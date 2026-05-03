@@ -162,3 +162,65 @@ func TestResolveEndpointSubstitutesWSL(t *testing.T) {
 		}
 	}
 }
+
+func TestParseHexLEIP(t *testing.T) {
+	cases := map[string]string{
+		"0100020A": "10.2.0.1",     // example from the docstring
+		"0100A8C0": "192.168.0.1",  // 0xC0A80001
+		"0112B2AC": "172.178.18.1", // gateway-ish
+		"00000000": "0.0.0.0",
+		"FFFFFFFF": "255.255.255.255",
+		"":         "",
+		"DEADBEEF": "239.190.173.222",
+		"toolong0": "", // wrong length
+		"NOTHEX!!": "", // invalid chars
+	}
+	for in, want := range cases {
+		if got := parseHexLEIP(in); got != want {
+			t.Errorf("parseHexLEIP(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseDefaultRouteGateway(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name: "wsl2 nat with hyper-v firewall — gateway is real host",
+			content: `Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT
+eth0	00000000	0100127B	0003	0	0	0	00000000	0	0	0
+eth0	0000127B	00000000	0001	0	0	0	0000FFFF	0	0	0
+`,
+			want: "123.18.0.1",
+		},
+		{
+			name: "no default route (only direct)",
+			content: `Iface	Destination	Gateway 	Flags
+eth0	0000127B	00000000	0001
+`,
+			want: "",
+		},
+		{
+			name: "default route with no gateway (on-link) is skipped",
+			content: `Iface	Destination	Gateway 	Flags
+eth0	00000000	00000000	0001
+`,
+			want: "",
+		},
+		{
+			name:    "empty input",
+			content: "",
+			want:    "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseDefaultRouteGateway(tc.content); got != tc.want {
+				t.Errorf("parseDefaultRouteGateway: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

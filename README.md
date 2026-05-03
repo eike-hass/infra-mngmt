@@ -144,14 +144,14 @@ On first run infra-mngmt auto-generates a bearer token at `~/.config/infra-mngmt
       "endpoint": "http://localhost:9998",
       "binary": "/usr/local/bin/process-compose",
       "compose_file": "/home/youruser/.config/infra-mngmt/process-compose.yaml",
-      "token": ""
+      "token_file": "/home/youruser/.config/infra-mngmt/process-compose.token"
     },
     {
       "name": "windows",
       "endpoint": "http://wsl-windows:9999",
       "binary": "/mnt/c/Users/youruser/AppData/Local/Programs/process-compose/process-compose.exe",
       "compose_file": "/mnt/c/Users/youruser/.config/infra-mngmt/process-compose.yaml",
-      "token": ""
+      "token_file": "/mnt/c/Users/youruser/.config/infra-mngmt/process-compose.token"
     }
   ],
   "extra_paths": [
@@ -161,7 +161,7 @@ On first run infra-mngmt auto-generates a bearer token at `~/.config/infra-mngmt
 }
 ```
 
-The `token` field in each `process_compose` entry is the bearer token for that process-compose instance's API. Leave empty if process-compose auth is not enabled. See [SECURITY.md](SECURITY.md) for how to set up process-compose authentication.
+Each `process_compose` entry can carry the API token for its instance one of two ways: `token` (literal) or `token_file` (path read at startup). The file form is preferred — it keeps the secret out of `config.json` and the same path can be passed to process-compose itself via `--token-file`, so both sides read one file. Sent on the wire as the `X-PC-Token-Key` header. Leave both unset if the instance has no auth. See [SECURITY.md](SECURITY.md) for the full setup.
 
 ### Field reference
 
@@ -173,18 +173,21 @@ The `token` field in each `process_compose` entry is the bearer token for that p
 | `process_compose[].endpoint` | required | Base URL of the process-compose management API. Supports the `wsl-windows` hostname (see below). |
 | `process_compose[].binary` | optional | Path to the process-compose binary. When set, a **▶ start** button appears in the UI if the endpoint is unreachable. |
 | `process_compose[].compose_file` | optional | Path to the process-compose YAML passed to `binary` on bootstrap. |
-| `process_compose[].token` | optional | Bearer token for this process-compose instance's API. |
+| `process_compose[].token` | optional | API token (literal) for this process-compose instance, sent as `X-PC-Token-Key`. Takes precedence over `token_file` when both are set. |
+| `process_compose[].token_file` | optional | Path to a file containing the API token. Read at startup; same path can be passed to process-compose's own `--token-file`. Preferred over `token` for keeping secrets out of config. |
 | `extra_paths` | `[]` | Additional project root directories to scan for `.claude/` beyond `~` and `$CWD`. |
 
 ### WSL2 NAT networking — the `wsl-windows` hostname
 
-With WSL2's default NAT networking the Windows host IP changes on every `wsl --shutdown`. Use `wsl-windows` as the hostname in any endpoint and infra-mngmt will substitute the real IP from `/etc/resolv.conf` at startup:
+With WSL2's default NAT networking the Windows host IP changes on every `wsl --shutdown`. Use `wsl-windows` as the hostname in any endpoint and infra-mngmt will substitute the real IP at startup:
 
 ```json
 "endpoint": "http://wsl-windows:9999"
 ```
 
-The config file never needs to change between restarts. If you switch to mirrored networking (`networkingMode=mirrored` in `%USERPROFILE%\.wslconfig`) change the endpoint to `http://localhost:9999`.
+The substitution reads WSL's default-route gateway from `/proc/net/route` — the actual Windows host as the WSL guest sees it. (On older WSL setups this matched `/etc/resolv.conf`'s nameserver; on Windows 11 with Hyper-V firewall mode that nameserver is now a DNS proxy bound to WSL's loopback and isn't routable. The default-route gateway is correct in both topologies.) The config file never needs to change between restarts.
+
+If you switch to mirrored networking (`networkingMode=mirrored` in `%USERPROFILE%\.wslconfig`), drop the sentinel and use `http://localhost:9999` directly.
 
 ---
 
@@ -326,6 +329,7 @@ ExecStart=/usr/local/bin/process-compose up \
   -f %h/.config/infra-mngmt/process-compose.yaml \
   --port 9998 \
   --address 127.0.0.1 \
+  --token-file %h/.config/infra-mngmt/process-compose.token \
   --tui=false
 Restart=on-failure
 Environment=HOME=%h
@@ -334,17 +338,7 @@ Environment=HOME=%h
 WantedBy=default.target
 ```
 
-If you have enabled process-compose bearer token auth (see [SECURITY.md](SECURITY.md)), load the token from a file rather than hardcoding it:
-
-```ini
-[Service]
-ExecStart=/bin/sh -c 'exec /usr/local/bin/process-compose up \
-  -f ${HOME}/.config/infra-mngmt/process-compose.yaml \
-  --port 9998 \
-  --address 127.0.0.1 \
-  --api-token "$(cat ${HOME}/.config/infra-mngmt/pc-token)" \
-  --tui=false'
-```
+The `--token-file` flag is process-compose's native auth mechanism — it reads the file directly, no shell wrapper needed. Generate the token once with `head -c 32 /dev/urandom | xxd -p -c 64 > ~/.config/infra-mngmt/process-compose.token && chmod 600 ~/.config/infra-mngmt/process-compose.token`. Drop the flag if you don't want auth (not recommended; see [SECURITY.md](SECURITY.md)).
 
 Enable and start both:
 
@@ -370,25 +364,38 @@ Three things need to autostart: the Windows process-compose instance, the WSL2 p
 Save as `%USERPROFILE%\.config\infra-mngmt\autostart.ps1`:
 
 ```powershell
-# Start Windows process-compose (services: llama.cpp, whisper, etc.)
-Start-Process -NoNewWindow -FilePath "process-compose" -ArgumentList `
-  "up", "-f", "$env:USERPROFILE\.config\infra-mngmt\process-compose.yaml", "--port", "9999", "--tui=false"
+$pcExe     = "$env:LOCALAPPDATA\Programs\process-compose\process-compose.exe"
+$cfg       = "$env:USERPROFILE\.config\infra-mngmt\process-compose.yaml"
+$tokenFile = "$env:USERPROFILE\.config\infra-mngmt\process-compose.token"
+$logFile   = "$env:USERPROFILE\.config\infra-mngmt\process-compose.log"
 
-# Start WSL2 services + infra-mngmt inside WSL2
-# wsl -e runs a single command; bash -lc sources the user profile (needed for PATH)
+$pcArgs = @(
+    '-f', $cfg,
+    '--tui=false',
+    '--port', '9999',
+    '--address', '0.0.0.0',
+    '--token-file', $tokenFile,
+    '--log-file', $logFile,
+    '--log-no-color'
+)
+
+# Detached: PowerShell exits immediately so Task Scheduler sees the action
+# as completed (and won't kill it at -ExecutionTimeLimit). process-compose
+# keeps running and writes its own log via --log-file.
+Start-Process -FilePath $pcExe -ArgumentList $pcArgs -WindowStyle Hidden
+
+# Start WSL2 services + infra-mngmt inside WSL2.
+# wsl -e runs a single command; bash -lc sources the user profile (needed for PATH).
 Start-Process -NoNewWindow -FilePath "wsl" -ArgumentList `
   "-e", "bash", "-lc",
   "systemctl --user start process-compose infra-mngmt"
 ```
 
-If you have enabled process-compose bearer token auth on the Windows side, add `--api-token` to the first `Start-Process` call:
+Three Windows-specific points worth knowing:
 
-```powershell
-$token = Get-Content "$env:USERPROFILE\.config\infra-mngmt\pc-token" -Raw
-Start-Process -NoNewWindow -FilePath "process-compose" -ArgumentList `
-  "up", "-f", "$env:USERPROFILE\.config\infra-mngmt\process-compose.yaml",
-  "--port", "9999", "--tui=false", "--api-token", $token.Trim()
-```
+- **`--address 0.0.0.0`** is required because WSL2 reaches Windows over the virtual NIC, not loopback. Default `localhost` would make the listener invisible to WSL.
+- **`--token-file`** matches what's in `config.json`'s `token_file` for the `windows` entry — both sides read the same file.
+- On Windows 11 with the **Hyper-V firewall** (you'll see the adapter name `vEthernet (WSL (Hyper-V firewall))`), regular `New-NetFirewallRule` rules don't apply to WSL traffic. You need `New-NetFirewallHyperVRule`. See [SECURITY.md](SECURITY.md#process-compose-hardening) for the exact command.
 
 > If you skipped systemd, replace the WSL2 `systemctl` line with explicit background commands:
 > ```

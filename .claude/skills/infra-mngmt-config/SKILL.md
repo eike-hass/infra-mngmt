@@ -28,14 +28,14 @@ A new service usually means **adding to (2)**. You only touch (1) when adding a 
       "endpoint": "http://localhost:9998",
       "binary": "/usr/local/bin/process-compose",
       "compose_file": "/home/user/.config/infra-mngmt/process-compose.yaml",
-      "token": ""
+      "token_file": "/home/user/.config/infra-mngmt/process-compose.token"
     },
     {
       "name": "windows",
       "endpoint": "http://wsl-windows:9999",
       "binary": "/mnt/c/Users/user/AppData/Local/Programs/process-compose/process-compose.exe",
       "compose_file": "/mnt/c/Users/user/.config/infra-mngmt/process-compose.yaml",
-      "token": ""
+      "token_file": "/mnt/c/Users/user/.config/infra-mngmt/process-compose.token"
     }
   ],
   "extra_paths": []
@@ -44,10 +44,10 @@ A new service usually means **adding to (2)**. You only touch (1) when adding a 
 
 Field rules:
 - `name` — free-form label shown in the UI.
-- `endpoint` — process-compose REST URL. The literal hostname `wsl-windows` is a **sentinel**: at startup the app resolves it to the Windows host IP from `/etc/resolv.conf`. Use it for the Windows tier so the config survives WSL2 NAT restarts. Do not hardcode `172.x.x.x`.
+- `endpoint` — process-compose REST URL. The literal hostname `wsl-windows` is a **sentinel**: at startup the app resolves it to the Windows host IP from WSL's default-route gateway (`/proc/net/route`), with `/etc/resolv.conf` as a fallback for legacy setups. Use it for the Windows tier so the config survives WSL2 NAT restarts. Do not hardcode `172.x.x.x`.
 - `binary` — optional. When set, the UI shows a ▶ start button if the endpoint is unreachable.
 - `compose_file` — optional, passed to `binary` on bootstrap. Required if you want bootstrap to work.
-- `token` — bearer token if process-compose auth is enabled; empty otherwise.
+- `token` / `token_file` — process-compose API token (sent as `X-PC-Token-Key`). Use `token_file` for cleanliness — same path can be passed to process-compose via `--token-file`. Leave both unset if auth is disabled. `token` (literal) takes precedence when both are set.
 - `extra_paths` — additional project roots to scan; each must contain a `.claude/` subdir.
 
 ## process-compose YAML
@@ -83,7 +83,7 @@ processes:
       restart: on_failure
 ```
 
-The Windows instance must bind `0.0.0.0` (process-compose's default) so WSL2 can reach it via NAT.
+The Windows instance must be started with `--address 0.0.0.0` so WSL2 can reach it via NAT — process-compose's default is `localhost`. On Windows 11 with the Hyper-V firewall (adapter `vEthernet (WSL (Hyper-V firewall))`), regular `New-NetFirewallRule` rules don't apply to WSL traffic; use `New-NetFirewallHyperVRule` instead. See the infra-mngmt repo's SECURITY.md.
 
 ## MCP status-badge naming convention
 
@@ -108,4 +108,4 @@ Orange dot = compose online but no name match → either the process isn't there
 - Don't put `process-compose.yaml` inside `.claude/` — it's not a Claude Code entity.
 - Don't hardcode the WSL2 gateway IP in `endpoint`; use `wsl-windows`.
 - Don't invent new scopes. infra-mngmt only knows global (`~/.claude/`) and per-project (`<repo>/.claude/`).
-- Don't commit secrets into `compose_file` paths that are world-readable; the `token` field in `config.json` is for the process-compose API token, not service credentials.
+- Don't commit secrets into `compose_file` paths that are world-readable; the `token` / `token_file` fields in `config.json` are for the process-compose API token, not service credentials.
