@@ -51,70 +51,63 @@ Login form uses `SameSite=Strict` cookies. All state-mutating routes (`/process/
 
 process-compose is the actual process supervisor. Its API exposes start/stop/restart and log access for every managed process. **Compromise of process-compose is equivalent to shell access for any managed service user.**
 
-### Default bind address (risk)
+### Default bind address
 
-By default, `process-compose` binds to `0.0.0.0` on its port. This means:
+`process-compose --address` defaults to `localhost`. Consequences:
 
-- The **WSL2-side** instance (`:9998`) is reachable from the Windows host and potentially from the LAN.
-- The **Windows-side** instance (`:9999`) is reachable from the LAN if Windows Firewall permits it.
+- The **WSL2-side** instance (`:9998`) is loopback-only by default — not reachable from the Windows host or the LAN unless `--address` is overridden.
+- The **Windows-side** instance (`:9999`) must be started with `--address 0.0.0.0` for infra-mngmt in WSL2 to reach it (the WSL2 guest cannot dial Windows-side `127.0.0.1` over NAT). That bind, combined with Windows Firewall, is the actual exposure surface.
 
 ### Recommended mitigations
 
 #### WSL2-side process-compose
 
-Bind to loopback only — infra-mngmt connects to it locally:
-
-```bash
-process-compose up -f ~/.config/infra-mngmt/process-compose.yaml \
-  --port 9998 \
-  --address 127.0.0.1 \
-  --tui=false
-```
-
-Update your systemd unit:
+The default loopback bind is correct here. Keep it explicit in the systemd unit so a future config change can't silently widen exposure:
 
 ```ini
 ExecStart=/usr/local/bin/process-compose up \
   -f %h/.config/infra-mngmt/process-compose.yaml \
   --port 9998 \
   --address 127.0.0.1 \
+  --token-file %h/.config/infra-mngmt/process-compose.token \
   --tui=false
 ```
 
 #### Windows-side process-compose
 
-Windows process-compose must bind to `0.0.0.0` so WSL2 can reach it via NAT (the WSL2 guest cannot connect to `127.0.0.1` on the Windows host). Use Windows Firewall to restrict which source IPs can reach that port:
+Bind to `0.0.0.0` (required for WSL2 reachability) and use Windows Firewall to restrict source. Default Windows inbound policy is deny, so a single scoped Allow rule is sufficient — no Block rule needed (and a Block rule would in fact override any Allow unless `-OverrideBlockRules $true` is set).
+
+Scope by interface (preferred — robust across WSL2 NAT subnet changes):
 
 ```powershell
-# Block all inbound connections to port 9999 except from the WSL2 subnet.
-# Replace 172.16.0.0/12 with the exact subnet shown by `wsl hostname -I` if needed.
 New-NetFirewallRule `
-  -DisplayName "process-compose WSL2 only" `
-  -Direction Inbound `
-  -Protocol TCP `
-  -LocalPort 9999 `
-  -RemoteAddress 172.16.0.0/12 `
-  -Action Allow
-
-New-NetFirewallRule `
-  -DisplayName "process-compose block all" `
-  -Direction Inbound `
-  -Protocol TCP `
-  -LocalPort 9999 `
-  -Action Block
+  -DisplayName "process-compose (WSL only)" `
+  -Direction Inbound -Protocol TCP -LocalPort 9999 -Action Allow `
+  -InterfaceAlias 'vEthernet (WSL*)' `
+  -Profile Any
 ```
 
-Firewall rules are evaluated in priority order — the more-specific Allow rule above the Block rule will permit only WSL2 traffic.
+Or scope by source subnet, if you prefer:
+
+```powershell
+# Adjust the subnet to match the source IP Windows sees from your WSL2 NAT —
+# inspect with: Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*)'
+New-NetFirewallRule `
+  -DisplayName "process-compose (WSL only)" `
+  -Direction Inbound -Protocol TCP -LocalPort 9999 -Action Allow `
+  -RemoteAddress 172.16.0.0/12 `
+  -Profile Any
+```
 
 #### Enable process-compose authentication
 
-process-compose supports bearer token authentication via `--api-token`.
+process-compose accepts an API token via the `--token-file <path>` flag (or the `PC_API_TOKEN` / `PC_API_TOKEN_PATH` env vars). Clients must send the token in the `X-PC-Token-Key` HTTP header. The token must be at least 20 characters; the snippets below produce 64 hex chars.
 
 **Generate a token — WSL2:**
 
 ```bash
-head -c 32 /dev/urandom | xxd -p -c 64 > ~/.config/infra-mngmt/pc-token
-chmod 600 ~/.config/infra-mngmt/pc-token
+head -c 32 /dev/urandom | xxd -p -c 64 > ~/.config/infra-mngmt/process-compose.token
+chmod 600 ~/.config/infra-mngmt/process-compose.token
 ```
 
 **Generate a token — Windows (PowerShell):**
@@ -124,9 +117,9 @@ $bytes = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
 $token = ([System.BitConverter]::ToString($bytes) -replace '-', '').ToLower()
 $dir   = "$env:USERPROFILE\.config\infra-mngmt"
 New-Item -ItemType Directory -Force $dir | Out-Null
-$token | Set-Content "$dir\pc-token" -NoNewline
+$token | Set-Content "$dir\process-compose.token" -NoNewline
 # restrict file to current user only (remove inherited ACEs, grant read to owner)
-icacls "$dir\pc-token" /inheritance:r /grant:r "${env:USERNAME}:(R)" | Out-Null
+icacls "$dir\process-compose.token" /inheritance:r /grant:r "${env:USERNAME}:(R)" | Out-Null
 ```
 
 **Start process-compose with the token:**
@@ -137,21 +130,21 @@ process-compose up \
   -f ~/.config/infra-mngmt/process-compose.yaml \
   --port 9998 \
   --address 127.0.0.1 \
-  --api-token "$(cat ~/.config/infra-mngmt/pc-token)" \
+  --token-file ~/.config/infra-mngmt/process-compose.token \
   --tui=false
 ```
 
 Windows (PowerShell):
 ```powershell
-$token = (Get-Content "$env:USERPROFILE\.config\infra-mngmt\pc-token" -Raw).Trim()
 process-compose up `
   -f "$env:USERPROFILE\.config\infra-mngmt\process-compose.yaml" `
   --port 9999 `
-  --api-token $token `
+  --address 0.0.0.0 `
+  --token-file "$env:USERPROFILE\.config\infra-mngmt\process-compose.token" `
   --tui=false
 ```
 
-**Add the matching token to infra-mngmt's `config.json`** so it can authenticate against each instance:
+**Point infra-mngmt at the same files** in `config.json` — the per-instance `token_file` field makes both sides read the same secret without embedding it in config:
 
 ```json
 {
@@ -159,30 +152,22 @@ process-compose up `
     {
       "name": "wsl",
       "endpoint": "http://localhost:9998",
-      "token": "<contents of ~/.config/infra-mngmt/pc-token>"
+      "token_file": "/home/<user>/.config/infra-mngmt/process-compose.token"
     },
     {
       "name": "windows",
       "endpoint": "http://wsl-windows:9999",
-      "token": "<contents of %USERPROFILE%\\.config\\infra-mngmt\\pc-token>"
+      "token_file": "/mnt/c/Users/<user>/.config/infra-mngmt/process-compose.token"
     }
   ]
 }
 ```
 
-**Systemd integration (WSL2):** load the token from the file at service start to avoid hardcoding it in the unit:
+(A literal `"token": "<value>"` is also accepted and takes precedence when set, but the file-based form keeps secrets out of the config and lets infra-mngmt's bootstrap pass `--token-file` straight through.)
 
-```ini
-[Service]
-ExecStart=/bin/sh -c 'exec /usr/local/bin/process-compose up \
-  -f ${HOME}/.config/infra-mngmt/process-compose.yaml \
-  --port 9998 \
-  --address 127.0.0.1 \
-  --api-token "$(cat ${HOME}/.config/infra-mngmt/pc-token)" \
-  --tui=false'
-```
+**Systemd integration (WSL2):** the unit shown above already passes `--token-file %h/...` directly. No shell wrapper or token interpolation is needed because process-compose reads the file itself.
 
-**Task Scheduler integration (Windows):** read the token inside the autostart script (see README §7) rather than embedding it in the task definition.
+**Task Scheduler integration (Windows):** the autostart script invoked by Task Scheduler should pass `--token-file` to `process-compose.exe` (see README §7). The token never appears on the command line or in the task definition.
 
 ---
 
