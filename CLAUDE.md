@@ -36,7 +36,7 @@ Process management is delegated to [process-compose](https://github.com/F1bonacc
 | Layer | Choice | Reason |
 |---|---|---|
 | Backend | Go | Goroutines for concurrent source watching; single static binary |
-| Docker API | stdlib `net/http` over Unix socket | No external deps; targets exactly the 6 Docker API calls needed |
+| Docker API | `github.com/docker/docker/client` (official SDK) | Strong types, API version negotiation, `stdcopy.StdCopy` for log demux, native support for events/exec/cp |
 | HTTP server | `net/http` + [chi](https://github.com/go-chi/chi) | Lightweight, idiomatic |
 | Frontend | Go templates + HTMX | No JS build pipeline; server-side rendering |
 | Search | fuse.js (CDN) | ⌘K across entities without a build step |
@@ -84,7 +84,23 @@ go test ./...                      # Run tests
 go vet ./...                       # Vet
 ```
 
-The devcontainer firewall blocks the Go module proxy. Use `GOPROXY=direct GONOSUMDB='*'` when running `go mod tidy` or adding dependencies.
+The devcontainer firewall allowlists the Go module proxy (`proxy.golang.org`, `sum.golang.org`, `dl.google.com`, etc.) — see `.devcontainer/init-firewall.sh`. Standard `go mod tidy` and toolchain auto-upgrade work without env overrides.
+
+## Testing
+
+See [TESTING.md](TESTING.md) for the test layout, mock patterns, coverage baseline, and the full process for keeping the suite in sync with the code. Highlights to enforce on every change:
+
+- **`go test ./...` must be green before declaring work done.** Never commit a failing test or a skipped one without a comment explaining why.
+- **Tests are part of every change**, not a follow-up:
+  - New pure function (parser, formatter, mapper) → unit test in the same package, happy path + at least one edge case.
+  - New HTTP handler → test in `internal/web/handlers_http_test.go` using the in-memory `mockSource` — at least the success path and the relevant failure cases (missing id, not-found, permission).
+  - New multi-step user flow (auth, redirects, cookies, cache invalidation across requests) → test in `internal/web/e2e_test.go` using the `e2eEnv` harness; single-request handler tests can't catch session/redirect/cache bugs.
+  - New source-kind or path-mapping logic → test the path mapping plus read/write roundtrip if writable.
+  - New entity kind → update `kindIcon` and extend `TestKindIcon`.
+  - Bug fix → add a regression test that fails before the fix and passes after.
+  - Refactor → existing tests pass without modification; if they don't, observable behavior changed and that needs its own test.
+- **Don't test pure logic through HTTP.** Unit-test it directly; reserve handler tests for routing, status codes, auth, and contracts.
+- **Mock `source.Source`, fake `httptest.Server`, real `t.TempDir()`** — established patterns in the existing tests; use them, don't invent new ones.
 
 ## App config
 
@@ -127,7 +143,7 @@ process-compose YAML files are **infrastructure config**, not Claude Code config
 
 5. **Web-first, Tauri later** — keep the UI purely server-rendered + HTMX. Tauri is an upgrade path, not a constraint.
 
-6. **No external deps beyond chi** — the Docker SDK (`github.com/docker/docker`) pulls in OpenTelemetry which is blocked by the devcontainer firewall. Use pure stdlib HTTP over the Unix socket instead.
+6. **Docker SDK pinning** — `github.com/docker/docker v27.5.1+incompatible` with explicit `github.com/docker/go-connections v0.5.0` (newer versions remove `sockets.DialPipe` which v27 still references) and `github.com/pkg/errors v0.9.1+` (earlier versions lack `errors.As`/`Is`). The SDK pulls in OpenTelemetry as a transitive dep; the firewall now allows the Go infra domains so this is fine, but resist upgrading to v28+ until those breaking changes settle.
 
 ## Build order (MVP = steps 1–3)
 

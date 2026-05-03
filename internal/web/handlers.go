@@ -113,12 +113,114 @@ type pageData struct {
 	MCPStatuses map[string]*MCPStatus
 }
 
+// kindGroup is one section of entities sharing a kind, used for the grouped
+// "all" view in the entity list.
+type kindGroup struct {
+	Kind     entity.Kind
+	Label    string
+	Entities []entity.Entity
+}
+
+// kindOrder is the canonical display order for the entity list.
+var kindOrder = []entity.Kind{
+	entity.KindMCPServer, entity.KindCommand, entity.KindAgent, entity.KindSkill,
+	entity.KindHook, entity.KindMemory, entity.KindClaudeMD,
+}
+
+var kindLabels = map[entity.Kind]string{
+	entity.KindMCPServer: "MCP Servers",
+	entity.KindCommand:   "Commands",
+	entity.KindAgent:     "Agents",
+	entity.KindSkill:     "Skills",
+	entity.KindHook:      "Hooks",
+	entity.KindMemory:    "Memory",
+	entity.KindClaudeMD:  "CLAUDE.md",
+}
+
+func groupEntitiesByKind(ents []entity.Entity) []kindGroup {
+	byKind := map[entity.Kind][]entity.Entity{}
+	for _, e := range ents {
+		byKind[e.Kind] = append(byKind[e.Kind], e)
+	}
+	out := make([]kindGroup, 0, len(kindOrder))
+	for _, k := range kindOrder {
+		if items, ok := byKind[k]; ok {
+			out = append(out, kindGroup{Kind: k, Label: kindLabels[k], Entities: items})
+		}
+	}
+	return out
+}
+
+// cpuBarWidth maps a CPU% to a bar fill width 0-100. Bars cap at 25% CPU = full
+// (since most processes idle low and we want subtle rises to be visible).
+func cpuBarWidth(cpu float64) int {
+	w := int(cpu * 4)
+	if w > 100 {
+		w = 100
+	}
+	if w < 0 {
+		w = 0
+	}
+	return w
+}
+
+// cpuBarClass returns the bar color class based on usage level.
+func cpuBarClass(cpu float64) string {
+	switch {
+	case cpu > 50:
+		return "cpu-high"
+	case cpu > 20:
+		return "cpu-mid"
+	default:
+		return "cpu-low"
+	}
+}
+
+// memBarWidth maps memory bytes to a bar fill width 0-100, capped at 512MB = full.
+func memBarWidth(b int64) int {
+	w := int(float64(b) / float64(1024*1024*512) * 100)
+	if w > 100 {
+		w = 100
+	}
+	if w < 0 {
+		w = 0
+	}
+	return w
+}
+
+// runningCount returns the number of running processes in a slice.
+func runningCount(procs []compose.ProcessState) int {
+	n := 0
+	for _, p := range procs {
+		if p.IsRunning() {
+			n++
+		}
+	}
+	return n
+}
+
 var tmplFuncs = template.FuncMap{
-	"kindIcon":    kindIcon,
-	"formatAge":   formatAge,
-	"formatMem":   formatMem,
-	"statusClass": statusClass,
+	"kindIcon":      kindIcon,
+	"formatAge":     formatAge,
+	"formatMem":     formatMem,
+	"statusClass":   statusClass,
+	"cpuBarWidth":   cpuBarWidth,
+	"cpuBarClass":   cpuBarClass,
+	"memBarWidth":   memBarWidth,
+	"runningCount":  runningCount,
 	"entityLevel": func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
+	"entityLevelShort": func(e entity.Entity) string {
+		switch sourceLevel(e.Source, e.Scope.Global) {
+		case "global":
+			return "glb"
+		case "project":
+			return "prj"
+		case "devcontainer":
+			return "ctr"
+		}
+		return "?"
+	},
+	"groupEntitiesByKind": groupEntitiesByKind,
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -174,9 +276,24 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	statuses := s.resolveMCPStatuses(r.Context(), all)
-	tmpl := template.Must(template.New("index").Funcs(tmplFuncs).Parse(indexHTML))
+	tmpl := template.Must(template.New("index").Funcs(tmplFuncs).Parse(entityListInnerHTML))
+	tmpl = template.Must(tmpl.Parse(indexHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl.Execute(w, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses})
+}
+
+// handleEntityListPartial returns just the entity-list inner HTML for in-place
+// refresh by the client (avoids a full page reload).
+func (s *Server) handleEntityListPartial(w http.ResponseWriter, r *http.Request) {
+	all, err := s.allEntities(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	statuses := s.resolveMCPStatuses(r.Context(), all)
+	tmpl := template.Must(template.New("partial").Funcs(tmplFuncs).Parse(entityListInnerHTML))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	tmpl.ExecuteTemplate(w, "entity-list-inner", pageData{Entities: all, MCPStatuses: statuses})
 }
 
 // handleEntityPreview returns the preview pane HTML fragment (HTMX target).
@@ -350,9 +467,12 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleContainerLogsStream streams Docker container logs as Server-Sent Events.
-// Events: "log" (one line), "state" (ContainerState JSON), "done" (stream ended).
-func (s *Server) handleContainerLogsStream(w http.ResponseWriter, r *http.Request) {
+// handleContainerEventsStream streams Docker engine events for a container as SSE.
+// Events: "state" (initial ContainerState JSON), "docker_event" (per-event JSON),
+// "done" (stream ended). Replaces the older log-tailing endpoint — devcontainer
+// entrypoints rarely produce useful stdout, but engine events (start, exec_create,
+// health_status:healthy, die) reflect real lifecycle activity.
+func (s *Server) handleContainerEventsStream(w http.ResponseWriter, r *http.Request) {
 	if s.docker == nil {
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
@@ -372,30 +492,39 @@ func (s *Server) handleContainerLogsStream(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	ctx := r.Context()
-	logCh := s.docker.StreamLogs(ctx, id)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
 
+	// Send the current container state once so the client doesn't have to
+	// wait for the next event to know if it's running/healthy.
+	if state, err := s.docker.InspectContainer(ctx, id); err == nil {
+		if data, jerr := json.Marshal(state); jerr == nil {
+			fmt.Fprintf(w, "event: state\ndata: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
+
+	evCh := s.docker.StreamEvents(ctx, id)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case line, ok := <-logCh:
+		case ev, ok := <-evCh:
 			if !ok {
 				fmt.Fprintf(w, "event: done\ndata: \n\n")
 				flusher.Flush()
 				return
 			}
-			fmt.Fprintf(w, "event: log\ndata: %s\n\n", sseEscape(line))
+			data, _ := json.Marshal(ev)
+			fmt.Fprintf(w, "event: docker_event\ndata: %s\n\n", data)
 			flusher.Flush()
-		case <-ticker.C:
-			state, err := s.docker.InspectContainer(ctx, id)
-			if err != nil {
-				continue
+
+			// Health-status transitions don't update overall State.Status, so
+			// re-inspect after each event so the client can refresh badge state.
+			if state, err := s.docker.InspectContainer(ctx, id); err == nil {
+				if sd, jerr := json.Marshal(state); jerr == nil {
+					fmt.Fprintf(w, "event: state\ndata: %s\n\n", sd)
+					flusher.Flush()
+				}
 			}
-			data, _ := json.Marshal(state)
-			fmt.Fprintf(w, "event: state\ndata: %s\n\n", data)
-			flusher.Flush()
 		}
 	}
 }
@@ -511,17 +640,17 @@ func kindIcon(k entity.Kind) string {
 	case entity.KindMCPServer:
 		return "⬡"
 	case entity.KindCommand:
-		return "/"
+		return "$"
 	case entity.KindAgent:
-		return "◈"
+		return "◉"
 	case entity.KindSkill:
-		return "◆"
+		return "✦"
 	case entity.KindMemory:
-		return "◎"
+		return "▤"
 	case entity.KindHook:
-		return "⚡"
+		return "↪"
 	case entity.KindClaudeMD:
-		return "≡"
+		return "#"
 	default:
 		return "·"
 	}

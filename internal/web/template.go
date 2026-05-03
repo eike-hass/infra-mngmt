@@ -6,7 +6,7 @@ const indexHTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>infra-mngmt</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230d0d0d'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-size='20' fill='%234a9eff'>⬡</text></svg>">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
@@ -20,13 +20,17 @@ window._cmResolve?.();
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0d0d0d;--bg2:#111;--bg3:#181818;--bg4:#1e1e1e;
-  --border:#222;--border2:#2a2a2a;
+  --bg:#0c0c0c;--bg2:#141414;--bg3:#1c1c1c;--bg4:#222;
+  --border:#252525;--border2:#2e2e2e;
   --text:#c9c9c9;--text2:#888;--text3:#444;--white:#f0f0f0;
-  --accent:#4a9eff;--accent2:#b899ff;
+  --accent:oklch(68% 0.18 200);--accent2:oklch(68% 0.18 302);
   --green:#6bcf7f;--red:#e06c6c;--yellow:#ffcc5c;--orange:#f0a04a;
-  --kind-mcp:#4a9eff;--kind-command:#6bcf7f;--kind-agent:#f0a04a;
-  --kind-skill:#e06c8a;--kind-memory:#9b9b9b;--kind-hook:#ffcc5c;--kind-claude_md:#aaa;
+  --kind-mcp:oklch(68% 0.18 200);--kind-command:oklch(68% 0.18 251);
+  --kind-agent:oklch(68% 0.18 302);--kind-skill:oklch(68% 0.18 353);
+  --kind-hook:oklch(68% 0.18 44);--kind-memory:oklch(68% 0.18 95);
+  --kind-claude_md:oklch(68% 0.18 146);
+  --level-global:oklch(68% 0.18 200);--level-project:oklch(68% 0.18 302);--level-devcontainer:oklch(68% 0.18 146);
+  --font:ui-monospace,'Cascadia Code','SF Mono',monospace;
 }
 html,body{height:100%;overflow:hidden}
 body{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);color:var(--text);display:flex;flex-direction:column}
@@ -49,9 +53,9 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .tab:hover{border-color:var(--border2);color:var(--text)}
 .tab.active{background:var(--bg4);border-color:var(--border2);color:var(--white)}
 .tab .scope-badge{font-size:9px;margin-left:5px;padding:1px 5px;border-radius:3px}
-.tab .scope-badge.global{background:#1e3a5f;color:var(--accent)}
-.tab .scope-badge.project{background:#2d1f3d;color:var(--accent2)}
-.tab .scope-badge.devcontainer{background:#1a2d1a;color:#6bcf7f}
+.tab .scope-badge.global{background:color-mix(in srgb,var(--level-global) 12%,transparent);color:var(--level-global)}
+.tab .scope-badge.project{background:color-mix(in srgb,var(--level-project) 12%,transparent);color:var(--level-project)}
+.tab .scope-badge.devcontainer{background:color-mix(in srgb,var(--level-devcontainer) 12%,transparent);color:var(--level-devcontainer)}
 #search{background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:4px 8px;border-radius:4px;font-family:inherit;font-size:11px;width:180px;outline:none;flex-shrink:0}
 #search:focus{border-color:#444}
 #search::placeholder{color:var(--text3)}
@@ -61,6 +65,13 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .pill{background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 8px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .12s}
 .pill:hover{border-color:var(--border2);color:var(--text)}
 .pill.active{color:var(--white)}
+.pill[data-kind="mcp_server"].active{background:color-mix(in srgb,var(--kind-mcp) 12%,transparent)}
+.pill[data-kind="command"].active{background:color-mix(in srgb,var(--kind-command) 12%,transparent)}
+.pill[data-kind="agent"].active{background:color-mix(in srgb,var(--kind-agent) 12%,transparent)}
+.pill[data-kind="skill"].active{background:color-mix(in srgb,var(--kind-skill) 12%,transparent)}
+.pill[data-kind="memory"].active{background:color-mix(in srgb,var(--kind-memory) 12%,transparent)}
+.pill[data-kind="hook"].active{background:color-mix(in srgb,var(--kind-hook) 12%,transparent)}
+.pill[data-kind="claude_md"].active{background:color-mix(in srgb,var(--kind-claude_md) 12%,transparent)}
 .pill-icon{display:inline-block}
 .pill[data-kind="mcp_server"] .pill-icon{color:var(--kind-mcp)}
 .pill[data-kind="command"] .pill-icon{color:var(--kind-command)}
@@ -80,20 +91,29 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 /* ── entity panels ── */
 .panels{display:flex;flex:1;overflow:hidden}
 .entity-list{width:320px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border);padding:8px 0}
-.entity-card{display:flex;align-items:baseline;gap:8px;padding:5px 16px;cursor:pointer;border-left:2px solid transparent;transition:background .1s}
+.entity-card{display:flex;align-items:center;gap:8px;padding:5px 16px;cursor:pointer;border-left:2px solid transparent;transition:background .1s}
 .entity-card:hover{background:var(--bg2)}
 .entity-card.selected{background:var(--bg3);border-left-color:var(--accent)}
-.kind-icon{font-size:10px;flex-shrink:0;width:10px;text-align:center}
+.kind-icon{font-size:12px;flex-shrink:0;width:12px;text-align:center}
 .kind-icon.mcp_server{color:var(--kind-mcp)}.kind-icon.command{color:var(--kind-command)}
 .kind-icon.agent{color:var(--kind-agent)}.kind-icon.skill{color:var(--kind-skill)}
 .kind-icon.memory{color:var(--kind-memory)}.kind-icon.hook{color:var(--kind-hook)}
 .kind-icon.claude_md{color:var(--kind-claude_md)}
 .entity-name{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.entity-scope-dot{font-size:8px;flex-shrink:0}
-.entity-scope-dot.global{color:var(--accent)}
-.entity-scope-dot.project{color:var(--accent2)}
-.entity-scope-dot.devcontainer{color:#6bcf7f}
+.entity-scope-tag{font-size:9px;flex-shrink:0;padding:0 4px;border-radius:3px;letter-spacing:.02em;line-height:16px}
+.entity-scope-tag.global{background:color-mix(in srgb,var(--level-global) 12%,transparent);color:var(--level-global)}
+.entity-scope-tag.project{background:color-mix(in srgb,var(--level-project) 12%,transparent);color:var(--level-project)}
+.entity-scope-tag.devcontainer{background:color-mix(in srgb,var(--level-devcontainer) 12%,transparent);color:var(--level-devcontainer)}
 .empty-list{color:var(--text3);padding:24px 16px;font-style:italic}
+/* ── kind groups in entity list ── */
+.kind-group-header{display:flex;align-items:center;gap:6px;padding:8px 16px 4px;cursor:pointer;user-select:none}
+.kind-group-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:600;flex:1}
+.kind-group-count{font-size:10px;color:var(--text3);background:var(--bg3);padding:0 5px;border-radius:8px;min-width:18px;text-align:center}
+.kind-group-chev{font-size:9px;color:var(--text3);transition:transform .15s;line-height:1;margin-left:2px}
+.kind-group.collapsed .kind-group-chev{transform:rotate(-90deg)}
+.kind-group.collapsed .kind-group-items{display:none}
+/* When a specific kind filter is active, hide group headers and rely on per-kind filtering. */
+#entity-list.flat .kind-group-header{display:none}
 
 /* ── preview pane ── */
 .preview{flex:1;overflow-y:auto;padding:20px 24px;min-width:0}
@@ -117,9 +137,24 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .svc-name{color:var(--white);font-weight:600;font-size:13px}
 .svc-endpoint{color:var(--text3);font-size:10px}
 .online-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.online-dot.online{background:var(--green)}.online-dot.offline{background:var(--red)}
-.svc-boot-btn{margin-left:auto;background:var(--bg4);border:1px solid var(--border2);color:var(--accent);padding:3px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:10px}
-.svc-offline{padding:12px 14px;color:var(--text3);font-style:italic}
+.online-dot.online{background:var(--green);box-shadow:0 0 5px var(--green)}.online-dot.offline{background:var(--red)}
+.svc-running-count{margin-left:auto;font-size:10px;color:var(--text3)}
+.svc-boot-btn{margin-left:auto;background:rgba(74,158,255,.1);border:1px solid rgba(74,158,255,.3);color:var(--accent);padding:4px 12px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600}
+.svc-boot-btn:hover{background:rgba(74,158,255,.18)}
+.svc-offline{padding:32px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center}
+.svc-offline-icon{font-size:28px;opacity:.2}
+.svc-offline-title{color:var(--text2);font-size:12px}
+.svc-offline-endpoint{color:var(--text3);font-size:10px}
+.svc-offline-hint{color:var(--text3);font-size:10px;margin-top:2px}
+/* CPU/mem bars in services table */
+.usage-bar{display:flex;align-items:center;gap:5px}
+.usage-bar-track{width:36px;height:4px;border-radius:2px;background:var(--bg4);overflow:hidden;flex-shrink:0}
+.usage-bar-fill{height:100%;transition:width .3s}
+.usage-bar-fill.cpu-low{background:var(--green)}
+.usage-bar-fill.cpu-mid{background:var(--yellow)}
+.usage-bar-fill.cpu-high{background:var(--orange)}
+.usage-bar-fill.mem{background:var(--accent);opacity:.6}
+.usage-val{color:var(--text2);font-size:11px}
 .process-table{width:100%;border-collapse:collapse}
 .process-table th{text-align:left;padding:5px 14px;font-size:10px;color:var(--text3);border-bottom:1px solid var(--border);font-weight:normal;text-transform:uppercase;letter-spacing:.06em}
 .process-table td{padding:6px 14px;border-bottom:1px solid var(--border);font-size:11px;vertical-align:middle}
@@ -146,14 +181,18 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .logs-panel .no-logs{color:var(--text3);font-style:italic}
 
 /* ── runtime status dots on entity cards ── */
-.runtime-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;display:inline-block}
-.runtime-dot.running{background:var(--green)}
-.runtime-dot.stopped,.runtime-dot.disabled{background:var(--text3)}
-.runtime-dot.error{background:var(--red)}
-.runtime-dot.starting{background:var(--yellow)}
-.runtime-dot.unresolved{background:var(--orange)}
-.runtime-dot.offline{background:var(--text3);opacity:.45}
-.runtime-dot.unknown{background:var(--text3);opacity:.35}
+/* MCP runtime badge — 14×14 tinted square with a 5px dot inside */
+.runtime-badge{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:3px;flex-shrink:0;border:1px solid var(--border2);background:rgba(255,255,255,.04)}
+.runtime-badge::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--text3);display:block}
+.runtime-badge.running{background:color-mix(in srgb,var(--kind-claude_md) 15%,transparent);border-color:var(--kind-claude_md)}
+.runtime-badge.running::before{background:var(--kind-claude_md)}
+.runtime-badge.error{background:color-mix(in srgb,var(--red) 12%,transparent);border-color:var(--red)}
+.runtime-badge.error::before{background:var(--red)}
+.runtime-badge.starting{background:color-mix(in srgb,var(--yellow) 12%,transparent);border-color:var(--yellow)}
+.runtime-badge.starting::before{background:var(--yellow)}
+.runtime-badge.unresolved{background:color-mix(in srgb,var(--orange) 12%,transparent);border-color:var(--orange)}
+.runtime-badge.unresolved::before{background:var(--orange)}
+.runtime-badge.offline,.runtime-badge.unknown{opacity:.5}
 
 /* ── preview MCP status badge ── */
 .mcp-status{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font-size:10px;margin-top:8px}
@@ -168,6 +207,32 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 
 /* ── broken-ref indicator in preview ── */
 .broken-ref-banner{background:#2a1e12;border:1px solid #5a3a18;border-radius:4px;color:var(--orange);padding:8px 12px;margin-bottom:12px;font-size:11px}
+/* ── preview header colored meta ── */
+.meta-kind.mcp_server{color:var(--kind-mcp)}.meta-kind.command{color:var(--kind-command)}
+.meta-kind.agent{color:var(--kind-agent)}.meta-kind.skill{color:var(--kind-skill)}
+.meta-kind.memory{color:var(--kind-memory)}.meta-kind.hook{color:var(--kind-hook)}
+.meta-kind.claude_md{color:var(--kind-claude_md)}
+.meta-level{padding:1px 5px;border-radius:3px}
+.meta-level.global{background:color-mix(in srgb,var(--level-global) 10%,transparent);color:var(--level-global)}
+.meta-level.project{background:color-mix(in srgb,var(--level-project) 10%,transparent);color:var(--level-project)}
+.meta-level.devcontainer{background:color-mix(in srgb,var(--level-devcontainer) 10%,transparent);color:var(--level-devcontainer)}
+.mcp-attrs{margin-top:8px;display:flex;flex-wrap:wrap;gap:4px 12px;font-size:10px;color:var(--text2)}
+.mcp-attrs-k{color:var(--text3)}
+.mcp-attrs-v{color:var(--text)}
+/* ── MCP structured card (when no markdown content) ── */
+.mcp-card{margin-top:4px}
+.mcp-transport-row{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.mcp-transport{font-size:10px;padding:2px 8px;border-radius:10px;background:var(--bg3);border:1px solid var(--border2);color:var(--kind-mcp)}
+.mcp-transport.sse,.mcp-transport.http{color:var(--accent2)}
+.mcp-table{background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden;margin-bottom:14px}
+.mcp-row{display:flex;border-bottom:1px solid var(--border)}
+.mcp-row:last-child{border-bottom:none}
+.mcp-row-k{width:70px;flex-shrink:0;padding:7px 12px;font-size:10px;color:var(--text3);background:var(--bg3);border-right:1px solid var(--border);letter-spacing:.03em}
+.mcp-row-v{flex:1;padding:7px 12px;font-size:11px;color:var(--text);font-family:var(--font);word-break:break-all;line-height:1.5}
+.mcp-detail{display:flex;flex-direction:column;gap:5px}
+.mcp-detail-row{display:flex;gap:8px;font-size:10px}
+.mcp-detail-k{color:var(--text3);width:50px;flex-shrink:0}
+.mcp-detail-v{color:var(--text2);word-break:break-all}
 
 /* ── edit toolbar ── */
 .preview-actions{display:flex;justify-content:flex-end;padding:6px 0 2px;gap:6px;align-items:center}
@@ -227,6 +292,15 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .ctr-log-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0;line-height:1}
 .ctr-log-close:hover{color:var(--text)}
 .ctr-log-pre{margin:0 8px 8px;padding:8px;font-size:10px;line-height:1.4;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:3px;max-height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.ctr-event-list{margin:0 8px 8px;padding:6px 8px;font-size:10px;background:var(--bg);border:1px solid var(--border);border-radius:3px;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.ctr-event{display:flex;align-items:center;gap:8px;line-height:1.5}
+.ctr-event-time{color:var(--text3);flex-shrink:0;font-variant-numeric:tabular-nums}
+.ctr-event-glyph{flex-shrink:0;width:10px;text-align:center}
+.ctr-event-action{color:var(--text)}
+.ctr-event.event-ok .ctr-event-glyph{color:var(--green)}
+.ctr-event.event-err .ctr-event-glyph{color:var(--red)}
+.ctr-event.event-warn .ctr-event-glyph{color:var(--yellow)}
+.ctr-event.event-info .ctr-event-glyph{color:var(--text2)}
 
 /* ── CodeMirror container ── */
 .editor-wrap{margin-top:4px;border:1px solid var(--border2);border-radius:4px;overflow:hidden;min-height:360px}
@@ -238,7 +312,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 <body>
 
 <header>
-  <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="18" height="18"><rect width="20" height="20" rx="4" fill="#111"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="13" fill="#4a9eff">⬡</text></svg>infra-mngmt</span>
+  <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" width="28" height="20"><polygon points="8,2 14,2 17,7 14,12 8,12 5,7" fill="var(--accent)" opacity="0.95"/><polygon points="13,8 19,8 22,13 19,18 13,18 10,13" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.55"/></svg>infra-mngmt</span>
 
   <div class="view-tabs">
     <button class="view-tab active" id="vtab-config" onclick="showView('config')">config</button>
@@ -266,12 +340,12 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 <div class="kind-bar" id="kind-bar">
   <button class="pill active" data-kind="all">all</button>
   <button class="pill" data-kind="mcp_server"><span class="pill-icon">⬡</span> MCP servers</button>
-  <button class="pill" data-kind="command"><span class="pill-icon">/</span> commands</button>
-  <button class="pill" data-kind="agent"><span class="pill-icon">◈</span> agents</button>
-  <button class="pill" data-kind="skill"><span class="pill-icon">◆</span> skills</button>
-  <button class="pill" data-kind="hook"><span class="pill-icon">⚡</span> hooks</button>
-  <button class="pill" data-kind="memory"><span class="pill-icon">◎</span> memory</button>
-  <button class="pill" data-kind="claude_md"><span class="pill-icon">≡</span> CLAUDE.md</button>
+  <button class="pill" data-kind="command"><span class="pill-icon">$</span> commands</button>
+  <button class="pill" data-kind="agent"><span class="pill-icon">◉</span> agents</button>
+  <button class="pill" data-kind="skill"><span class="pill-icon">✦</span> skills</button>
+  <button class="pill" data-kind="hook"><span class="pill-icon">↪</span> hooks</button>
+  <button class="pill" data-kind="memory"><span class="pill-icon">▤</span> memory</button>
+  <button class="pill" data-kind="claude_md"><span class="pill-icon">#</span> CLAUDE.md</button>
 </div>
 
 <div id="project-overview" style="display:none">
@@ -291,21 +365,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 
 <div id="view-config" style="display:flex;flex:1;overflow:hidden">
   <div class="entity-list" id="entity-list">
-    {{range .Entities}}
-    {{$status := index $.MCPStatuses .ID}}
-    <div class="entity-card"
-         data-id="{{.ID}}"
-         data-project="{{.Scope.Project}}"
-         data-kind="{{.Kind}}"
-         data-name="{{.Name}}"
-         data-scope="{{.Scope.Label}}">
-      <span class="kind-icon {{.Kind}}">{{kindIcon .Kind}}</span>
-      <span class="entity-name">{{.Name}}</span>
-      {{if $status}}<span class="runtime-dot {{$status.State}}" title="{{$status.State}}{{if $status.Process}} · {{$status.Instance}}/{{$status.Process}}{{end}}"></span>{{end}}
-      <span class="entity-scope-dot {{entityLevel .}}" title="{{entityLevel .}}">●</span>
-    </div>
-    {{end}}
-    <div class="empty-list" id="empty-list" style="{{if .Entities}}display:none{{end}}">no entities found</div>
+    {{template "entity-list-inner" .}}
   </div>
   <div class="preview" id="preview">
     <p class="preview-hint">← select an entity to preview</p>
@@ -334,24 +394,49 @@ function showView(v) {
 // ── entity filtering ──
 let activeProject = '__all__', activeKind = 'all', fuseResults = null;
 const cards = () => [...document.querySelectorAll('.entity-card')];
-const fuseData = cards().map(c => ({id:c.dataset.id,name:c.dataset.name,kind:c.dataset.kind}));
-const fuse = new Fuse(fuseData, {keys:['name','kind'],threshold:0.35});
+let fuse;
+function rebuildFuse() {
+  const fuseData = cards().map(c => ({id:c.dataset.id,name:c.dataset.name,kind:c.dataset.kind}));
+  fuse = new Fuse(fuseData, {keys:['name','kind'],threshold:0.35});
+}
+rebuildFuse();
 
 function applyFilters() {
   const ids = fuseResults ? new Set(fuseResults.map(r=>r.item.id)) : null;
+  const list = document.getElementById('entity-list');
+  // 'flat' class hides group headers when a single-kind filter is active.
+  list.classList.toggle('flat', activeKind !== 'all');
+
   let any = false;
   cards().forEach(c => {
-    const ok = (activeProject==='__all__'||c.dataset.project===activeProject)
+    // Inclusive filter: a project depends on its own MCPs *and* all globals.
+    // When MCP kind is selected on a project tab, also show global-scoped MCPs
+    // (they apply to every project at runtime).
+    const projOK = activeProject === '__all__'
+                || c.dataset.project === activeProject
+                || (activeKind === 'mcp_server' && c.dataset.scope === 'global');
+    const ok = projOK
              && (activeKind==='all'||c.dataset.kind===activeKind)
              && (!ids||ids.has(c.dataset.id));
     c.style.display = ok ? '' : 'none';
     if (ok) any = true;
   });
+  // Hide whole kind-group sections that have no visible cards (and update counts).
+  document.querySelectorAll('.kind-group').forEach(g => {
+    const visible = g.querySelectorAll('.entity-card:not([style*="display: none"])').length;
+    g.style.display = visible === 0 ? 'none' : '';
+    const cnt = g.querySelector('.kind-group-count');
+    if (cnt) cnt.textContent = visible;
+  });
   document.getElementById('empty-list').style.display = any ? 'none' : '';
 }
 
+function toggleKindGroup(headerEl) {
+  headerEl.parentElement.classList.toggle('collapsed');
+}
+
 // ── project overview ──
-const kindIcons = {mcp_server:'⬡',command:'/',agent:'◈',skill:'◆',memory:'◎',hook:'⚡',claude_md:'≡'};
+const kindIcons = {mcp_server:'⬡',command:'$',agent:'◉',skill:'✦',memory:'▤',hook:'↪',claude_md:'#'};
 let ovExpanded = false, selectedEntityProject = null;
 
 function updateProjectOverview() {
@@ -412,10 +497,23 @@ async function doRefresh(e) {
   const btn = document.getElementById('ov-refresh');
   btn.classList.add('spinning');
   btn.disabled = true;
+  // Remember which entity was selected so we can re-mark it after the swap.
+  const prevSelectedId = document.querySelector('.entity-card.selected')?.dataset.id || null;
   try {
     await fetch('/api/refresh', {method:'POST'});
-    window.location.reload();
-  } catch(_) {
+    const html = await fetch('/partials/entity-list').then(r => r.text());
+    document.getElementById('entity-list').innerHTML = html;
+    rebuildFuse();
+    if (prevSelectedId) {
+      const card = document.querySelector('.entity-card[data-id="'+prevSelectedId.replace(/"/g,'\\"')+'"]');
+      if (card) card.classList.add('selected');
+    }
+    await fetchContainers();
+    const dp = selectedEntityProject || activeProject;
+    renderContainerControls(dp);
+    applyFilters();
+    updateProjectOverview();
+  } finally {
     btn.classList.remove('spinning');
     btn.disabled = false;
   }
@@ -423,7 +521,7 @@ async function doRefresh(e) {
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  t.classList.add('active'); activeProject = t.dataset.project; selectedEntityProject = null; applyFilters(); updateProjectOverview();
+  t.classList.add('active'); activeProject = t.dataset.project; selectedEntityProject = null; closeLogStream(); applyFilters(); updateProjectOverview();
 }));
 document.querySelectorAll('.pill').forEach(p => p.addEventListener('click', () => {
   document.querySelectorAll('.pill').forEach(x=>x.classList.remove('active'));
@@ -592,19 +690,46 @@ async function containerAction(id, action) {
   }
 }
 
+// Action → glyph + color class for the event log.
+const eventStyle = (action) => {
+  if (action === 'start' || action === 'health_status: healthy') return ['✓','event-ok'];
+  if (action === 'die' || action === 'kill' || action === 'health_status: unhealthy' || action === 'oom') return ['✖','event-err'];
+  if (action === 'restart' || action === 'health_status: starting') return ['↺','event-warn'];
+  if (action === 'exec_create' || action === 'exec_start' || action === 'attach') return ['⚙','event-info'];
+  return ['·','event-info'];
+};
+
+function fmtEventTime(unixSecs) {
+  if (!unixSecs) return '';
+  const d = new Date(unixSecs * 1000);
+  return d.toTimeString().slice(0,8); // HH:MM:SS
+}
+
 function openLogStream(id) {
   if (_logEventSource) _logEventSource.close();
   _logContainerId = id;
   const panel = document.getElementById('ov-log-panel');
-  panel.innerHTML = '<div class="ctr-log-wrap"><div class="ctr-log-bar">startup log<button class="ctr-log-close" onclick="closeLogStream()">×</button></div><pre class="ctr-log-pre" id="ctr-log-pre"></pre></div>';
+  panel.innerHTML = '<div class="ctr-log-wrap"><div class="ctr-log-bar">container events<button class="ctr-log-close" onclick="closeLogStream()">×</button></div><div class="ctr-event-list" id="ctr-event-list"></div></div>';
   panel.style.display = '';
   const dp = selectedEntityProject || activeProject;
   renderContainerControls(dp);
 
-  _logEventSource = new EventSource('/api/container/logs-stream?id='+encodeURIComponent(id));
-  _logEventSource.addEventListener('log', e => {
-    const pre = document.getElementById('ctr-log-pre');
-    if (pre) { pre.textContent += e.data + '\n'; pre.scrollTop = pre.scrollHeight; }
+  _logEventSource = new EventSource('/api/container/events-stream?id='+encodeURIComponent(id));
+  _logEventSource.addEventListener('docker_event', e => {
+    const list = document.getElementById('ctr-event-list');
+    if (!list) return;
+    try {
+      const ev = JSON.parse(e.data);
+      const [glyph, cls] = eventStyle(ev.action);
+      const row = document.createElement('div');
+      row.className = 'ctr-event ' + cls;
+      row.innerHTML =
+        '<span class="ctr-event-time">' + fmtEventTime(ev.time) + '</span>' +
+        '<span class="ctr-event-glyph">' + glyph + '</span>' +
+        '<span class="ctr-event-action">' + (ev.action || '?') + '</span>';
+      list.appendChild(row);
+      list.scrollTop = list.scrollHeight;
+    } catch(_) {}
   });
   _logEventSource.addEventListener('state', e => {
     try {
@@ -641,6 +766,39 @@ fetchContainers().then(() => {
 </html>
 `
 
+// entityListInnerHTML is a Go template fragment that defines the inner content
+// of #entity-list. Used by indexHTML and exposed as a separate partial endpoint
+// so the refresh button can swap the entity list without a full page reload.
+const entityListInnerHTML = `{{define "entity-list-inner"}}
+{{range $group := groupEntitiesByKind .Entities}}
+<div class="kind-group" data-kind="{{$group.Kind}}">
+  <div class="kind-group-header" onclick="toggleKindGroup(this)">
+    <span class="kind-icon {{$group.Kind}}">{{kindIcon $group.Kind}}</span>
+    <span class="kind-group-label">{{$group.Label}}</span>
+    <span class="kind-group-count">{{len $group.Entities}}</span>
+    <span class="kind-group-chev">▾</span>
+  </div>
+  <div class="kind-group-items">
+    {{range $group.Entities}}
+    {{$status := index $.MCPStatuses .ID}}
+    <div class="entity-card"
+         data-id="{{.ID}}"
+         data-project="{{.Scope.Project}}"
+         data-kind="{{.Kind}}"
+         data-name="{{.Name}}"
+         data-scope="{{.Scope.Label}}">
+      <span class="kind-icon {{.Kind}}">{{kindIcon .Kind}}</span>
+      <span class="entity-name">{{.Name}}</span>
+      {{if $status}}<span class="runtime-badge {{$status.State}}" title="{{$status.State}}{{if $status.Process}} · {{$status.Instance}}/{{$status.Process}}{{end}}"></span>{{end}}
+      <span class="entity-scope-tag {{entityLevel .}}" title="{{entityLevel .}}">{{entityLevelShort .}}</span>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+<div class="empty-list" id="empty-list" style="{{if .Entities}}display:none{{end}}">no entities found</div>
+{{end}}`
+
 const previewHTML = `
 {{$e := .Entity}}
 {{$c := .Content}}
@@ -659,15 +817,20 @@ const previewHTML = `
 <div class="preview-header">
   <div class="preview-name">{{$e.Name}}</div>
   <div class="preview-meta">
-    <span>kind: {{$e.Kind}}</span>
-    <span>level: {{entityLevel $e}}</span>
-    <span>source: {{$e.Source}}</span>
+    <span>kind: <span class="meta-kind {{$e.Kind}}">{{$e.Kind}}</span></span>
+    <span>level: <span class="meta-level {{entityLevel $e}}">{{entityLevel $e}}</span></span>
+    <span>source: <span style="color:var(--text)">{{$e.Source}}</span></span>
   </div>
   {{if $s}}
   <div style="margin-top:8px">
     <span class="mcp-status {{$s.State}}">
       <span class="dot"></span>{{$s.State}}{{if $s.Process}} &nbsp;·&nbsp; {{$s.Instance}}/{{$s.Process}}{{end}}
     </span>
+  </div>
+  {{end}}
+  {{if and (eq (printf "%s" $e.Kind) "mcp_server") $e.Attrs}}
+  <div class="mcp-attrs">
+    {{range $k, $v := $e.Attrs}}<span><span class="mcp-attrs-k">{{$k}}:</span> <span class="mcp-attrs-v">{{$v}}</span></span>{{end}}
   </div>
   {{end}}
   <div class="preview-path">{{$e.Path}}</div>
@@ -685,6 +848,29 @@ const previewHTML = `
   <div class="raw-src">{{$c}}</div>
   <div class="rendered-md"></div>
   <div class="editor-wrap" style="display:none"></div>
+</div>
+{{else if eq (printf "%s" $e.Kind) "mcp_server"}}
+<div class="mcp-card">
+  {{$transport := index $e.Attrs "type"}}{{if not $transport}}{{$transport = "stdio"}}{{end}}
+  <div class="mcp-transport-row">
+    <span class="mcp-transport {{$transport}}">{{$transport}}</span>
+    {{if and $s (eq $s.State "running")}}<span style="font-size:10px;color:var(--text3)">↑ connected</span>{{end}}
+  </div>
+  {{if $e.Attrs}}
+  <div class="mcp-table">
+    {{range $k, $v := $e.Attrs}}{{if ne $k "type"}}
+    <div class="mcp-row">
+      <div class="mcp-row-k">{{$k}}</div>
+      <div class="mcp-row-v">{{$v}}</div>
+    </div>
+    {{end}}{{end}}
+  </div>
+  {{end}}
+  <div class="mcp-detail">
+    <div class="mcp-detail-row"><span class="mcp-detail-k">scope</span><span class="mcp-detail-v">{{if $e.Scope.Global}}global (~/.claude){{else}}project ({{$e.Scope.Project}}){{end}}</span></div>
+    <div class="mcp-detail-row"><span class="mcp-detail-k">source</span><span class="mcp-detail-v">{{$e.Source}}</span></div>
+    <div class="mcp-detail-row"><span class="mcp-detail-k">config</span><span class="mcp-detail-v" style="color:var(--text3)">{{$e.Path}}</span></div>
+  </div>
 </div>
 {{else}}
 <div class="preview-no-content">content not available for this entity type</div>
@@ -707,7 +893,9 @@ const servicesHTML = `
     <span class="online-dot {{if $iv.Online}}online{{else}}offline{{end}}"></span>
     <span class="svc-name">{{$iv.Name}}</span>
     <span class="svc-endpoint">{{$iv.Endpoint}}</span>
-    {{if and (not $iv.Online) $iv.CanBoot}}
+    {{if $iv.Online}}
+    <span class="svc-running-count">{{runningCount $iv.Processes}}/{{len $iv.Processes}} running</span>
+    {{else if $iv.CanBoot}}
     <button class="svc-boot-btn"
             hx-post="/compose/start?instance={{$iv.Name}}"
             hx-target="#services-inner"
@@ -726,8 +914,18 @@ const servicesHTML = `
       <td><span class="status-pill {{statusClass .Status}}"><span class="dot"></span>{{.Status}}</span></td>
       <td>{{if .Pid}}{{.Pid}}{{else}}—{{end}}</td>
       <td>{{.Restarts}}</td>
-      <td>{{printf "%.1f" .CPU}}%</td>
-      <td>{{formatMem .Mem}}</td>
+      <td>
+        <div class="usage-bar">
+          <div class="usage-bar-track"><div class="usage-bar-fill {{cpuBarClass .CPU}}" style="width:{{cpuBarWidth .CPU}}%"></div></div>
+          <span class="usage-val">{{printf "%.1f" .CPU}}%</span>
+        </div>
+      </td>
+      <td>
+        <div class="usage-bar">
+          <div class="usage-bar-track"><div class="usage-bar-fill mem" style="width:{{memBarWidth .Mem}}%"></div></div>
+          <span class="usage-val">{{formatMem .Mem}}</span>
+        </div>
+      </td>
       <td>{{formatAge .Age}}</td>
       <td>
         <div class="proc-actions">
@@ -756,8 +954,17 @@ const servicesHTML = `
   </table>
   {{else}}
   <div class="svc-offline">
-    offline — endpoint unreachable ({{$iv.Endpoint}})
-    {{if not $iv.CanBoot}}· no binary configured for bootstrap{{end}}
+    <span class="svc-offline-icon">⬡</span>
+    <div class="svc-offline-title">process-compose unreachable</div>
+    <div class="svc-offline-endpoint">{{$iv.Endpoint}}</div>
+    {{if $iv.CanBoot}}
+    <button class="svc-boot-btn" style="margin-left:0;margin-top:4px"
+            hx-post="/compose/start?instance={{$iv.Name}}"
+            hx-target="#services-inner"
+            hx-swap="outerHTML">▶ start process-compose</button>
+    {{else}}
+    <div class="svc-offline-hint">no binary configured — add <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">binary</code> to config.json to enable bootstrap</div>
+    {{end}}
   </div>
   {{end}}
 </div>
@@ -784,7 +991,7 @@ const loginHTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>infra-mngmt · login</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230d0d0d'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-size='20' fill='%234a9eff'>⬡</text></svg>">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#0d0d0d;--bg2:#111;--bg3:#181818;--border:#222;--border2:#2a2a2a;--text:#c9c9c9;--text2:#888;--text3:#444;--white:#f0f0f0;--accent:#4a9eff;--red:#e06c6c}
@@ -802,7 +1009,7 @@ button:hover{opacity:.88}
 </head>
 <body>
 <form class="card" method="POST" action="/login">
-  <div class="logo">infra-mngmt <span>/ login</span></div>
+  <div class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" width="28" height="20" style="vertical-align:middle;margin-right:4px"><polygon points="8,2 14,2 17,7 14,12 8,12 5,7" fill="var(--accent)" opacity="0.95"/><polygon points="13,8 19,8 22,13 19,18 13,18 10,13" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.55"/></svg>infra-mngmt <span>/ login</span></div>
   {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
   <label for="token">bearer token</label>
   <input id="token" type="password" name="token" autofocus placeholder="paste your token">

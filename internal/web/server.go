@@ -56,6 +56,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 	s.mux.Get("/login", s.handleLoginGet)
 	s.mux.Post("/login", s.handleLoginPost)
 	s.mux.Post("/logout", s.handleLogout)
+	s.mux.Get("/favicon.svg", handleFavicon)
 
 	// All other routes require authentication (when a token is configured).
 	s.mux.Group(func(r chi.Router) {
@@ -68,6 +69,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Get("/api/entity/content", s.handleEntityContent)
 		r.Post("/api/entity", s.handleEntityWrite)
 		r.Get("/partials/entity", s.handleEntityPreview)
+		r.Get("/partials/entity-list", s.handleEntityListPartial)
 
 		// services routes
 		r.Get("/partials/services", s.handleServicesPartial)
@@ -80,7 +82,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Get("/api/containers", s.handleContainers)
 		r.Post("/api/container/start", s.handleContainerStart)
 		r.Post("/api/container/stop", s.handleContainerStop)
-		r.Get("/api/container/logs-stream", s.handleContainerLogsStream)
+		r.Get("/api/container/events-stream", s.handleContainerEventsStream)
 	})
 
 	return s
@@ -164,6 +166,19 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		next = "/"
 	}
 	http.Redirect(w, r, next, http.StatusSeeOther)
+}
+
+// faviconSVG is served at /favicon.svg — dual interlocking hexagons (host + container).
+const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#0c0c0c"/>
+  <polygon points="9,3 18,3 22.5,10.5 18,18 9,18 4.5,10.5" fill="oklch(68% 0.18 200)" opacity="0.95"/>
+  <polygon points="14,14 23,14 27.5,21.5 23,29 14,29 9.5,21.5" fill="none" stroke="oklch(68% 0.18 200)" stroke-width="1.5" opacity="0.55"/>
+</svg>`
+
+func handleFavicon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write([]byte(faviconSVG))
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
