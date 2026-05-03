@@ -1,3 +1,8 @@
 dist/
 .mcp.json
-.claude/
+
+# Ignore .claude by default but check in shared, project-scoped skills.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/infra-mngmt-config/
