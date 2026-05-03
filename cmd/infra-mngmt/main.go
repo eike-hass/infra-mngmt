@@ -35,12 +35,22 @@ func main() {
 	// Build compose entries from config.
 	compose := make([]web.ComposeEntry, 0, len(cfg.ProcessCompose))
 	for _, pc := range cfg.ProcessCompose {
+		tok := pc.Token
+		if tok == "" && pc.TokenFile != "" {
+			b, err := os.ReadFile(pc.TokenFile)
+			if err != nil {
+				log.Printf("warning: process_compose %q: read token_file %q: %v — instance will be queried without auth", pc.Name, pc.TokenFile, err)
+			} else {
+				tok = strings.TrimSpace(string(b))
+			}
+		}
 		compose = append(compose, web.ComposeEntry{
 			Name:        pc.Name,
 			Endpoint:    config.ResolveEndpoint(pc.Endpoint),
-			Token:       pc.Token,
+			Token:       tok,
 			Binary:      pc.Binary,
 			ComposeFile: pc.ComposeFile,
+			TokenFile:   pc.TokenFile,
 		})
 	}
 	if len(compose) == 0 {

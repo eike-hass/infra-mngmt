@@ -9,6 +9,22 @@ import (
 	"time"
 )
 
+// bootstrapArgs builds the CLI args passed to process-compose at start.
+// Pulled out as a pure function so it can be tested without exec.
+func bootstrapArgs(composeFile, port, tokenFile string) []string {
+	args := []string{
+		"-f", composeFile,
+		"--tui=false", // never hijack the terminal
+	}
+	if port != "" {
+		args = append(args, "--port", port)
+	}
+	if tokenFile != "" {
+		args = append(args, "--token-file", tokenFile)
+	}
+	return args
+}
+
 // Bootstrapper can start and stop a process-compose instance when its
 // REST endpoint is unreachable. This solves the chicken-and-egg problem:
 // the app must be able to *start* the supervisor, not just query it.
@@ -17,6 +33,7 @@ type Bootstrapper struct {
 	Binary      string // path to process-compose binary
 	ComposeFile string // path to the process-compose.yaml
 	Endpoint    string // expected REST endpoint after start
+	TokenFile   string // path to file containing the API token; passed via --token-file when set
 }
 
 // Start launches process-compose in the background and waits up to 5 seconds
@@ -30,16 +47,17 @@ func (b *Bootstrapper) Start(ctx context.Context) error {
 		return fmt.Errorf("compose file not found at %q: %w", b.ComposeFile, err)
 	}
 
-	// Extract port from endpoint for --port flag.
-	port := portFromEndpoint(b.Endpoint)
+	// Read the token now so the post-start Ping can authenticate.
+	// A missing token file is non-fatal — process-compose itself will fail
+	// fast with a clearer error than we could synthesize.
+	var token string
+	if b.TokenFile != "" {
+		if data, err := os.ReadFile(b.TokenFile); err == nil {
+			token = strings.TrimSpace(string(data))
+		}
+	}
 
-	args := []string{
-		"-f", b.ComposeFile,
-		"--tui=false", // never hijack the terminal
-	}
-	if port != "" {
-		args = append(args, "--port", port)
-	}
+	args := bootstrapArgs(b.ComposeFile, portFromEndpoint(b.Endpoint), b.TokenFile)
 
 	cmd := exec.CommandContext(ctx, b.Binary, args...)
 	cmd.Stdout = nil
@@ -49,7 +67,7 @@ func (b *Bootstrapper) Start(ctx context.Context) error {
 	}
 
 	// Wait for the REST endpoint to become ready.
-	client := New(b.Name, b.Endpoint, "")
+	client := New(b.Name, b.Endpoint, token)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if client.Ping(ctx) {

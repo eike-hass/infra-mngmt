@@ -44,6 +44,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 				Binary:      e.Binary,
 				ComposeFile: e.ComposeFile,
 				Endpoint:    e.Endpoint,
+				TokenFile:   e.TokenFile,
 			}
 		}
 	}
@@ -90,7 +91,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 
 // ComposeEntry is a flat struct passed from main to avoid importing config.
 type ComposeEntry struct {
-	Name, Endpoint, Token, Binary, ComposeFile string
+	Name, Endpoint, Token, Binary, ComposeFile, TokenFile string
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

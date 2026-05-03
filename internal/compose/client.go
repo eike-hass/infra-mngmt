@@ -34,7 +34,7 @@ type ProcessState struct {
 type Client struct {
 	name     string
 	endpoint string // e.g. "http://localhost:9998"
-	token    string // bearer token; empty = no auth
+	token    string // process-compose API token (X-PC-Token-Key); empty = no auth
 	http     *http.Client
 }
 
@@ -192,7 +192,7 @@ func (c *Client) newReq(ctx context.Context, method, path string, body io.Reader
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("X-PC-Token-Key", c.token)
 	}
 	return req, nil
 }

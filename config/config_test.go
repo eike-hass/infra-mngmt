@@ -37,7 +37,7 @@ func TestLoadSaveRoundtrip(t *testing.T) {
 		TokenFile: "/etc/token",
 		ProcessCompose: []ProcessCompose{
 			{Name: "wsl", Endpoint: "http://localhost:9998", Binary: "/usr/bin/pc", ComposeFile: "/etc/pc.yaml", Token: "abc"},
-			{Name: "windows", Endpoint: "http://wsl-windows:9999"},
+			{Name: "windows", Endpoint: "http://wsl-windows:9999", TokenFile: "/etc/pc.token"},
 		},
 		ExtraPaths: []string{"/home/u/projA"},
 	}
@@ -56,6 +56,9 @@ func TestLoadSaveRoundtrip(t *testing.T) {
 	}
 	if out.ProcessCompose[0].Token != "abc" {
 		t.Errorf("token not preserved: %q", out.ProcessCompose[0].Token)
+	}
+	if out.ProcessCompose[1].TokenFile != "/etc/pc.token" {
+		t.Errorf("token_file not preserved: %q", out.ProcessCompose[1].TokenFile)
 	}
 	if len(out.ExtraPaths) != 1 || out.ExtraPaths[0] != "/home/u/projA" {
 		t.Errorf("ExtraPaths not preserved: %+v", out.ExtraPaths)

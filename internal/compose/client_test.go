@@ -96,8 +96,11 @@ func TestProcessesWrappedArray(t *testing.T) {
 
 func TestProcessesAuthHeader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer secret" {
-			t.Errorf("missing/wrong auth header: %q", r.Header.Get("Authorization"))
+		if r.Header.Get("X-PC-Token-Key") != "secret" {
+			t.Errorf("missing/wrong auth header: %q", r.Header.Get("X-PC-Token-Key"))
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization header should not be set, got %q", got)
 		}
 		w.Write([]byte(`[]`))
 	}))

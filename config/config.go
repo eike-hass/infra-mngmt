@@ -15,7 +15,8 @@ type ProcessCompose struct {
 	Endpoint    string `json:"endpoint"`
 	Binary      string `json:"binary"`
 	ComposeFile string `json:"compose_file"`
-	Token       string `json:"token,omitempty"` // bearer token for process-compose auth
+	Token       string `json:"token,omitempty"`      // process-compose API token; takes precedence over TokenFile
+	TokenFile   string `json:"token_file,omitempty"` // path to file containing the token; same file is passed to process-compose via --token-file
 }
 
 type Config struct {
