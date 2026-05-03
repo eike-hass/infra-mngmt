@@ -118,19 +118,6 @@ func TestKindIcon(t *testing.T) {
 	}
 }
 
-func TestFormatAge(t *testing.T) {
-	cases := map[float64]string{
-		0: "0s", 30: "30s", 59: "59s",
-		60: "1m0s", 90: "1m30s", 3599: "59m59s",
-		3600: "1h0m", 7320: "2h2m",
-	}
-	for in, want := range cases {
-		if got := formatAge(in); got != want {
-			t.Errorf("formatAge(%v) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestFormatMem(t *testing.T) {
 	cases := map[int64]string{
 		0: "—", 512: "512B", 1024: "1K", 1500: "1K",
@@ -145,18 +132,40 @@ func TestFormatMem(t *testing.T) {
 }
 
 func TestStatusClass(t *testing.T) {
+	// Upstream status constants (src/types/process.go): Disabled, Foreground,
+	// Pending, Running, Launching, Launched, Restarting, Terminating,
+	// Completed, Skipped, Error, Scheduled.
 	cases := map[string]string{
 		"Running": "running", "running": "running",
-		"Stopped": "stopped", "Completed": "stopped",
-		"Error": "error", "dead": "error",
-		"Starting": "starting", "Launched": "starting", "Restarting": "starting",
-		"Disabled": "disabled", "skipped": "disabled",
+		"Foreground": "running", "Launched": "running",
+		"Completed":   "stopped",
+		"Error":       "error",
+		"Pending":     "starting",
+		"Launching":   "starting",
+		"Restarting":  "starting",
+		"Terminating": "starting",
+		"Scheduled":   "starting",
+		"Disabled":    "disabled", "Skipped": "disabled",
 		"":     "unknown",
 		"Wat?": "unknown",
 	}
 	for in, want := range cases {
 		if got := statusClass(in); got != want {
 			t.Errorf("statusClass(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestHealthClass(t *testing.T) {
+	cases := map[string]string{
+		"Ready":     "ready",
+		"Not Ready": "not-ready",
+		"-":         "unknown",
+		"":          "unknown",
+	}
+	for in, want := range cases {
+		if got := healthClass(in); got != want {
+			t.Errorf("healthClass(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

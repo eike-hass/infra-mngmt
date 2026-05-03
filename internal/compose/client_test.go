@@ -7,15 +7,28 @@ import (
 	"testing"
 )
 
-func TestProcessStateIsRunning(t *testing.T) {
-	cases := map[string]bool{
-		"Running": true, "running": true, "Launched": true, "starting": true, "Restarting": true,
-		"Stopped": false, "Error": false, "Completed": false, "Disabled": false, "": false,
+func TestProcessesUnmarshalsAllFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[{
+			"name":"socat","namespace":"default","status":"Running","system_time":"1m30s",
+			"is_ready":"Ready","has_ready_probe":true,"pid":42,"exit_code":0,"restarts":1,
+			"cpu":3.5,"mem":1048576,"is_running":true
+		}]}`))
+	}))
+	defer srv.Close()
+	c := New("test", srv.URL, "")
+	procs, err := c.Processes(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
-	for status, want := range cases {
-		if got := (ProcessState{Status: status}).IsRunning(); got != want {
-			t.Errorf("IsRunning(%q) = %v, want %v", status, got, want)
-		}
+	if len(procs) != 1 {
+		t.Fatalf("got %d procs, want 1", len(procs))
+	}
+	p := procs[0]
+	if p.Name != "socat" || p.Namespace != "default" || p.Status != "Running" ||
+		p.SystemTime != "1m30s" || p.Health != "Ready" || !p.HasHealthProbe ||
+		p.Pid != 42 || p.Restarts != 1 || p.CPU != 3.5 || p.Mem != 1048576 || !p.IsRunning {
+		t.Errorf("fields not unmarshalled correctly: %+v", p)
 	}
 }
 

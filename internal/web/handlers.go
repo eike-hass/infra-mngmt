@@ -192,7 +192,7 @@ func memBarWidth(b int64) int {
 func runningCount(procs []compose.ProcessState) int {
 	n := 0
 	for _, p := range procs {
-		if p.IsRunning() {
+		if p.IsRunning {
 			n++
 		}
 	}
@@ -201,9 +201,9 @@ func runningCount(procs []compose.ProcessState) int {
 
 var tmplFuncs = template.FuncMap{
 	"kindIcon":     kindIcon,
-	"formatAge":    formatAge,
 	"formatMem":    formatMem,
 	"statusClass":  statusClass,
+	"healthClass":  healthClass,
 	"cpuBarWidth":  cpuBarWidth,
 	"cpuBarClass":  cpuBarClass,
 	"memBarWidth":  memBarWidth,
@@ -778,19 +778,6 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 	_ = tmpl.Execute(w, data)
 }
 
-// formatAge converts a duration in seconds to a compact human string.
-func formatAge(secs float64) string {
-	if secs < 60 {
-		return fmt.Sprintf("%ds", int(secs))
-	}
-	if secs < 3600 {
-		return fmt.Sprintf("%dm%ds", int(secs)/60, int(secs)%60)
-	}
-	h := int(secs) / 3600
-	m := (int(secs) % 3600) / 60
-	return fmt.Sprintf("%dh%dm", h, m)
-}
-
 // formatMem formats bytes as a compact string.
 func formatMem(b int64) string {
 	if b == 0 {
@@ -806,16 +793,32 @@ func formatMem(b int64) string {
 	}
 }
 
-// statusClass maps a process status string to a CSS class.
+// healthClass maps a process-compose readiness value to a CSS pill class.
+// Values come from src/types/process.go: "Ready", "Not Ready", "-".
+func healthClass(health string) string {
+	switch health {
+	case "Ready":
+		return "ready"
+	case "Not Ready":
+		return "not-ready"
+	default:
+		return "unknown"
+	}
+}
+
+// statusClass maps a process-compose process status to a CSS pill class.
+// Statuses come from the upstream constants in src/types/process.go: Disabled,
+// Foreground, Pending, Running, Launching, Launched, Restarting, Terminating,
+// Completed, Skipped, Error, Scheduled.
 func statusClass(status string) string {
 	switch strings.ToLower(status) {
-	case "running":
+	case "running", "foreground", "launched":
 		return "running"
-	case "stopped", "completed":
+	case "completed":
 		return "stopped"
-	case "error", "dead":
+	case "error":
 		return "error"
-	case "starting", "launched", "restarting":
+	case "pending", "launching", "restarting", "terminating", "scheduled":
 		return "starting"
 	case "disabled", "skipped":
 		return "disabled"

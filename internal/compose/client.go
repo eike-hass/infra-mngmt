@@ -11,25 +11,22 @@ import (
 	"time"
 )
 
-// ProcessState mirrors the process-compose process object.
+// ProcessState mirrors the process-compose process object returned by /processes.
+// Field set and JSON tags match upstream src/types/process.go exactly so we can
+// trust the API rather than recompute (e.g. IsRunning, SystemTime).
 type ProcessState struct {
-	Name     string  `json:"name"`
-	Status   string  `json:"status"` // "Running","Stopped","Launched","Starting","Error","Completed","Disabled"
-	Pid      int     `json:"pid"`
-	ExitCode int     `json:"exit_code"`
-	Restarts int     `json:"restarts"`
-	CPU      float64 `json:"cpu"`
-	Mem      int64   `json:"mem"`
-	Age      float64 `json:"age"` // seconds
-}
-
-// IsRunning returns true for process states that indicate active execution.
-func (p ProcessState) IsRunning() bool {
-	switch strings.ToLower(p.Status) {
-	case "running", "launched", "starting", "restarting":
-		return true
-	}
-	return false
+	Name           string  `json:"name"`
+	Namespace      string  `json:"namespace"`
+	Status         string  `json:"status"`          // Disabled|Foreground|Pending|Running|Launching|Launched|Restarting|Terminating|Completed|Skipped|Error|Scheduled
+	SystemTime     string  `json:"system_time"`     // pre-formatted age, e.g. "1h2m3s" or "-"
+	Health         string  `json:"is_ready"`        // "Ready" | "Not Ready" | "-"
+	HasHealthProbe bool    `json:"has_ready_probe"` // true if a readiness/liveness probe is configured
+	Pid            int     `json:"pid"`
+	ExitCode       int     `json:"exit_code"`
+	Restarts       int     `json:"restarts"`
+	CPU            float64 `json:"cpu"`
+	Mem            int64   `json:"mem"` // bytes
+	IsRunning      bool    `json:"is_running"`
 }
 
 // Client is an HTTP client for the process-compose REST API.

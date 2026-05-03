@@ -168,6 +168,13 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .status-pill.starting{background:#2a2a1a;color:var(--yellow)}.status-pill.starting .dot{background:var(--yellow)}
 .status-pill.disabled{background:#1e1e1e;color:var(--text3)}.status-pill.disabled .dot{background:var(--text3)}
 .status-pill.unknown{background:#1e1e1e;color:var(--text3)}.status-pill.unknown .dot{background:var(--text3)}
+.health-pill{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:10px;font-size:9px;letter-spacing:.02em;border:1px solid transparent;vertical-align:middle}
+.health-pill.ready{background:#15311a;color:var(--green);border-color:#1a3a1a}
+.health-pill.not-ready{background:#3a1a1a;color:var(--red);border-color:#4a1818}
+.health-pill.unknown{background:#1e1e1e;color:var(--text3);border-color:var(--border)}
+.exit-code{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:10px;font-size:9px;background:#3a1a1a;color:var(--red);vertical-align:middle}
+.proc-name{color:var(--text)}
+.proc-ns{color:var(--text3);font-size:9px;letter-spacing:.04em;text-transform:uppercase;margin-top:1px}
 .proc-actions{display:flex;gap:4px}
 .proc-btn{background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 7px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .1s}
 .proc-btn:hover{border-color:var(--border2);color:var(--text)}
@@ -910,8 +917,15 @@ const servicesHTML = `
     <tbody>
     {{range $iv.Processes}}
     <tr>
-      <td>{{.Name}}</td>
-      <td><span class="status-pill {{statusClass .Status}}"><span class="dot"></span>{{.Status}}</span></td>
+      <td>
+        <div class="proc-name">{{.Name}}</div>
+        {{if and .Namespace (ne .Namespace "default")}}<div class="proc-ns">{{.Namespace}}</div>{{end}}
+      </td>
+      <td>
+        <span class="status-pill {{statusClass .Status}}"><span class="dot"></span>{{.Status}}</span>
+        {{if .HasHealthProbe}}<span class="health-pill {{healthClass .Health}}" title="readiness: {{.Health}}">{{.Health}}</span>{{end}}
+        {{if and (not .IsRunning) (ne .ExitCode 0)}}<span class="exit-code" title="exit code">{{.ExitCode}}</span>{{end}}
+      </td>
       <td>{{if .Pid}}{{.Pid}}{{else}}—{{end}}</td>
       <td>{{.Restarts}}</td>
       <td>
@@ -926,7 +940,7 @@ const servicesHTML = `
           <span class="usage-val">{{formatMem .Mem}}</span>
         </div>
       </td>
-      <td>{{formatAge .Age}}</td>
+      <td>{{if .SystemTime}}{{.SystemTime}}{{else}}—{{end}}</td>
       <td>
         <div class="proc-actions">
           {{if .IsRunning}}
