@@ -1,0 +1,72 @@
+# infra-mngmt Makefile.
+#
+# All targets work both inside the devcontainer (where golangci-lint is
+# pre-installed via the Dockerfile) and on a host where the dev has installed
+# the same tools.
+#
+# Standard flow before committing: `make check` (fmt-clean + vet + lint + test).
+
+GO    ?= go
+BIN   := dist/infra-mngmt
+PKG   := ./...
+
+.PHONY: build test test-cover fmt fmt-check vet lint check tidy clean run
+
+## build: compile the server binary into dist/
+build:
+	$(GO) build -o $(BIN) ./cmd/infra-mngmt
+
+## run: build and start the server (re-run after each code change)
+run: build
+	./$(BIN)
+
+## test: run the full test suite
+test:
+	$(GO) test $(PKG)
+
+## test-cover: run tests with per-package coverage summary
+test-cover:
+	$(GO) test -cover $(PKG)
+
+## fmt: rewrite all Go files with gofmt
+fmt:
+	gofmt -w .
+
+## fmt-check: fail if any Go file needs reformatting (CI/pre-commit gate)
+fmt-check:
+	@unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt: the following files need formatting:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
+## vet: run `go vet` (subset of staticcheck-class checks built into the toolchain)
+vet:
+	$(GO) vet $(PKG)
+
+## lint: run golangci-lint with the project config (.golangci.yml)
+# Prefer a user-local install in $HOME/go/bin if present (newer than the system
+# binary in /usr/local/bin until the devcontainer is rebuilt).
+lint:
+	@if [ -x "$$HOME/go/bin/golangci-lint" ]; then \
+		"$$HOME/go/bin/golangci-lint" run; \
+	else \
+		golangci-lint run; \
+	fi
+
+## check: full pre-commit gate — format, vet, lint, test
+check: fmt-check vet lint test
+
+## tidy: clean up the module graph
+tidy:
+	$(GO) mod tidy
+
+## clean: remove build artifacts and lint cache
+clean:
+	rm -rf $(BIN)
+	golangci-lint cache clean 2>/dev/null || true
+
+## help: list available targets and their descriptions
+help:
+	@grep -E '^## ' Makefile | sed 's/## /  /' | sort

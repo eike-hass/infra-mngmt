@@ -73,11 +73,11 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 
 		// services routes
 		r.Get("/partials/services", s.handleServicesPartial)
-		r.Post("/process/start", s.handleProcessStart)   // ?instance=&process=
-		r.Post("/process/stop", s.handleProcessStop)     // ?instance=&process=
+		r.Post("/process/start", s.handleProcessStart) // ?instance=&process=
+		r.Post("/process/stop", s.handleProcessStop)   // ?instance=&process=
 		r.Post("/process/restart", s.handleProcessRestart)
-		r.Post("/compose/start", s.handleComposeStart)   // ?instance=  — bootstrap
-		r.Get("/partials/logs", s.handleProcessLogs)     // ?instance=&process=
+		r.Post("/compose/start", s.handleComposeStart) // ?instance=  — bootstrap
+		r.Get("/partials/logs", s.handleProcessLogs)   // ?instance=&process=
 		r.Post("/api/refresh", s.handleRefresh)
 		r.Get("/api/containers", s.handleContainers)
 		r.Post("/api/container/start", s.handleContainerStart)
@@ -134,7 +134,7 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	}
 	tmpl := template.Must(template.New("login").Parse(loginHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.Execute(w, map[string]string{"Next": r.URL.Query().Get("next"), "Error": ""})
+	_ = tmpl.Execute(w, map[string]string{"Next": r.URL.Query().Get("next"), "Error": ""})
 }
 
 func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +147,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		tmpl := template.Must(template.New("login").Parse(loginHTML))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
-		tmpl.Execute(w, map[string]string{"Next": r.FormValue("next"), "Error": "invalid token"})
+		_ = tmpl.Execute(w, map[string]string{"Next": r.FormValue("next"), "Error": "invalid token"})
 		return
 	}
 	sid := make([]byte, 16)
@@ -178,7 +178,7 @@ const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
 func handleFavicon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.Write([]byte(faviconSVG))
+	_, _ = w.Write([]byte(faviconSVG))
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

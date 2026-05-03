@@ -19,7 +19,7 @@ type Scope struct {
 	Project string // absolute path to repo root; empty if global
 }
 
-func GlobalScope() Scope   { return Scope{Global: true} }
+func GlobalScope() Scope             { return Scope{Global: true} }
 func ProjectScope(root string) Scope { return Scope{Project: root} }
 
 func (s Scope) String() string {

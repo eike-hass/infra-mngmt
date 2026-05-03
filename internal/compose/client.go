@@ -14,7 +14,7 @@ import (
 // ProcessState mirrors the process-compose process object.
 type ProcessState struct {
 	Name     string  `json:"name"`
-	Status   string  `json:"status"`   // "Running","Stopped","Launched","Starting","Error","Completed","Disabled"
+	Status   string  `json:"status"` // "Running","Stopped","Launched","Starting","Error","Completed","Disabled"
 	Pid      int     `json:"pid"`
 	ExitCode int     `json:"exit_code"`
 	Restarts int     `json:"restarts"`

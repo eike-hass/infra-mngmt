@@ -78,11 +78,19 @@ go.sum
 ## Development commands
 
 ```bash
-go run ./cmd/infra-mngmt           # Run (re-run manually for changes)
-go build -o dist/infra-mngmt ./cmd/infra-mngmt  # Build binary
-go test ./...                      # Run tests
-go vet ./...                       # Vet
+make build                         # Compile to dist/infra-mngmt
+make run                           # Build + start the server
+make test                          # Full test suite
+make test-cover                    # With per-package coverage summary
+make fmt                           # Apply gofmt -w to the tree
+make fmt-check                     # Fail if anything needs reformatting
+make vet                           # `go vet ./...`
+make lint                          # golangci-lint with .golangci.yml
+make check                         # fmt-check + vet + lint + test (pre-commit gate)
+make tidy                          # `go mod tidy`
 ```
+
+**Always run `make check` before declaring work done.** It enforces formatting, the `go vet` baseline, the `golangci-lint` set in `.golangci.yml` (errcheck, govet, ineffassign, staticcheck, unused, bodyclose, misspell, unconvert), and the full test suite. Bare `go test ./...` is not enough — the lint gate catches unclosed bodies, misspellings, and dead code that tests won't.
 
 The devcontainer firewall allowlists the Go module proxy (`proxy.golang.org`, `sum.golang.org`, `dl.google.com`, etc.) — see `.devcontainer/init-firewall.sh`. Standard `go mod tidy` and toolchain auto-upgrade work without env overrides.
 

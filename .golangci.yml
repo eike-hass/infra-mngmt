@@ -1,0 +1,54 @@
+# golangci-lint configuration (schema v2).
+#
+# Run locally with `make lint` (or `golangci-lint run`).
+#
+# Keep the linter set small at first — easy to add, painful to remove without
+# either silencing or fixing every flagged occurrence. Extend with care.
+
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  # Start from the standard set (vet/staticcheck-class checks) and add a few
+  # high-signal linters.
+  default: standard
+  enable:
+    - bodyclose       # ensures HTTP response bodies are closed
+    - misspell        # catches common typos in comments and string literals
+    - unconvert       # flags unnecessary type conversions
+
+  settings:
+    misspell:
+      locale: US
+
+    errcheck:
+      # Closing an io.Closer in a defer is universal Go idiom — there is no
+      # meaningful action to take if Close returns an error after the work is
+      # done. Excluding lets the linter focus on real-bug-prone unchecked
+      # returns at the call site.
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+
+  exclusions:
+    rules:
+      # Test files routinely have intentionally-unchecked errors (write to
+      # ResponseRecorder, json.Unmarshal that's allowed to fail, etc.). Don't
+      # enforce errcheck/bodyclose there to keep the suite expressive.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
+
+      # template.go renders via html/template; the literal HTML/JS strings
+      # generate misspell false positives on intentional shortened text.
+      - path: internal/web/template\.go
+        linters:
+          - misspell
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

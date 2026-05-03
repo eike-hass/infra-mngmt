@@ -155,7 +155,7 @@ func discoverDockerSources() ([]source.Source, []string, *docker.Client, error) 
 	ctx := context.Background()
 	containers, err := dc.ListManaged(ctx)
 	if err != nil {
-		dc.Close()
+		_ = dc.Close()
 		return nil, nil, nil, fmt.Errorf("list managed containers: %w", err)
 	}
 

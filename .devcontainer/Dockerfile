@@ -63,6 +63,27 @@ RUN ARCH="$(uname -m)" && \
   install -m 0755 /tmp/docker/docker /usr/local/bin/docker && \
   rm -rf /tmp/docker /tmp/docker.tgz
 
+# Install golangci-lint from GitHub releases. The Go module proxy
+# (proxy.golang.org via Google's CDN) rotates IPs, which can desync from the
+# firewall's startup-time DNS resolution; GitHub releases have stable, allowed
+# IP ranges so the install is reliable across rebuilds.
+# v2.x is required because the project's transitive deps (OpenTelemetry pulled
+# in via the Docker SDK) declare `go 1.25` in their go.mod files. v1.x of
+# golangci-lint is built with Go 1.24 and rejects those deps with
+# "package requires newer Go version go1.25". v2.12.1 is built with Go 1.26.
+ARG GOLANGCI_LINT_VERSION=2.12.1
+RUN ARCH="$(dpkg --print-architecture)" && \
+  case "$ARCH" in \
+    amd64) GOLANGCI_ARCH=linux-amd64 ;; \
+    arm64) GOLANGCI_ARCH=linux-arm64 ;; \
+    *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+  esac && \
+  wget -qO /tmp/golangci-lint.tgz \
+    "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-${GOLANGCI_ARCH}.tar.gz" && \
+  tar -xzf /tmp/golangci-lint.tgz -C /tmp && \
+  install -m 0755 "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-${GOLANGCI_ARCH}/golangci-lint" /usr/local/bin/golangci-lint && \
+  rm -rf /tmp/golangci-lint.tgz "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-${GOLANGCI_ARCH}"
+
 # Install the Docker Compose CLI plugin alongside the docker binary so
 # `docker compose ...` works. Direct binary from GitHub Releases —
 # github.com is in the firewall allow-list. Lives in the system-wide

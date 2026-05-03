@@ -236,7 +236,7 @@ type Event struct {
 }
 
 // StreamEvents streams Docker engine events for a single container until the
-// container is removed or ctx is cancelled.
+// container is removed or ctx is canceled.
 func (c *Client) StreamEvents(ctx context.Context, containerID string) <-chan Event {
 	out := make(chan Event, 32)
 	go func() {
@@ -276,7 +276,7 @@ func (c *Client) StreamEvents(ctx context.Context, containerID string) <-chan Ev
 }
 
 // StreamLogs streams stdout+stderr from a container as line-by-line strings.
-// The returned channel is closed when the container exits or ctx is cancelled.
+// The returned channel is closed when the container exits or ctx is canceled.
 // Handles both multiplexed (non-TTY) and raw (TTY) Docker log streams.
 func (c *Client) StreamLogs(ctx context.Context, id string) <-chan string {
 	out := make(chan string, 64)
@@ -317,7 +317,7 @@ func (c *Client) StreamLogs(ctx context.Context, id string) <-chan string {
 		// then emit by line.
 		pr, pw := io.Pipe()
 		go func() {
-			defer pw.Close()
+			defer func() { _ = pw.Close() }()
 			_, _ = stdcopy.StdCopy(pw, pw, rc)
 		}()
 		emitLines(pr, send)

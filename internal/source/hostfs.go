@@ -144,7 +144,7 @@ func decodeProjectPath(encoded string) string {
 
 // claudeMDFile is one absolute path that may contain a CLAUDE.md.
 type claudeMDFile struct {
-	path string
+	path  string
 	scope entity.Scope
 }
 
@@ -472,7 +472,7 @@ func (s *HostFSSource) readSettingsBlock(section, name string) ([]byte, error) {
 }
 
 // prettyJSON returns a re-indented copy of raw JSON; falls back to the input
-// unchanged when re-marshalling fails.
+// unchanged when re-marshaling fails.
 func prettyJSON(raw json.RawMessage) []byte {
 	var v any
 	if json.Unmarshal(raw, &v) == nil {

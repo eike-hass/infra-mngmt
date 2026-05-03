@@ -69,7 +69,7 @@ func (m *mockSource) addEntity(kind entity.Kind, name string, content []byte) en
 }
 
 func newServerWithSource(srcs ...source.Source) *Server {
-	s := New([]source.Source(srcs), nil, "", nil)
+	s := New(srcs, nil, "", nil)
 	return s
 }
 

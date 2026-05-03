@@ -218,24 +218,24 @@ func (s *DockerVolumeSource) settingsEntities(ctx context.Context) ([]entity.Ent
 	var out []entity.Entity
 	for name, raw := range sf.MCPServers {
 		e := entity.Entity{
-			ID:    fmt.Sprintf("%s:%s:%s", s.id, entity.KindMCPServer, name),
-			Kind:  entity.KindMCPServer,
-			Name:  name,
-			Scope: s.scope,
+			ID:     fmt.Sprintf("%s:%s:%s", s.id, entity.KindMCPServer, name),
+			Kind:   entity.KindMCPServer,
+			Name:   name,
+			Scope:  s.scope,
 			Source: s.id,
-			Path:  settingsPath,
-			Attrs: parseMCPAttrs(raw),
+			Path:   settingsPath,
+			Attrs:  parseMCPAttrs(raw),
 		}
 		out = append(out, e)
 	}
 	for name := range sf.Hooks {
 		out = append(out, entity.Entity{
-			ID:    fmt.Sprintf("%s:%s:%s", s.id, entity.KindHook, name),
-			Kind:  entity.KindHook,
-			Name:  name,
-			Scope: s.scope,
+			ID:     fmt.Sprintf("%s:%s:%s", s.id, entity.KindHook, name),
+			Kind:   entity.KindHook,
+			Name:   name,
+			Scope:  s.scope,
 			Source: s.id,
-			Path:  settingsPath,
+			Path:   settingsPath,
 		})
 	}
 	return out, nil

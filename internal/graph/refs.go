@@ -12,9 +12,9 @@ import (
 // ProcInfo is the minimal representation of a running (or stopped) process
 // that graph needs for resolution. Callers fill this from compose.ProcessState.
 type ProcInfo struct {
-	Instance  string // compose instance name
-	Name      string // process name
-	CSSState  string // normalised CSS class: "running","stopped","error","starting","disabled","unknown"
+	Instance string // compose instance name
+	Name     string // process name
+	CSSState string // normalised CSS class: "running","stopped","error","starting","disabled","unknown"
 }
 
 // RefState describes how well an MCP server's service dependency is satisfied.

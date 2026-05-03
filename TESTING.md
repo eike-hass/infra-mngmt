@@ -7,13 +7,22 @@ requiring Docker, process-compose, or a network.
 ## Running
 
 ```bash
-go test ./...                  # all tests
-go test -cover ./...           # with coverage by package
+make test                      # all tests
+make test-cover                # with coverage by package
+make check                     # fmt + vet + lint + test (pre-commit gate)
+
 go test -run TestFoo ./pkg     # single test
 go test -v ./internal/web      # verbose, single package
 ```
 
-`go test ./...` must be green before any change is considered done.
+`make check` must pass before any change is considered done. It enforces:
+
+- `gofmt -l .` produces empty output (no unformatted files)
+- `go vet ./...` passes
+- `golangci-lint run` passes against `.golangci.yml` (errcheck, govet, ineffassign, staticcheck, unused, bodyclose, misspell, unconvert)
+- `go test ./...` passes
+
+Bare `go test ./...` will not catch lint regressions — always use `make check`.
 
 ## Layout
 

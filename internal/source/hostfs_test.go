@@ -17,9 +17,8 @@ func buildClaudeDir(t *testing.T, scope entity.Scope) string {
 	t.Helper()
 	root := t.TempDir()
 	claude := filepath.Join(root, ".claude")
-	if scope.Global {
-		// Global: simulate ~/.claude → claude dir is inside root with no parent CLAUDE.md
-	}
+	// Global scope simulates ~/.claude (claude dir is inside root, no parent
+	// CLAUDE.md). Project scope adds a CLAUDE.md one level up.
 
 	// Standard subdirectories
 	for _, sub := range []string{"commands", "agents", "memory", "skills", "skills/example", "hooks"} {
@@ -28,12 +27,12 @@ func buildClaudeDir(t *testing.T, scope entity.Scope) string {
 		}
 	}
 	files := map[string]string{
-		"commands/run.md":          "# run",
-		"agents/helper.md":         "# helper",
-		"memory/note.md":           "remember this",
-		"memory/MEMORY.md":         "should be skipped",
-		"skills/example/SKILL.md":  "skill body",
-		"settings.json":            `{"mcpServers":{"local-py":{"command":"python","args":["-m","srv"]},"remote":{"type":"sse","url":"http://x"}},"hooks":{"on-save":{"cmd":"echo"}}}`,
+		"commands/run.md":         "# run",
+		"agents/helper.md":        "# helper",
+		"memory/note.md":          "remember this",
+		"memory/MEMORY.md":        "should be skipped",
+		"skills/example/SKILL.md": "skill body",
+		"settings.json":           `{"mcpServers":{"local-py":{"command":"python","args":["-m","srv"]},"remote":{"type":"sse","url":"http://x"}},"hooks":{"on-save":{"cmd":"echo"}}}`,
 	}
 	if scope.Global {
 		files["CLAUDE.md"] = "global memory"

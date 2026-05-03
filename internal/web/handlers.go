@@ -79,7 +79,7 @@ func (s *Server) handleEntityContent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.Write(data)
+			_, _ = w.Write(data)
 			return
 		}
 	}
@@ -200,15 +200,15 @@ func runningCount(procs []compose.ProcessState) int {
 }
 
 var tmplFuncs = template.FuncMap{
-	"kindIcon":      kindIcon,
-	"formatAge":     formatAge,
-	"formatMem":     formatMem,
-	"statusClass":   statusClass,
-	"cpuBarWidth":   cpuBarWidth,
-	"cpuBarClass":   cpuBarClass,
-	"memBarWidth":   memBarWidth,
-	"runningCount":  runningCount,
-	"entityLevel": func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
+	"kindIcon":     kindIcon,
+	"formatAge":    formatAge,
+	"formatMem":    formatMem,
+	"statusClass":  statusClass,
+	"cpuBarWidth":  cpuBarWidth,
+	"cpuBarClass":  cpuBarClass,
+	"memBarWidth":  memBarWidth,
+	"runningCount": runningCount,
+	"entityLevel":  func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
 	"entityLevelShort": func(e entity.Entity) string {
 		switch sourceLevel(e.Source, e.Scope.Global) {
 		case "global":
@@ -279,7 +279,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	tmpl := template.Must(template.New("index").Funcs(tmplFuncs).Parse(entityListInnerHTML))
 	tmpl = template.Must(tmpl.Parse(indexHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.Execute(w, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses})
+	_ = tmpl.Execute(w, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses})
 }
 
 // handleEntityListPartial returns just the entity-list inner HTML for in-place
@@ -293,7 +293,7 @@ func (s *Server) handleEntityListPartial(w http.ResponseWriter, r *http.Request)
 	statuses := s.resolveMCPStatuses(r.Context(), all)
 	tmpl := template.Must(template.New("partial").Funcs(tmplFuncs).Parse(entityListInnerHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.ExecuteTemplate(w, "entity-list-inner", pageData{Entities: all, MCPStatuses: statuses})
+	_ = tmpl.ExecuteTemplate(w, "entity-list-inner", pageData{Entities: all, MCPStatuses: statuses})
 }
 
 // handleEntityPreview returns the preview pane HTML fragment (HTMX target).
@@ -326,7 +326,7 @@ func (s *Server) handleEntityPreview(w http.ResponseWriter, r *http.Request) {
 			}
 			tmpl := template.Must(template.New("preview").Funcs(tmplFuncs).Parse(previewHTML))
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			tmpl.Execute(w, map[string]any{
+			_ = tmpl.Execute(w, map[string]any{
 				"Entity":    e,
 				"Content":   string(content),
 				"MCPStatus": mcpStatus,
@@ -497,7 +497,7 @@ func (s *Server) handleContainerEventsStream(w http.ResponseWriter, r *http.Requ
 	// wait for the next event to know if it's running/healthy.
 	if state, err := s.docker.InspectContainer(ctx, id); err == nil {
 		if data, jerr := json.Marshal(state); jerr == nil {
-			fmt.Fprintf(w, "event: state\ndata: %s\n\n", data)
+			_, _ = fmt.Fprintf(w, "event: state\ndata: %s\n\n", data)
 			flusher.Flush()
 		}
 	}
@@ -509,19 +509,19 @@ func (s *Server) handleContainerEventsStream(w http.ResponseWriter, r *http.Requ
 			return
 		case ev, ok := <-evCh:
 			if !ok {
-				fmt.Fprintf(w, "event: done\ndata: \n\n")
+				_, _ = fmt.Fprintf(w, "event: done\ndata: \n\n")
 				flusher.Flush()
 				return
 			}
 			data, _ := json.Marshal(ev)
-			fmt.Fprintf(w, "event: docker_event\ndata: %s\n\n", data)
+			_, _ = fmt.Fprintf(w, "event: docker_event\ndata: %s\n\n", data)
 			flusher.Flush()
 
 			// Health-status transitions don't update overall State.Status, so
 			// re-inspect after each event so the client can refresh badge state.
 			if state, err := s.docker.InspectContainer(ctx, id); err == nil {
 				if sd, jerr := json.Marshal(state); jerr == nil {
-					fmt.Fprintf(w, "event: state\ndata: %s\n\n", sd)
+					_, _ = fmt.Fprintf(w, "event: state\ndata: %s\n\n", sd)
 					flusher.Flush()
 				}
 			}
@@ -583,7 +583,7 @@ func (s *Server) allEntities(ctx context.Context) ([]entity.Entity, error) {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // sourceLabel turns a source ID into a short human-readable label.
@@ -659,10 +659,10 @@ func kindIcon(k entity.Kind) string {
 // ── services handlers ─────────────────────────────────────────────────────────
 
 type instanceView struct {
-	Name     string
-	Endpoint string
-	Online   bool
-	CanBoot  bool // has a bootstrapper configured
+	Name      string
+	Endpoint  string
+	Online    bool
+	CanBoot   bool // has a bootstrapper configured
 	Processes []compose.ProcessState
 }
 
@@ -691,7 +691,7 @@ func (s *Server) handleServicesPartial(w http.ResponseWriter, r *http.Request) {
 	views := s.buildInstanceViews(r.Context())
 	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.Execute(w, views)
+	_ = tmpl.Execute(w, views)
 }
 
 func (s *Server) handleProcessStart(w http.ResponseWriter, r *http.Request) {
@@ -775,7 +775,7 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	tmpl := template.Must(template.New("logs").Funcs(tmplFuncs).Parse(logsHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.Execute(w, data)
+	_ = tmpl.Execute(w, data)
 }
 
 // formatAge converts a duration in seconds to a compact human string.
@@ -823,5 +823,3 @@ func statusClass(status string) string {
 		return "unknown"
 	}
 }
-
-
