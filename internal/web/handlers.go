@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -208,6 +209,8 @@ var tmplFuncs = template.FuncMap{
 	"cpuBarClass":  cpuBarClass,
 	"memBarWidth":  memBarWidth,
 	"runningCount": runningCount,
+	"canStop":      canStop,
+	"canStart":     canStart,
 	"entityLevel":  func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
 	"entityLevelShort": func(e entity.Entity) string {
 		switch sourceLevel(e.Source, e.Scope.Global) {
@@ -688,10 +691,14 @@ func (s *Server) buildInstanceViews(ctx context.Context) []instanceView {
 }
 
 func (s *Server) handleServicesPartial(w http.ResponseWriter, r *http.Request) {
-	views := s.buildInstanceViews(r.Context())
+	data := servicesPageData{
+		Instances:  s.buildInstanceViews(r.Context()),
+		Bridges:    s.rebuildBridgeViews(r.Context()),
+		Containers: s.rebuildContainerViews(r.Context()),
+	}
 	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, views)
+	_ = tmpl.Execute(w, data)
 }
 
 func (s *Server) handleProcessStart(w http.ResponseWriter, r *http.Request) {
@@ -719,9 +726,12 @@ func (s *Server) processAction(w http.ResponseWriter, r *http.Request, fn func(*
 		http.Error(w, "invalid instance or process name", http.StatusBadRequest)
 		return
 	}
+	verb := strings.TrimPrefix(r.URL.Path, "/process/")
 	for _, c := range s.compose {
 		if c.Name() == instName {
+			log.Printf("compose: %s %s/%s", verb, instName, procName)
 			if err := fn(c, procName); err != nil {
+				log.Printf("compose: %s %s/%s failed: %v", verb, instName, procName, err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -747,6 +757,31 @@ func (s *Server) handleComposeStart(w http.ResponseWriter, r *http.Request) {
 	s.handleServicesPartial(w, r)
 }
 
+// handleComposeReload re-reads the named instance's compose YAML and
+// reconciles the running process set. Useful after editing the YAML to drop
+// processes without a full systemd restart. See compose.Client.Reload for
+// version-specific caveats.
+func (s *Server) handleComposeReload(w http.ResponseWriter, r *http.Request) {
+	instName := r.URL.Query().Get("instance")
+	if !validProcessName(instName) {
+		http.Error(w, "invalid instance", http.StatusBadRequest)
+		return
+	}
+	for _, c := range s.compose {
+		if c.Name() == instName {
+			log.Printf("compose: reload request from=%s instance=%s", r.RemoteAddr, instName)
+			if err := c.Reload(r.Context()); err != nil {
+				log.Printf("compose: reload %s failed: %v", instName, err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			s.handleServicesPartial(w, r)
+			return
+		}
+	}
+	http.Error(w, "instance not found", http.StatusNotFound)
+}
+
 type logsData struct {
 	Instance string
 	Process  string
@@ -762,16 +797,25 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := logsData{Instance: instName, Process: procName}
+	matched := false
 	for _, c := range s.compose {
 		if c.Name() == instName {
-			lines, err := c.Logs(r.Context(), procName, 100)
+			matched = true
+			lines, err := c.Logs(r.Context(), procName, 200)
 			if err != nil {
+				log.Printf("logs: %s/%s: %v", instName, procName, err)
 				data.Err = err.Error()
 			} else {
 				data.Lines = lines
+				if len(lines) == 0 {
+					log.Printf("logs: %s/%s: 0 lines returned", instName, procName)
+				}
 			}
 			break
 		}
+	}
+	if !matched {
+		data.Err = "instance " + instName + " not configured"
 	}
 	tmpl := template.Must(template.New("logs").Funcs(tmplFuncs).Parse(logsHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -804,6 +848,30 @@ func healthClass(health string) string {
 	default:
 		return "unknown"
 	}
+}
+
+// canStop reports whether the stop button should render. True for any state
+// where there's something to halt (or a restart loop to break) — including
+// Error/Restarting, which the bare `IsRunning` check misses.
+func canStop(status string) bool {
+	switch strings.ToLower(status) {
+	case "running", "foreground", "launched", "launching",
+		"pending", "restarting", "scheduled", "terminating", "error":
+		return true
+	}
+	return false
+}
+
+// canStart reports whether the start button should render. True only for
+// states where the process is definitely not running and not on its way up.
+func canStart(status string) bool {
+	switch strings.ToLower(status) {
+	case "completed", "disabled", "skipped":
+		return true
+	case "":
+		return true // process-compose hasn't reported yet — let the user try
+	}
+	return false
 }
 
 // statusClass maps a process-compose process status to a CSS pill class.

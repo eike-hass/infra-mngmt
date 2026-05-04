@@ -40,37 +40,34 @@ Process management is delegated to [process-compose](https://github.com/F1bonacc
 | HTTP server | `net/http` + [chi](https://github.com/go-chi/chi) | Lightweight, idiomatic |
 | Frontend | Go templates + HTMX | No JS build pipeline; server-side rendering |
 | Search | fuse.js (CDN) | ⌘K across entities without a build step |
-| Config | `encoding/json` | No firewall-blocked deps; JSON config at `~/.config/infra-mngmt/config.json` |
+| Config | `gopkg.in/yaml.v3` | YAML config at `~/.config/infra-mngmt/config.yaml` (loader still falls back to legacy `config.json` with a deprecation log) |
 
 ## Project structure
 
 ```
 cmd/
   infra-mngmt/
-    main.go              # CLI flags, config load, server start
+    main.go              # CLI: server, addr, bridges, version subcommands
 internal/
-  source/
-    source.go            # Source interface + shared types (ErrReadOnly, ErrNotFound, ChangeEvent)
-    hostfs.go            # HostFSSource — direct filesystem
-    dockervol.go         # DockerVolumeSource — sidecar pattern
-  entity/
-    types.go             # Entity model: Kind, Scope, Entity (with Attrs map)
-  docker/
-    client.go            # Docker socket REST client (pure stdlib)
-    labels.go            # devcontainer + claude.managed label constants
-  compose/
-    client.go            # process-compose REST API client
-    bootstrap.go         # start/stop process-compose itself
+  source/                # EntitySource implementations (hostfs, dockervol)
+  entity/                # Entity model: Kind, Scope, Entity (with Attrs map)
+  docker/                # Docker client: managed-container discovery, sidecar IO, ContainerStats
+  compose/               # process-compose REST client (incl. bootstrap)
+  bridge/                # bridges.yaml: types, load, state, apply (PowerShell + WSL socat)
+  containers/            # containers.yaml: declared-container declarations + load
+  deps/                  # dependencies.yaml: rules, scope-pattern matching
   graph/
-    refs.go              # Cross-reference resolution: MCP → process matching, broken-ref detection
+    refs.go              # Resolver: deps + legacy substring fallback; bridge/process/container state rollup
   web/
-    server.go            # HTTP router, middleware
-    handlers.go          # Route handlers
+    server.go            # HTTP router, middleware, auth
+    handlers.go          # Entity + process routes; container stats fan-out
+    bridges.go           # bridge views + apply/reset/refresh handlers
+    containers.go        # declared-container views + handlers
     status.go            # MCP runtime status resolver (uses graph package)
     template.go          # Inline Go HTML templates (index, preview, services, logs)
 config/
-  config.go              # App config schema + Load/Save
-  wsl.go                 # WSL2 NAT helper: resolves "wsl-windows" hostname from /etc/resolv.conf
+  config.go              # App config: YAML primary, JSON fallback for legacy installs
+  wsl.go                 # `wsl-windows` sentinel → Windows host IP via /proc/net/route
 go.mod
 go.sum
 ```
@@ -112,30 +109,29 @@ See [TESTING.md](TESTING.md) for the test layout, mock patterns, coverage baseli
 
 ## App config
 
-Stored at `~/.config/infra-mngmt/config.json`. Auto-created on first run with defaults.
+Stored at `~/.config/infra-mngmt/config.yaml`. Auto-created on first run with defaults. The loader still accepts `config.json` for legacy installs and logs a deprecation warning.
 
-```json
-{
-  "bind": "127.0.0.1:7842",
-  "process_compose": [
-    {
-      "name": "wsl",
-      "endpoint": "http://localhost:9998",
-      "binary": "/usr/local/bin/process-compose",
-      "compose_file": "/home/user/.config/infra-mngmt/process-compose.yaml"
-    },
-    {
-      "name": "windows",
-      "endpoint": "http://wsl-windows:9999",
-      "binary": "/mnt/c/tools/process-compose/process-compose.exe",
-      "compose_file": "/mnt/c/Users/user/.config/infra-mngmt/process-compose.yaml"
-    }
-  ],
-  "extra_paths": []
-}
+```yaml
+bind: 127.0.0.1:7842
+token_file: /home/user/.config/infra-mngmt/token
+process_compose:
+  - name: wsl
+    endpoint: http://localhost:9998
+    binary: /usr/local/bin/process-compose
+    compose_file: /home/user/.config/infra-mngmt/process-compose.yaml
+    token_file: /home/user/.config/infra-mngmt/process-compose.token
+  - name: windows
+    endpoint: http://wsl-windows:9999
+    binary: /c/Users/user/AppData/Local/Programs/process-compose/process-compose.exe
+    compose_file: /c/Users/user/.config/infra-mngmt/process-compose.yaml
+    token_file: /c/Users/user/.config/infra-mngmt/process-compose.token
+trusted_networks: [127.0.0.0/8, ::1/128, 172.17.0.0/16]
+extra_paths: []
 ```
 
-`wsl-windows` in an endpoint is a sentinel resolved at startup to the Windows host IP from `/etc/resolv.conf` (see `config/wsl.go`). Necessary for WSL2 NAT mode where the gateway IP changes on each restart.
+`wsl-windows` in an endpoint is a sentinel resolved at startup to the Windows host IP from `/proc/net/route` (the WSL guest's default-route gateway — see `config/wsl.go`). Necessary for WSL2 NAT mode where the gateway IP changes on each restart. The older resolv.conf-based path is no longer used because Win11 + Hyper-V firewall makes the resolv.conf nameserver a local DNS proxy bound to WSL's loopback, not routable.
+
+`bridges.yaml`, `dependencies.yaml`, `containers.yaml` live alongside `config.yaml` and are auto-discovered (or pointed at via `bridges_file`/`dependencies_file`/`containers_file` in the main config).
 
 process-compose YAML files are **infrastructure config**, not Claude Code config — they do not belong in `.claude/` directories. Use `~/.config/infra-mngmt/` or any path the `compose_file` field points to.
 

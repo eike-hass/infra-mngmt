@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -195,6 +196,26 @@ func normalizeDevcontainerPath(p string) string {
 
 // ── container lifecycle ──────────────────────────────────────────────────────
 
+// FindByName returns the first container whose name (case-insensitive) matches
+// the argument. Includes stopped containers. Returns ok=false if nothing
+// matches. Used for the dependencies-resolver `container:<name>` lookup.
+func (c *Client) FindByName(ctx context.Context, name string) (ManagedContainer, bool, error) {
+	ctrs, err := c.cli.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return ManagedContainer{}, false, fmt.Errorf("list containers: %w", err)
+	}
+	want := strings.ToLower(name)
+	for _, ctr := range ctrs {
+		for _, n := range ctr.Names {
+			if strings.EqualFold(strings.TrimPrefix(n, "/"), name) ||
+				strings.ToLower(strings.TrimPrefix(n, "/")) == want {
+				return toManaged(ctr), true, nil
+			}
+		}
+	}
+	return ManagedContainer{}, false, nil
+}
+
 // InspectContainer returns the runtime state of a container, including health.
 func (c *Client) InspectContainer(ctx context.Context, id string) (ContainerState, error) {
 	insp, err := c.cli.ContainerInspect(ctx, id)
@@ -226,6 +247,69 @@ func (c *Client) StopContainer(ctx context.Context, id string) error {
 		return fmt.Errorf("stop container: %w", err)
 	}
 	return nil
+}
+
+// ContainerStats is a one-shot CPU%/memory snapshot for a running container.
+// CPU is the percentage of all cores (e.g. 150.0 = 1.5 cores). Mem is the
+// RSS-equivalent in bytes — on cgroup v1 we subtract the page-cache term, on
+// cgroup v2 we use Usage directly. Returns zero values if the daemon hasn't
+// produced a usable delta yet (newly started containers).
+type ContainerStats struct {
+	CPU float64
+	Mem int64
+}
+
+// Stats requests a single primed stat from the daemon. The daemon waits ~1 s
+// internally to populate precpu_stats so we get a real CPU delta in one call.
+// Latency is therefore ~1 s — call this in parallel goroutines, not serially,
+// when fanning out across containers.
+func (c *Client) Stats(ctx context.Context, id string) (ContainerStats, error) {
+	resp, err := c.cli.ContainerStats(ctx, id, false)
+	if err != nil {
+		return ContainerStats{}, fmt.Errorf("container stats: %w", err)
+	}
+	defer resp.Body.Close()
+	var s container.StatsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return ContainerStats{}, fmt.Errorf("decode stats: %w", err)
+	}
+	return ContainerStats{CPU: cpuPercent(&s), Mem: memUsage(&s)}, nil
+}
+
+// cpuPercent computes the docker-stats-equivalent CPU% from a primed stats
+// snapshot. Returns 0 when the delta isn't usable (e.g. no SystemUsage on
+// Windows or the precpu fields are still zero).
+func cpuPercent(s *container.StatsResponse) float64 {
+	cpuDelta := float64(s.CPUStats.CPUUsage.TotalUsage) - float64(s.PreCPUStats.CPUUsage.TotalUsage)
+	sysDelta := float64(s.CPUStats.SystemUsage) - float64(s.PreCPUStats.SystemUsage)
+	if cpuDelta <= 0 || sysDelta <= 0 {
+		return 0
+	}
+	cores := float64(s.CPUStats.OnlineCPUs)
+	if cores == 0 {
+		cores = float64(len(s.CPUStats.CPUUsage.PercpuUsage))
+	}
+	if cores == 0 {
+		cores = 1
+	}
+	return (cpuDelta / sysDelta) * cores * 100
+}
+
+// memUsage returns the container's RSS-equivalent memory in bytes. cgroup v1
+// reports a "cache" entry that's safe to subtract; cgroup v2 uses "file"
+// instead. If neither is present (Windows, or older daemons), Usage is
+// returned as-is.
+func memUsage(s *container.StatsResponse) int64 {
+	usage := int64(s.MemoryStats.Usage)
+	if v, ok := s.MemoryStats.Stats["cache"]; ok {
+		usage -= int64(v)
+	} else if v, ok := s.MemoryStats.Stats["file"]; ok {
+		usage -= int64(v)
+	}
+	if usage < 0 {
+		return 0
+	}
+	return usage
 }
 
 // Event is an infra-mngmt-shaped wrapper around a Docker engine event.

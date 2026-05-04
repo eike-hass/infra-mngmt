@@ -33,7 +33,7 @@ type e2eEnv struct {
 
 func newE2E(t *testing.T, token string, srcs ...source.Source) *e2eEnv {
 	t.Helper()
-	srv := New(srcs, nil, token, nil)
+	srv := New(srcs, nil, token, nil, nil, nil, nil, nil)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 

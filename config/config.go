@@ -3,33 +3,45 @@ package config
 import (
 	crand "crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type ProcessCompose struct {
-	Name        string `json:"name"`
-	Endpoint    string `json:"endpoint"`
-	Binary      string `json:"binary"`
-	ComposeFile string `json:"compose_file"`
-	Token       string `json:"token,omitempty"`      // process-compose API token; takes precedence over TokenFile
-	TokenFile   string `json:"token_file,omitempty"` // path to file containing the token; same file is passed to process-compose via --token-file
+	Name        string `yaml:"name"`
+	Endpoint    string `yaml:"endpoint"`
+	Binary      string `yaml:"binary"`
+	ComposeFile string `yaml:"compose_file"`
+	Token       string `yaml:"token,omitempty"`      // process-compose API token; takes precedence over TokenFile
+	TokenFile   string `yaml:"token_file,omitempty"` // path to file containing the token; same file is passed to process-compose via --token-file
 }
 
 type Config struct {
-	Bind           string           `json:"bind"`
-	TokenFile      string           `json:"token_file"`
-	ProcessCompose []ProcessCompose `json:"process_compose"`
+	Bind             string           `yaml:"bind"`
+	TokenFile        string           `yaml:"token_file"`
+	ProcessCompose   []ProcessCompose `yaml:"process_compose"`
+	BridgesFile      string           `yaml:"bridges_file,omitempty"`
+	DependenciesFile string           `yaml:"dependencies_file,omitempty"`
+	ContainersFile   string           `yaml:"containers_file,omitempty"`
+	// TrustedNetworks lists CIDRs whose connections bypass the bearer-token
+	// auth check. Use this to skip the login flow for local access (loopback,
+	// Docker bridge, WSL adapter) while still requiring auth for everything
+	// else. Empty (default) means every request is authenticated when
+	// token_file is set. Loopback is NOT trusted by default — add explicitly
+	// if you want browser-localhost to skip login.
+	TrustedNetworks []string `yaml:"trusted_networks,omitempty"`
 	// Explicit project root paths to add (each must contain a .claude/ subdir).
-	ExtraPaths []string `json:"extra_paths"`
+	ExtraPaths []string `yaml:"extra_paths"`
 }
 
+// DefaultPath returns the canonical config path.
 func DefaultPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "infra-mngmt", "config.json")
+	return filepath.Join(home, ".config", "infra-mngmt", "config.yaml")
 }
 
 func Default() *Config {
@@ -40,6 +52,9 @@ func Default() *Config {
 	}
 }
 
+// Load reads and parses a YAML config file. Missing file returns the default
+// config — callers that need to distinguish "fresh install" from "user
+// removed config" should stat the path themselves first.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -49,7 +64,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 	cfg := Default()
-	if err := json.Unmarshal(data, cfg); err != nil {
+	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	return cfg, nil
@@ -86,11 +101,12 @@ func LoadOrCreateToken(path string) (string, error) {
 	return token, nil
 }
 
+// Save writes the config as YAML.
 func Save(path string, cfg *Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}

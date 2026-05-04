@@ -28,7 +28,7 @@ func TestServicesTemplateRendersOfflineCard(t *testing.T) {
 
 	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, views); err != nil {
+	if err := tmpl.Execute(&buf, servicesPageData{Instances: views}); err != nil {
 		t.Fatalf("template.Execute error: %v", err)
 	}
 	out := buf.String()
@@ -59,7 +59,7 @@ func TestServicesTemplateRendersAPIBadges(t *testing.T) {
 	}}
 	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, views); err != nil {
+	if err := tmpl.Execute(&buf, servicesPageData{Instances: views}); err != nil {
 		t.Fatalf("template.Execute error: %v", err)
 	}
 	out := buf.String()
@@ -76,5 +76,56 @@ func TestServicesTemplateRendersAPIBadges(t *testing.T) {
 	// Default namespace should NOT render the proc-ns label
 	if strings.Contains(out, `proc-ns">default<`) {
 		t.Errorf("default namespace should be hidden")
+	}
+}
+
+func TestServicesTemplateRendersBridges(t *testing.T) {
+	data := servicesPageData{
+		Bridges: []bridgeView{
+			{
+				Name:        "producer-pal",
+				Tier:        "windows",
+				Type:        "portproxy+firewall",
+				Listen:      "172.18.0.1:3350",
+				Connect:     "127.0.0.1:3350",
+				State:       "active",
+				StateClass:  "running",
+				DisplayName: "Producer Pal MCP",
+			},
+		},
+	}
+	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		t.Fatalf("template.Execute error: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"network bridges",
+		"producer-pal",
+		"172.18.0.1:3350",
+		"Producer Pal MCP",
+		`status-pill running`,
+		`/bridge/apply?name=producer-pal`,
+		`/bridge/reset?name=producer-pal`,
+		`/bridges/apply`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n", want)
+		}
+	}
+}
+
+func TestServicesTemplateOmitsBridgeSectionWhenEmpty(t *testing.T) {
+	data := servicesPageData{
+		Instances: []instanceView{{Name: "wsl", Endpoint: "x", Online: true}},
+	}
+	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		t.Fatalf("template.Execute: %v", err)
+	}
+	if strings.Contains(buf.String(), "network bridges") {
+		t.Errorf("bridges section should be hidden when no bridges declared")
 	}
 }

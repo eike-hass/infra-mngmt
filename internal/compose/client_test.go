@@ -112,12 +112,13 @@ func TestProcessesAuthHeader(t *testing.T) {
 }
 
 func TestStartStopRestart(t *testing.T) {
-	var hits []string
+	type call struct {
+		method string
+		path   string
+	}
+	var hits []call
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
-		}
-		hits = append(hits, r.URL.Path)
+		hits = append(hits, call{r.Method, r.URL.Path})
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
@@ -132,14 +133,90 @@ func TestStartStopRestart(t *testing.T) {
 	if err := c.Restart(ctx, "foo"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"/process/foo/start", "/process/foo/stop", "/process/foo/restart"}
+	// process-compose uses verb-first URLs. Start/Restart are POST, Stop is
+	// PATCH — that's how the upstream gin router registers them.
+	want := []call{
+		{http.MethodPost, "/process/start/foo"},
+		{http.MethodPatch, "/process/stop/foo"},
+		{http.MethodPost, "/process/restart/foo"},
+	}
 	if len(hits) != 3 {
 		t.Fatalf("expected 3 requests, got %v", hits)
 	}
-	for i, p := range want {
-		if hits[i] != p {
-			t.Errorf("hit %d = %q, want %q", i, hits[i], p)
+	for i, w := range want {
+		if hits[i] != w {
+			t.Errorf("hit %d = %+v, want %+v", i, hits[i], w)
 		}
+	}
+}
+
+func TestReload(t *testing.T) {
+	var hits []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		hits = append(hits, r.URL.Path)
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	c := New("test", srv.URL, "")
+	if err := c.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0] != "/project/configuration" {
+		t.Errorf("expected one POST to /project/configuration, got %v", hits)
+	}
+}
+
+func TestReloadSurfacesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "config invalid", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	c := New("test", srv.URL, "")
+	if err := c.Reload(context.Background()); err == nil {
+		t.Fatal("expected error when reload returns 400")
+	}
+}
+
+func TestLogsURLIsPathBased(t *testing.T) {
+	var hit string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = r.URL.Path
+		w.Write([]byte(`{"logs":[]}`))
+	}))
+	defer srv.Close()
+	c := New("test", srv.URL, "")
+	if _, err := c.Logs(context.Background(), "myproc", 200); err != nil {
+		t.Fatal(err)
+	}
+	want := "/process/logs/myproc/0/200"
+	if hit != want {
+		t.Errorf("logs URL = %q, want %q (process-compose uses path params)", hit, want)
+	}
+}
+
+func TestLogsStringArrayFormat(t *testing.T) {
+	// This is what process-compose actually returns from
+	// /process/logs/{name}/{endOffset}/{limit}.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"logs":["first line\r","second line\n","third line"]}`))
+	}))
+	defer srv.Close()
+	c := New("test", srv.URL, "")
+	logs, err := c.Logs(context.Background(), "p", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 3 {
+		t.Fatalf("expected 3 lines, got %d: %+v", len(logs), logs)
+	}
+	if logs[0].Message != "first line" {
+		t.Errorf("trim trailing CR: got %q", logs[0].Message)
+	}
+	if logs[1].Message != "second line" {
+		t.Errorf("trim trailing LF: got %q", logs[1].Message)
 	}
 }
 

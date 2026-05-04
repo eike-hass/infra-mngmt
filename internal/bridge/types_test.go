@@ -1,0 +1,129 @@
+package bridge
+
+import (
+	"strings"
+	"testing"
+)
+
+func validBridge() Bridge {
+	return Bridge{
+		Name:    "producer-pal",
+		Tier:    TierWindows,
+		Type:    TypePortproxy,
+		Listen:  Endpoint{Addr: "${wsl-host-ip}", Port: 3350},
+		Connect: Endpoint{Addr: "127.0.0.1", Port: 3350, Family: FamilyAuto},
+		Firewall: Firewall{
+			Remote:      "172.18.0.0/16",
+			DisplayName: "Producer Pal MCP",
+		},
+	}
+}
+
+func TestBridgeValidateValid(t *testing.T) {
+	b := validBridge()
+	if err := b.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestBridgeValidateBadName(t *testing.T) {
+	cases := []string{"", "Bad Name", "with_underscore", "-leading-dash",
+		strings.Repeat("a", 41)}
+	for _, n := range cases {
+		t.Run(n, func(t *testing.T) {
+			b := validBridge()
+			b.Name = n
+			if err := b.Validate(); err == nil {
+				t.Errorf("expected error for name %q", n)
+			}
+		})
+	}
+}
+
+func TestBridgeValidateTierTypeMismatch(t *testing.T) {
+	b := validBridge()
+	b.Tier = TierWSL
+	if err := b.Validate(); err == nil {
+		t.Error("expected error for tier=wsl + type=portproxy+firewall")
+	}
+	b = validBridge()
+	b.Tier = TierWindows
+	b.Type = TypeSocat
+	if err := b.Validate(); err == nil {
+		t.Error("expected error for tier=windows + type=socat")
+	}
+}
+
+func TestBridgeValidateContainerTierReserved(t *testing.T) {
+	b := validBridge()
+	b.Tier = "container:abc123"
+	if err := b.Validate(); err == nil {
+		t.Error("expected container tier to be rejected")
+	}
+}
+
+func TestBridgeValidateBadEndpoint(t *testing.T) {
+	cases := []struct {
+		name string
+		mut  func(*Bridge)
+	}{
+		{"listen port 0", func(b *Bridge) { b.Listen.Port = 0 }},
+		{"listen port too high", func(b *Bridge) { b.Listen.Port = 70000 }},
+		{"connect addr empty", func(b *Bridge) { b.Connect.Addr = "" }},
+		{"listen addr garbage", func(b *Bridge) { b.Listen.Addr = "not.an.ip" }},
+		{"connect family invalid", func(b *Bridge) { b.Connect.Family = "v7" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := validBridge()
+			tc.mut(&b)
+			if err := b.Validate(); err == nil {
+				t.Error("expected validation error")
+			}
+		})
+	}
+}
+
+func TestBridgeValidateAcceptsSentinel(t *testing.T) {
+	b := validBridge()
+	b.Listen.Addr = "${wsl-host-ip}"
+	if err := b.Validate(); err != nil {
+		t.Errorf("sentinel should be accepted: %v", err)
+	}
+}
+
+func TestBridgeValidateFirewallRequired(t *testing.T) {
+	b := validBridge()
+	b.Firewall.DisplayName = ""
+	if err := b.Validate(); err == nil {
+		t.Error("expected error when firewall.display_name missing on portproxy bridge")
+	}
+	b = validBridge()
+	b.Firewall.Remote = "not-cidr"
+	if err := b.Validate(); err == nil {
+		t.Error("expected error for invalid CIDR")
+	}
+}
+
+func TestFileValidateUniqueNames(t *testing.T) {
+	b1 := validBridge()
+	b2 := validBridge()
+	b2.Listen.Port = 8080
+	b2.Connect.Port = 8080
+	f := File{Bridges: []Bridge{b1, b2}}
+	if err := f.Validate(); err == nil {
+		t.Error("expected duplicate-name error")
+	}
+}
+
+func TestFileValidateDefaultsFamily(t *testing.T) {
+	b := validBridge()
+	b.Connect.Family = ""
+	f := File{Bridges: []Bridge{b}}
+	if err := f.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if f.Bridges[0].Connect.Family != FamilyAuto {
+		t.Errorf("expected default family 'auto', got %q", f.Bridges[0].Connect.Family)
+	}
+}

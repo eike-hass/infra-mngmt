@@ -91,9 +91,10 @@ func (c *Client) Processes(ctx context.Context) ([]ProcessState, error) {
 	return wrapped.Data, nil
 }
 
-// Start starts a named process.
+// Start starts a named process. process-compose's REST API routes process
+// verbs as /process/<verb>/<name>, NOT /process/<name>/<verb>.
 func (c *Client) Start(ctx context.Context, process string) error {
-	resp, err := c.do(ctx, http.MethodPost, "/process/"+process+"/start", nil)
+	resp, err := c.do(ctx, http.MethodPost, "/process/start/"+process, nil)
 	if err != nil {
 		return err
 	}
@@ -101,9 +102,11 @@ func (c *Client) Start(ctx context.Context, process string) error {
 	return nil
 }
 
-// Stop stops a named process.
+// Stop stops a named process and clears its restart loop. The upstream route
+// is PATCH-only — using POST gets a 404 from gin's method-aware router, which
+// surfaced as the "stop errors" symptom on the Windows tier.
 func (c *Client) Stop(ctx context.Context, process string) error {
-	resp, err := c.do(ctx, http.MethodPost, "/process/"+process+"/stop", nil)
+	resp, err := c.do(ctx, http.MethodPatch, "/process/stop/"+process, nil)
 	if err != nil {
 		return err
 	}
@@ -113,7 +116,25 @@ func (c *Client) Stop(ctx context.Context, process string) error {
 
 // Restart restarts a named process.
 func (c *Client) Restart(ctx context.Context, process string) error {
-	resp, err := c.do(ctx, http.MethodPost, "/process/"+process+"/restart", nil)
+	resp, err := c.do(ctx, http.MethodPost, "/process/restart/"+process, nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+// Reload re-reads the compose file and reconciles the running process set
+// against it: new entries are added, changed entries are restarted, and
+// entries removed from the YAML are stopped + dropped. The upstream route
+// is `POST /project/configuration` — there is no `/reload` suffix; sending
+// to /project/configuration/reload returns 404.
+//
+// Caveat: behavior varies between process-compose versions. Recent versions
+// (v1.41+) handle full reconciliation; older ones may only add/update and
+// leave deleted entries running until a full restart.
+func (c *Client) Reload(ctx context.Context) error {
+	resp, err := c.do(ctx, http.MethodPost, "/project/configuration", nil)
 	if err != nil {
 		return err
 	}
@@ -128,9 +149,12 @@ type LogLine struct {
 	Message string `json:"message"`
 }
 
-// Logs returns the last n log lines for a process.
+// Logs returns the last n log lines for a process. process-compose's REST
+// API uses path-based parameters: /process/logs/{name}/{endOffset}/{limit}.
+// endOffset=0 means "from the start of the in-memory buffer"; combined with
+// a limit equal to the buffer size this returns up to `lines` of recent log.
 func (c *Client) Logs(ctx context.Context, process string, lines int) ([]LogLine, error) {
-	url := fmt.Sprintf("/process/%s/logs?endOffset=%d&follow=false", process, lines)
+	url := fmt.Sprintf("/process/logs/%s/0/%d", process, lines)
 	resp, err := c.do(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -142,7 +166,23 @@ func (c *Client) Logs(ctx context.Context, process string, lines int) ([]LogLine
 		return nil, err
 	}
 
-	// Try {"logs": [...]} first, then flat array, then treat as plain text.
+	// process-compose returns {"logs": ["line1", "line2", ...]} — strings,
+	// not structured LogLine objects. Try that first, then the structured
+	// shapes that older builds may use, then plain text.
+	var stringWrapped struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.Unmarshal(body, &stringWrapped); err == nil && len(stringWrapped.Logs) > 0 {
+		out := make([]LogLine, 0, len(stringWrapped.Logs))
+		for _, ln := range stringWrapped.Logs {
+			ln = strings.TrimRight(ln, "\r\n")
+			if ln == "" {
+				continue
+			}
+			out = append(out, LogLine{Message: ln})
+		}
+		return out, nil
+	}
 	var wrapped struct {
 		Logs []LogLine `json:"logs"`
 	}
@@ -150,7 +190,7 @@ func (c *Client) Logs(ctx context.Context, process string, lines int) ([]LogLine
 		return wrapped.Logs, nil
 	}
 	var list []LogLine
-	if err := json.Unmarshal(body, &list); err == nil {
+	if err := json.Unmarshal(body, &list); err == nil && len(list) > 0 {
 		return list, nil
 	}
 	// Fallback: plain text, one line per entry.

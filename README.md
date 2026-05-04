@@ -101,67 +101,64 @@ Build inside a devcontainer (Go is already available there). The workspace direc
 **In a devcontainer terminal:**
 
 ```bash
-go build -o /workspace/dist/infra-mngmt ./cmd/infra-mngmt
+make build
 ```
 
-If this is the first build and module dependencies aren't cached yet:
+`make build` runs `go build` with `-ldflags "-X main.buildEpoch=$(date +%s)"` so the resulting binary reports its compile timestamp via `infra-mngmt version` and a startup log line — handy for confirming a deploy actually picked up new code.
 
-```bash
-GOPROXY=direct GONOSUMDB='*' go build -o /workspace/dist/infra-mngmt ./cmd/infra-mngmt
-```
+The devcontainer firewall already allowlists the Go module proxy (`proxy.golang.org`, `sum.golang.org`, `dl.google.com`); standard `go mod tidy` and `make build` work without env overrides.
 
 **Then from a WSL2 terminal, copy the binary into your PATH:**
 
 ```bash
 mkdir -p ~/.local/bin
-# replace ~/projects/infra-mngmt with the actual path to your checkout
-cp ~/projects/infra-mngmt/dist/infra-mngmt ~/.local/bin/
+# replace ~/Workspace/infra-mngmt with the actual path to your checkout
+cp ~/Workspace/infra-mngmt/dist/infra-mngmt ~/.local/bin/
 ```
 
 Verify:
 
 ```bash
 infra-mngmt -h
+infra-mngmt version    # commit + build epoch
 ```
 
 ---
 
 ## 3. Configure
 
-Config lives at `~/.config/infra-mngmt/config.json`. If the file doesn't exist, defaults are used (bind `127.0.0.1:7842`, no process-compose instances, no extra paths).
+Config lives at `~/.config/infra-mngmt/config.yaml`. If the file doesn't exist, defaults are used (bind `127.0.0.1:7842`, no process-compose instances, no extra paths). The loader also accepts a legacy `config.json` and logs a deprecation warning.
 
 On first run infra-mngmt auto-generates a bearer token at `~/.config/infra-mngmt/token` (0600). You will need it to log in at `http://localhost:7842/login`.
 
 ### Full config reference
 
-```json
-{
-  "bind": "127.0.0.1:7842",
-  "token_file": "~/.config/infra-mngmt/token",
-  "process_compose": [
-    {
-      "name": "wsl",
-      "endpoint": "http://localhost:9998",
-      "binary": "/usr/local/bin/process-compose",
-      "compose_file": "/home/youruser/.config/infra-mngmt/process-compose.yaml",
-      "token_file": "/home/youruser/.config/infra-mngmt/process-compose.token"
-    },
-    {
-      "name": "windows",
-      "endpoint": "http://wsl-windows:9999",
-      "binary": "/mnt/c/Users/youruser/AppData/Local/Programs/process-compose/process-compose.exe",
-      "compose_file": "/mnt/c/Users/youruser/.config/infra-mngmt/process-compose.yaml",
-      "token_file": "/mnt/c/Users/youruser/.config/infra-mngmt/process-compose.token"
-    }
-  ],
-  "extra_paths": [
-    "/home/youruser/projects/project-a",
-    "/home/youruser/projects/project-b"
-  ]
-}
+```yaml
+bind: 127.0.0.1:7842
+token_file: ~/.config/infra-mngmt/token
+process_compose:
+  - name: wsl
+    endpoint: http://localhost:9998
+    binary: /usr/local/bin/process-compose
+    compose_file: /home/youruser/.config/infra-mngmt/process-compose.yaml
+    token_file: /home/youruser/.config/infra-mngmt/process-compose.token
+  - name: windows
+    endpoint: http://wsl-windows:9999
+    binary: /c/Users/youruser/AppData/Local/Programs/process-compose/process-compose.exe
+    compose_file: /c/Users/youruser/.config/infra-mngmt/process-compose.yaml
+    token_file: /c/Users/youruser/.config/infra-mngmt/process-compose.token
+trusted_networks:
+  - 127.0.0.0/8
+  - ::1/128
+  - 172.17.0.0/16        # Docker bridge so the devcontainer can reach the UI without logging in
+extra_paths:
+  - /home/youruser/projects/project-a
+  - /home/youruser/projects/project-b
 ```
 
-Each `process_compose` entry can carry the API token for its instance one of two ways: `token` (literal) or `token_file` (path read at startup). The file form is preferred — it keeps the secret out of `config.json` and the same path can be passed to process-compose itself via `--token-file`, so both sides read one file. Sent on the wire as the `X-PC-Token-Key` header. Leave both unset if the instance has no auth. See [SECURITY.md](SECURITY.md) for the full setup.
+Each `process_compose` entry can carry the API token for its instance one of two ways: `token` (literal) or `token_file` (path read at startup). The file form is preferred — it keeps the secret out of `config.yaml` and the same path can be passed to process-compose itself via `--token-file`, so both sides read one file. Sent on the wire as the `X-PC-Token-Key` header. Leave both unset if the instance has no auth. See [SECURITY.md](SECURITY.md) for the full setup.
+
+`bridges.yaml`, `dependencies.yaml`, and `containers.yaml` are auto-discovered alongside `config.yaml` (or set `bridges_file:`/`dependencies_file:`/`containers_file:` to override). They drive the bridge applier (Windows portproxy + firewall via one UAC prompt), the entity → service/bridge dependency resolver, and the declared-container panel respectively.
 
 ### Field reference
 
@@ -169,12 +166,16 @@ Each `process_compose` entry can carry the API token for its instance one of two
 |---|---|---|
 | `bind` | `127.0.0.1:7842` | Listen address. Set to `0.0.0.0:7842` for LAN access. |
 | `token_file` | `~/.config/infra-mngmt/token` | Path to the infra-mngmt bearer token. Set to `""` to disable auth. |
-| `process_compose[].name` | required | Display name shown in the services tab. |
+| `trusted_networks` | `[]` | CIDRs whose source IPs bypass the bearer-token login. Typical: loopback + the Docker bridge. |
+| `process_compose[].name` | required | Display name shown in the services tab; also the tier identifier in `dependencies.yaml`. |
 | `process_compose[].endpoint` | required | Base URL of the process-compose management API. Supports the `wsl-windows` hostname (see below). |
 | `process_compose[].binary` | optional | Path to the process-compose binary. When set, a **▶ start** button appears in the UI if the endpoint is unreachable. |
 | `process_compose[].compose_file` | optional | Path to the process-compose YAML passed to `binary` on bootstrap. |
 | `process_compose[].token` | optional | API token (literal) for this process-compose instance, sent as `X-PC-Token-Key`. Takes precedence over `token_file` when both are set. |
 | `process_compose[].token_file` | optional | Path to a file containing the API token. Read at startup; same path can be passed to process-compose's own `--token-file`. Preferred over `token` for keeping secrets out of config. |
+| `bridges_file` | `bridges.yaml` alongside config | Path to bridges.yaml. |
+| `dependencies_file` | `dependencies.yaml` alongside config | Path to dependencies.yaml. |
+| `containers_file` | `containers.yaml` alongside config | Path to containers.yaml. |
 | `extra_paths` | `[]` | Additional project root directories to scan for `.claude/` beyond `~` and `$CWD`. |
 
 ### WSL2 NAT networking — the `wsl-windows` hostname
@@ -197,23 +198,10 @@ Process-compose YAMLs are **infrastructure config** — they manage services lik
 
 ### WSL2 — `~/.config/infra-mngmt/process-compose.yaml`
 
-Manages socat bridges that forward Windows service ports into WSL2, plus any WSL-native MCP servers.
+Hosts WSL-native services and one-shot operational entries (e.g. a self-deploy entry that copies a freshly-built `dist/infra-mngmt` and restarts the systemd unit). Reaching Windows-side services from inside WSL is handled by the **bridges layer** (§ Bridges below), not by socat in this YAML — declarative bridges replace the older `socat + awk /etc/resolv.conf` pattern.
 
 ```yaml
-processes:
-  socat-llama:
-    command: >
-      socat TCP-LISTEN:8080,fork,reuseaddr
-        TCP:$(awk '/nameserver/{print $2; exit}' /etc/resolv.conf):8080
-    availability:
-      restart: always
-
-  socat-whisper:
-    command: >
-      socat TCP-LISTEN:9090,fork,reuseaddr
-        TCP:$(awk '/nameserver/{print $2; exit}' /etc/resolv.conf):9090
-    availability:
-      restart: always
+processes: {}     # empty is fine; the supervisor stays up via --keep-project
 ```
 
 Start (run once; systemd handles it on subsequent boots — see §6):
@@ -222,10 +210,11 @@ Start (run once; systemd handles it on subsequent boots — see §6):
 process-compose up -f ~/.config/infra-mngmt/process-compose.yaml \
   --port 9998 \
   --address 127.0.0.1 \
+  --keep-project \
   --tui=false &
 ```
 
-`--address 127.0.0.1` restricts the API to loopback — infra-mngmt talks to it locally so this is safe and recommended. See [SECURITY.md](SECURITY.md) for adding bearer token auth.
+`--address 127.0.0.1` restricts the API to loopback — infra-mngmt talks to it locally so this is safe and recommended. `--keep-project` keeps the supervisor running when `processes:` is empty (or every entry has terminated), preserving the REST API. See [SECURITY.md](SECURITY.md) for adding bearer token auth.
 
 ### Windows — `%USERPROFILE%\.config\infra-mngmt\process-compose.yaml`
 
@@ -252,19 +241,23 @@ process-compose up -f "$env:USERPROFILE\.config\infra-mngmt\process-compose.yaml
 
 The Windows instance must bind to `0.0.0.0` (the default) so WSL2 can reach it over NAT. See [SECURITY.md](SECURITY.md) for firewall rules to restrict which source IPs can reach port 9999.
 
-### Naming convention for MCP status badges
+### Linking entities to services and bridges (`dependencies.yaml`)
 
-infra-mngmt matches MCP server entries in `settings.json` to process-compose processes by name substring (case-insensitive). Name your processes after the MCP servers they back:
+The resolver maps any Claude Code entity (MCP server, skill, hook, …) to the services and bridges it depends on via `~/.config/infra-mngmt/dependencies.yaml`. Status pills on entity cards are the worst-of state across all matched needs.
 
 ```yaml
-# MCP server name in settings.json: "llama-cpp"
-# process name below:                "llama-cpp"  ← matched; dot turns green when running
-processes:
-  llama-cpp:
-    command: …
+dependencies:
+  - entity: mcp:llama
+    scope: "*"
+    needs: [service:llama-server, bridge:llama-cpp]
+  - entity: skill:summarize-doc
+    scope: host
+    needs: [service:llama-server]
 ```
 
-An **orange dot** on an MCP card means compose is online but no process name matches — the service is either not configured in process-compose or named differently.
+`needs[i]` is `service:<process-name>[@<tier>]` or `bridge:<bridge-name>`. Tier qualifier (`@wsl`, `@windows`) is only needed when the same process name exists on multiple tiers. See `.claude/skills/infra-mngmt-config/SKILL.md` for the full schema.
+
+If no rule matches an MCP entity, the resolver falls back to the legacy substring match against process-compose process names (so existing setups keep working). An **orange dot** means compose is online but nothing matches — either add a `dependencies.yaml` rule or rename the process.
 
 ---
 
@@ -411,25 +404,39 @@ $script = "$env:USERPROFILE\.config\infra-mngmt\autostart.ps1"
 
 $action  = New-ScheduledTaskAction `
   -Execute "powershell.exe" `
-  -Argument "-NonInteractive -WindowStyle Hidden -File `"$script`""
+  -Argument "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`""
 
-$trigger = New-ScheduledTaskTrigger -AtLogOn
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 
 $settings = New-ScheduledTaskSettingsSet `
   -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
   -RestartCount 2 `
-  -RestartInterval (New-TimeSpan -Minutes 1)
+  -RestartInterval (New-TimeSpan -Minutes 1) `
+  -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 
 Register-ScheduledTask `
   -TaskName "infra-mngmt autostart" `
   -Action   $action `
   -Trigger  $trigger `
   -Settings $settings `
-  -RunLevel Highest `
   -Force
 ```
 
-This triggers at logon for the current user, runs hidden, and retries twice if WSL2 hasn't initialised yet.
+`-ExecutionPolicy Bypass` is required: the default `LocalMachine` policy is `Restricted` (or `RemoteSigned` post-domain-join), under which an unsigned `.ps1` exits 1 silently when invoked via Task Scheduler. Symptom: task fires on time but `Get-ScheduledTaskInfo` shows `LastTaskResult: 1` and nothing comes up.
+
+This triggers at logon for the current user, runs hidden, and retries twice if WSL2 hasn't initialised yet. `-RunLevel Highest` is intentionally omitted — the script binds `127.0.0.1:9919` in your own profile and needs no elevation; requesting `Highest` only adds a silent-failure mode on accounts where Task Scheduler can't auto-elevate.
+
+Verify the registration actually works:
+
+```powershell
+Start-ScheduledTask -TaskName "infra-mngmt autostart"
+Start-Sleep 2
+Get-ScheduledTaskInfo -TaskName "infra-mngmt autostart" |
+  Select TaskName, LastRunTime, LastTaskResult
+# LastTaskResult must be 0. Anything else means the script failed; re-run by
+# hand with `powershell.exe -NonInteractive -WindowStyle Hidden -ExecutionPolicy
+# Bypass -File "<path>"` to see the actual error.
+```
 
 To run it immediately without logging out:
 
@@ -487,10 +494,12 @@ See [SECURITY.md](SECURITY.md) for the full threat model and hardening recommend
 All commands run inside the devcontainer:
 
 ```bash
-go run ./cmd/infra-mngmt           # run without building
-go build -o dist/infra-mngmt ./cmd/infra-mngmt  # build binary
-go test ./...                      # run tests
-go vet ./...                       # vet
+make build                # build dist/infra-mngmt with -X main.buildEpoch stamp
+make test                 # full test suite
+make check                # fmt + vet + lint + test (pre-commit gate)
+make tidy                 # go mod tidy
 ```
 
-The devcontainer firewall blocks the Go module proxy. Use `GOPROXY=direct GONOSUMDB='*'` when adding dependencies or running `go mod tidy`.
+The devcontainer firewall allowlists the Go module proxy (`proxy.golang.org`, `sum.golang.org`, `dl.google.com`) — no `GOPROXY=direct` workaround needed.
+
+After a code change, redeploy via the `infra-mngmt-deploy` process-compose entry (one-click from the services panel, or `curl -X POST "http://172.17.0.1:7842/process/start?instance=wsl&process=infra-mngmt-deploy"` from the devcontainer). The originating session dies mid-deploy and recovers in ~1 s with the new binary; verify the new `build_epoch` to confirm. Manual fallback: `cp dist/infra-mngmt ~/.local/bin/ && systemctl --user restart infra-mngmt`.

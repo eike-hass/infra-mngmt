@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 )
 
@@ -161,5 +162,70 @@ func TestEmitLinesTrimsCRLF(t *testing.T) {
 	emitLines(strings.NewReader("a\r\nb\r\n"), send)
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Errorf("got %v, want [a b]", got)
+	}
+}
+
+func TestCPUPercent(t *testing.T) {
+	// Mirrors the docker stats formula:
+	// cpuDelta=2_000_000_000, sysDelta=8_000_000_000, cores=4
+	// → (2/8)*4*100 = 100.0%
+	s := &container.StatsResponse{}
+	s.CPUStats.CPUUsage.TotalUsage = 3_000_000_000
+	s.PreCPUStats.CPUUsage.TotalUsage = 1_000_000_000
+	s.CPUStats.SystemUsage = 16_000_000_000
+	s.PreCPUStats.SystemUsage = 8_000_000_000
+	s.CPUStats.OnlineCPUs = 4
+	if got := cpuPercent(s); got != 100.0 {
+		t.Errorf("cpuPercent = %v, want 100.0", got)
+	}
+}
+
+func TestCPUPercentZeroDeltas(t *testing.T) {
+	// Newly-started container: precpu_stats not yet populated → return 0,
+	// not NaN/Inf.
+	if got := cpuPercent(&container.StatsResponse{}); got != 0 {
+		t.Errorf("cpuPercent on zero stats = %v, want 0", got)
+	}
+}
+
+func TestCPUPercentFallsBackToPercpuLen(t *testing.T) {
+	// Older daemons populate PercpuUsage but not OnlineCPUs.
+	s := &container.StatsResponse{}
+	s.CPUStats.CPUUsage.TotalUsage = 100
+	s.PreCPUStats.CPUUsage.TotalUsage = 0
+	s.CPUStats.SystemUsage = 200
+	s.PreCPUStats.SystemUsage = 0
+	s.CPUStats.CPUUsage.PercpuUsage = []uint64{0, 0}
+	if got := cpuPercent(s); got != 100.0 {
+		t.Errorf("cpuPercent with PercpuUsage fallback = %v, want 100.0", got)
+	}
+}
+
+func TestMemUsageSubtractsCache(t *testing.T) {
+	// cgroup v1: subtract "cache".
+	s := &container.StatsResponse{}
+	s.MemoryStats.Usage = 1_000_000
+	s.MemoryStats.Stats = map[string]uint64{"cache": 200_000}
+	if got := memUsage(s); got != 800_000 {
+		t.Errorf("memUsage(cgroup v1) = %d, want 800000", got)
+	}
+}
+
+func TestMemUsageSubtractsFile(t *testing.T) {
+	// cgroup v2: subtract "file".
+	s := &container.StatsResponse{}
+	s.MemoryStats.Usage = 1_000_000
+	s.MemoryStats.Stats = map[string]uint64{"file": 300_000}
+	if got := memUsage(s); got != 700_000 {
+		t.Errorf("memUsage(cgroup v2) = %d, want 700000", got)
+	}
+}
+
+func TestMemUsageNoStats(t *testing.T) {
+	// Windows / older daemons return raw usage with no stats map.
+	s := &container.StatsResponse{}
+	s.MemoryStats.Usage = 500_000
+	if got := memUsage(s); got != 500_000 {
+		t.Errorf("memUsage(no stats) = %d, want 500000", got)
 	}
 }

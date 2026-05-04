@@ -10,11 +10,16 @@ GO    ?= go
 BIN   := dist/infra-mngmt
 PKG   := ./...
 
+# Stamp the build with a Unix epoch so the running binary can report when it
+# was compiled — used to confirm deploys actually picked up new code.
+BUILD_EPOCH := $(shell date +%s)
+LDFLAGS := -X main.buildEpoch=$(BUILD_EPOCH)
+
 .PHONY: build test test-cover fmt fmt-check vet lint check tidy clean run
 
 ## build: compile the server binary into dist/
 build:
-	$(GO) build -o $(BIN) ./cmd/infra-mngmt
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/infra-mngmt
 
 ## run: build and start the server (re-run after each code change)
 run: build

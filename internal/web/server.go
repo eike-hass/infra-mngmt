@@ -5,7 +5,10 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"html/template"
+	"log"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -14,27 +17,41 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/eike-hass/infra-mngmt/internal/compose"
+	"github.com/eike-hass/infra-mngmt/internal/containers"
+	"github.com/eike-hass/infra-mngmt/internal/deps"
 	"github.com/eike-hass/infra-mngmt/internal/docker"
+	"github.com/eike-hass/infra-mngmt/internal/graph"
 	"github.com/eike-hass/infra-mngmt/internal/source"
 )
 
 type Server struct {
-	sources     []source.Source
-	compose     []*compose.Client
-	booters     map[string]*compose.Bootstrapper // keyed by client name
-	docker      *docker.Client                   // nil if Docker unavailable
-	mux         *chi.Mux
-	token       string   // required bearer token; empty = auth disabled
-	sessions    sync.Map // session ID (string) → struct{}
-	entityCache entityCacheEntry
+	sources         []source.Source
+	compose         []*compose.Client
+	booters         map[string]*compose.Bootstrapper // keyed by client name
+	bridges         []graph.BridgeInfo               // bridges.yaml entries with observed state; mutated under bridgesMu
+	bridgesMu       sync.RWMutex
+	bridgesFile     string                 // path to bridges.yaml so /bridges/refresh can reload
+	containerDecls  []containers.Container // containers.yaml entries
+	containersFile  string                 // path to containers.yaml so /containers/refresh can reload
+	depRules        []deps.Rule            // dependencies.yaml rules
+	docker          *docker.Client         // nil if Docker unavailable
+	mux             *chi.Mux
+	token           string         // required bearer token; empty = auth disabled
+	trustedNetworks []netip.Prefix // CIDRs whose source IPs bypass auth
+	sessions        sync.Map       // session ID (string) → struct{}
+	entityCache     entityCacheEntry
 }
 
-func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *docker.Client) *Server {
+func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *docker.Client, bridges []graph.BridgeInfo, depRules []deps.Rule, containerDecls []containers.Container, trustedCIDRs []string) *Server {
 	s := &Server{
-		sources: sources,
-		booters: map[string]*compose.Bootstrapper{},
-		token:   token,
-		docker:  dc,
+		sources:         sources,
+		booters:         map[string]*compose.Bootstrapper{},
+		token:           token,
+		docker:          dc,
+		bridges:         bridges,
+		containerDecls:  containerDecls,
+		depRules:        depRules,
+		trustedNetworks: parseTrustedCIDRs(trustedCIDRs),
 	}
 	for _, e := range composeCfg {
 		s.compose = append(s.compose, compose.New(e.Name, e.Endpoint, e.Token))
@@ -77,8 +94,19 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Post("/process/start", s.handleProcessStart) // ?instance=&process=
 		r.Post("/process/stop", s.handleProcessStop)   // ?instance=&process=
 		r.Post("/process/restart", s.handleProcessRestart)
-		r.Post("/compose/start", s.handleComposeStart) // ?instance=  — bootstrap
-		r.Get("/partials/logs", s.handleProcessLogs)   // ?instance=&process=
+		r.Post("/compose/start", s.handleComposeStart)   // ?instance=  — bootstrap
+		r.Post("/compose/reload", s.handleComposeReload) // ?instance=  — re-read YAML, reconcile
+		// bridge routes
+		r.Post("/bridge/apply", s.handleBridgeApply) // ?name=
+		r.Post("/bridge/reset", s.handleBridgeReset) // ?name=
+		r.Post("/bridges/apply", s.handleBridgesApplyAll)
+		r.Post("/bridges/refresh", s.handleBridgesRefresh)
+		// container routes (declared via containers.yaml; distinct from
+		// devcontainer-discovery routes under /api/container/*)
+		r.Post("/decl-container/start", s.handleContainerStartByName) // ?name=
+		r.Post("/decl-container/stop", s.handleContainerStopByName)   // ?name=
+		r.Post("/containers/refresh", s.handleContainersRefresh)
+		r.Get("/partials/logs", s.handleProcessLogs) // ?instance=&process=
 		r.Post("/api/refresh", s.handleRefresh)
 		r.Get("/api/containers", s.handleContainers)
 		r.Post("/api/container/start", s.handleContainerStart)
@@ -94,6 +122,17 @@ type ComposeEntry struct {
 	Name, Endpoint, Token, Binary, ComposeFile, TokenFile string
 }
 
+// SetBridgesFile records the path to bridges.yaml so the /bridges/refresh
+// route can reload it on demand without a server restart.
+func (s *Server) SetBridgesFile(path string) {
+	s.bridgesFile = path
+}
+
+// SetContainersFile records the path to containers.yaml for hot-reload.
+func (s *Server) SetContainersFile(path string) {
+	s.containersFile = path
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
@@ -106,6 +145,10 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if s.requestIsTrusted(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if c, err := r.Cookie("im_session"); err == nil {
 			if _, ok := s.sessions.Load(c.Value); ok {
 				next.ServeHTTP(w, r)
@@ -115,6 +158,46 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		target := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
 		http.Redirect(w, r, target, http.StatusSeeOther)
 	})
+}
+
+// requestIsTrusted reports whether r's source IP falls in one of the
+// configured trustedNetworks. Used to bypass auth for local clients.
+func (s *Server) requestIsTrusted(r *http.Request) bool {
+	if len(s.trustedNetworks) == 0 {
+		return false
+	}
+	host := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		host = h
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	for _, p := range s.trustedNetworks {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseTrustedCIDRs converts string CIDRs to netip.Prefix, dropping invalid
+// entries with a log warning. Empty input returns nil.
+func parseTrustedCIDRs(cidrs []string) []netip.Prefix {
+	if len(cidrs) == 0 {
+		return nil
+	}
+	out := make([]netip.Prefix, 0, len(cidrs))
+	for _, c := range cidrs {
+		p, err := netip.ParsePrefix(strings.TrimSpace(c))
+		if err != nil {
+			log.Printf("warning: trusted_networks %q: %v — skipping", c, err)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {

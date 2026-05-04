@@ -16,20 +16,20 @@ func TestBootstrapArgs(t *testing.T) {
 		{
 			name:        "no port no token",
 			composeFile: "/etc/pc.yaml",
-			want:        []string{"-f", "/etc/pc.yaml", "--tui=false"},
+			want:        []string{"-f", "/etc/pc.yaml", "--tui=false", "--keep-project"},
 		},
 		{
 			name:        "with port",
 			composeFile: "/etc/pc.yaml",
 			port:        "9998",
-			want:        []string{"-f", "/etc/pc.yaml", "--tui=false", "--port", "9998"},
+			want:        []string{"-f", "/etc/pc.yaml", "--tui=false", "--keep-project", "--port", "9998"},
 		},
 		{
 			name:        "with token file",
 			composeFile: "/etc/pc.yaml",
 			port:        "9999",
 			tokenFile:   "/etc/pc.token",
-			want:        []string{"-f", "/etc/pc.yaml", "--tui=false", "--port", "9999", "--token-file", "/etc/pc.token"},
+			want:        []string{"-f", "/etc/pc.yaml", "--tui=false", "--keep-project", "--port", "9999", "--token-file", "/etc/pc.token"},
 		},
 	}
 	for _, tc := range cases {
@@ -40,6 +40,21 @@ func TestBootstrapArgs(t *testing.T) {
 					tc.composeFile, tc.port, tc.tokenFile, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestIsWindowsBinary(t *testing.T) {
+	cases := map[string]bool{
+		"/c/Windows/System32/foo.exe":      true,
+		"/mnt/c/tools/process-compose.exe": true,
+		"/usr/local/bin/process-compose":   false,
+		"/some/path/foo.EXE":               true,
+		"":                                 false,
+	}
+	for in, want := range cases {
+		if got := isWindowsBinary(in); got != want {
+			t.Errorf("isWindowsBinary(%q) = %v, want %v", in, got, want)
+		}
 	}
 }
 

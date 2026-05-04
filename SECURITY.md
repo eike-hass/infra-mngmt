@@ -21,7 +21,7 @@ All routes except `/login` and `/logout` require a session cookie issued after p
 
 Session IDs are 16 random bytes encoded as hex. Sessions are stored only in memory (lost on restart, requiring re-login).
 
-To disable authentication (local-only, trusted environment), remove `token_file` from `config.json`. **Do not do this if the service is reachable from other machines.**
+To disable authentication (local-only, trusted environment), remove `token_file` from `config.yaml`. **Do not do this if the service is reachable from other machines.** A safer middle ground is `trusted_networks:` — list CIDRs whose source IPs bypass the login flow (e.g. `127.0.0.0/8`, `172.17.0.0/16` for the Docker bridge) without disabling auth wholesale.
 
 ### Bind address
 
@@ -39,11 +39,11 @@ All HTML templates use Go's `html/template` package, which auto-escapes all valu
 
 ### CSRF
 
-Login form uses `SameSite=Strict` cookies. All state-mutating routes (`/process/start`, `/process/stop`, `/process/restart`, `/compose/start`) are `POST`-only and served via HTMX, which also sends `HX-Request: true` headers (not relied upon for security, but layered).
+Login form uses `SameSite=Strict` cookies. All state-mutating routes (`/process/start`, `/process/stop`, `/process/restart`, `/compose/start`, `/compose/reload`, `/bridge/apply`, `/bridge/reset`, `/bridges/apply`, `/bridges/refresh`, `/decl-container/start`, `/decl-container/stop`, `/containers/refresh`, `/api/container/start`, `/api/container/stop`, `/api/refresh`, `/api/entity`) are `POST`-only and served via HTMX, which also sends `HX-Request: true` headers (not relied upon for security, but layered).
 
 ### Config file permissions
 
-`config.json` and the token file are written with `0600` permissions. Ensure the directory (`~/.config/infra-mngmt/`) is not world-readable.
+`config.yaml` (or legacy `config.json`) and the token file are written with `0600` permissions. Ensure the directory (`~/.config/infra-mngmt/`) is not world-readable.
 
 ---
 
@@ -144,26 +144,19 @@ process-compose up `
   --tui=false
 ```
 
-**Point infra-mngmt at the same files** in `config.json` — the per-instance `token_file` field makes both sides read the same secret without embedding it in config:
+**Point infra-mngmt at the same files** in `config.yaml` — the per-instance `token_file` field makes both sides read the same secret without embedding it in config:
 
-```json
-{
-  "process_compose": [
-    {
-      "name": "wsl",
-      "endpoint": "http://localhost:9998",
-      "token_file": "/home/<user>/.config/infra-mngmt/process-compose.token"
-    },
-    {
-      "name": "windows",
-      "endpoint": "http://wsl-windows:9999",
-      "token_file": "/mnt/c/Users/<user>/.config/infra-mngmt/process-compose.token"
-    }
-  ]
-}
+```yaml
+process_compose:
+  - name: wsl
+    endpoint: http://localhost:9998
+    token_file: /home/<user>/.config/infra-mngmt/process-compose.token
+  - name: windows
+    endpoint: http://wsl-windows:9999
+    token_file: /c/Users/<user>/.config/infra-mngmt/process-compose.token
 ```
 
-(A literal `"token": "<value>"` is also accepted and takes precedence when set, but the file-based form keeps secrets out of the config and lets infra-mngmt's bootstrap pass `--token-file` straight through.)
+(A literal `token: "<value>"` is also accepted and takes precedence when set, but the file-based form keeps secrets out of the config and lets infra-mngmt's bootstrap pass `--token-file` straight through.)
 
 **Systemd integration (WSL2):** the unit shown above already passes `--token-file %h/...` directly. No shell wrapper or token interpolation is needed because process-compose reads the file itself.
 

@@ -30,13 +30,17 @@ Tests live next to the code they cover:
 
 | Package | Test files | Covers |
 |---|---|---|
-| `config/` | `config_test.go` | Load/Save round-trip, token gen, WSL endpoint resolution |
+| `cmd/infra-mngmt/` | `main_test.go` | Subcommand dispatch, addr/version/bridges CLI surface |
+| `config/` | `config_test.go` | YAML primary + JSON fallback Load/Save, token gen, `wsl-windows` endpoint resolution |
 | `internal/entity/` | `types_test.go` | `Scope`, `Kind` helpers |
 | `internal/source/` | `hostfs_test.go`, `dockervol_test.go` | Source implementations and path↔entity mapping |
-| `internal/docker/` | `client_test.go` | Path normalization, frame parsing, `toManaged` label/mount logic |
-| `internal/compose/` | `client_test.go` | REST client driven by `httptest.Server` |
-| `internal/graph/` | `refs_test.go` | MCP↔process matching, broken-ref detection |
-| `internal/web/` | `helpers_test.go`, `handlers_http_test.go`, `template_test.go`, `e2e_test.go` | Helper funcs, HTTP routing/auth, template smoke tests, end-to-end flows |
+| `internal/docker/` | `client_test.go` | Path normalization, frame parsing, `toManaged` label/mount logic, `cpuPercent`/`memUsage` for stats |
+| `internal/compose/` | `client_test.go` | REST client driven by `httptest.Server` (start uses POST, stop uses PATCH; reload posts to `/project/configuration`) |
+| `internal/bridge/` | `apply_test.go`, `load_test.go`, `state_test.go`, `runner_test.go`, `types_test.go` | bridges.yaml schema, PowerShell payload generation, portproxy state parsing |
+| `internal/containers/` | `load_test.go`, `types_test.go` | containers.yaml schema + load |
+| `internal/deps/` | `load_test.go`, `match_test.go`, `types_test.go` | dependencies.yaml schema, scope-pattern rule matching |
+| `internal/graph/` | `refs_test.go` | dependencies-driven resolution + legacy substring fallback, bridge/container state rollup |
+| `internal/web/` | `helpers_test.go`, `handlers_http_test.go`, `template_test.go`, `e2e_test.go`, `status_test.go` | Helper funcs, HTTP routing/auth, template smoke tests, end-to-end flows |
 
 ## Patterns
 

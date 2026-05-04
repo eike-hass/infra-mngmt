@@ -17,9 +17,15 @@ func TestDefault(t *testing.T) {
 	}
 }
 
+func TestDefaultPathIsYAML(t *testing.T) {
+	if got := filepath.Ext(DefaultPath()); got != ".yaml" {
+		t.Errorf("DefaultPath ext = %q, want .yaml", got)
+	}
+}
+
 func TestLoadMissingReturnsDefault(t *testing.T) {
 	dir := t.TempDir()
-	cfg, err := Load(filepath.Join(dir, "does-not-exist.json"))
+	cfg, err := Load(filepath.Join(dir, "does-not-exist.yaml"))
 	if err != nil {
 		t.Fatalf("Load nonexistent: unexpected error %v", err)
 	}
@@ -30,7 +36,7 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 
 func TestLoadSaveRoundtrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "config.yaml")
 
 	in := &Config{
 		Bind:      "0.0.0.0:8080",
@@ -39,7 +45,9 @@ func TestLoadSaveRoundtrip(t *testing.T) {
 			{Name: "wsl", Endpoint: "http://localhost:9998", Binary: "/usr/bin/pc", ComposeFile: "/etc/pc.yaml", Token: "abc"},
 			{Name: "windows", Endpoint: "http://wsl-windows:9999", TokenFile: "/etc/pc.token"},
 		},
-		ExtraPaths: []string{"/home/u/projA"},
+		BridgesFile:      "/etc/im/bridges.yaml",
+		DependenciesFile: "/etc/im/dependencies.yaml",
+		ExtraPaths:       []string{"/home/u/projA"},
 	}
 	if err := Save(path, in); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -60,19 +68,25 @@ func TestLoadSaveRoundtrip(t *testing.T) {
 	if out.ProcessCompose[1].TokenFile != "/etc/pc.token" {
 		t.Errorf("token_file not preserved: %q", out.ProcessCompose[1].TokenFile)
 	}
+	if out.BridgesFile != in.BridgesFile {
+		t.Errorf("BridgesFile not preserved: got %q want %q", out.BridgesFile, in.BridgesFile)
+	}
+	if out.DependenciesFile != in.DependenciesFile {
+		t.Errorf("DependenciesFile not preserved: got %q want %q", out.DependenciesFile, in.DependenciesFile)
+	}
 	if len(out.ExtraPaths) != 1 || out.ExtraPaths[0] != "/home/u/projA" {
 		t.Errorf("ExtraPaths not preserved: %+v", out.ExtraPaths)
 	}
 }
 
-func TestLoadInvalidJSON(t *testing.T) {
+func TestLoadInvalidYAML(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(path, []byte("{not valid json"), 0o600); err != nil {
+	path := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(path, []byte("\tnot: valid\n  - yaml"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(path); err == nil {
-		t.Fatal("expected error for invalid JSON, got nil")
+		t.Fatal("expected error for invalid YAML, got nil")
 	}
 }
 
@@ -96,7 +110,6 @@ func TestLoadOrCreateTokenGenerates(t *testing.T) {
 	if len(tok) != 64 { // 32 bytes hex-encoded = 64 chars
 		t.Errorf("expected 64-char token, got %d (%q)", len(tok), tok)
 	}
-	// File should exist with 0600 perms
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("token file not created: %v", err)
@@ -105,7 +118,6 @@ func TestLoadOrCreateTokenGenerates(t *testing.T) {
 		t.Errorf("token file perms = %v, want 0600", info.Mode().Perm())
 	}
 
-	// Second call should read same token
 	tok2, err := LoadOrCreateToken(path)
 	if err != nil {
 		t.Fatal(err)
@@ -146,9 +158,6 @@ func TestResolveEndpointPassThrough(t *testing.T) {
 }
 
 func TestResolveEndpointSubstitutesWSL(t *testing.T) {
-	// Can only verify substitution if we're actually in WSL2 (resolv.conf has nameserver).
-	// In CI / containers without WSL, WSLWindowsHostIP() returns "" and the input
-	// should be returned unchanged.
 	in := "http://wsl-windows:9999"
 	got := ResolveEndpoint(in)
 	if ip := WSLWindowsHostIP(); ip != "" {
@@ -165,15 +174,15 @@ func TestResolveEndpointSubstitutesWSL(t *testing.T) {
 
 func TestParseHexLEIP(t *testing.T) {
 	cases := map[string]string{
-		"0100020A": "10.2.0.1",     // example from the docstring
-		"0100A8C0": "192.168.0.1",  // 0xC0A80001
-		"0112B2AC": "172.178.18.1", // gateway-ish
+		"0100020A": "10.2.0.1",
+		"0100A8C0": "192.168.0.1",
+		"0112B2AC": "172.178.18.1",
 		"00000000": "0.0.0.0",
 		"FFFFFFFF": "255.255.255.255",
 		"":         "",
 		"DEADBEEF": "239.190.173.222",
-		"toolong0": "", // wrong length
-		"NOTHEX!!": "", // invalid chars
+		"toolong0": "",
+		"NOTHEX!!": "",
 	}
 	for in, want := range cases {
 		if got := parseHexLEIP(in); got != want {

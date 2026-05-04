@@ -156,6 +156,36 @@ func TestStatusClass(t *testing.T) {
 	}
 }
 
+func TestCanStop(t *testing.T) {
+	yes := []string{"Running", "running", "RESTARTING", "Error", "Pending", "Launching", "Launched", "Foreground", "Terminating", "Scheduled"}
+	no := []string{"Completed", "Disabled", "Skipped", "stopped", "Unknown"}
+	for _, s := range yes {
+		if !canStop(s) {
+			t.Errorf("canStop(%q) = false, want true", s)
+		}
+	}
+	for _, s := range no {
+		if canStop(s) {
+			t.Errorf("canStop(%q) = true, want false", s)
+		}
+	}
+}
+
+func TestCanStart(t *testing.T) {
+	yes := []string{"Completed", "Disabled", "Skipped", ""}
+	no := []string{"Running", "Restarting", "Error", "Pending", "Launching"}
+	for _, s := range yes {
+		if !canStart(s) {
+			t.Errorf("canStart(%q) = false, want true", s)
+		}
+	}
+	for _, s := range no {
+		if canStart(s) {
+			t.Errorf("canStart(%q) = true, want false", s)
+		}
+	}
+}
+
 func TestHealthClass(t *testing.T) {
 	cases := map[string]string{
 		"Ready":     "ready",

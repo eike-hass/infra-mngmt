@@ -130,8 +130,8 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .preview-no-content{color:var(--text3);font-style:italic;margin-top:12px}
 
 /* ── services view ── */
-#view-services{flex:1;overflow-y:auto;padding:16px 24px;display:none}
-.svc-grid{display:flex;flex-direction:column;gap:20px}
+#view-services{flex:1;overflow-y:auto;padding:16px 24px;display:none;flex-direction:column}
+.svc-grid{display:flex;flex-direction:column;gap:20px;max-width:1400px;width:100%;margin:0 auto}
 .svc-instance{background:var(--bg2);border:1px solid var(--border);border-radius:6px;overflow:hidden}
 .svc-header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3)}
 .svc-name{color:var(--white);font-weight:600;font-size:13px}
@@ -309,6 +309,16 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .ctr-event.event-warn .ctr-event-glyph{color:var(--yellow)}
 .ctr-event.event-info .ctr-event-glyph{color:var(--text2)}
 
+/* ── toast notifications ── */
+.toast-stack{position:fixed;bottom:16px;right:16px;display:flex;flex-direction:column-reverse;gap:8px;z-index:9999;max-width:480px;pointer-events:none}
+.toast{background:var(--bg2);border:1px solid var(--red);border-left:3px solid var(--red);color:var(--text);padding:10px 36px 10px 12px;border-radius:4px;font-size:11px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.4);position:relative;pointer-events:auto;opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s;word-break:break-word;max-width:100%}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.info{border-color:var(--accent);border-left-color:var(--accent)}
+.toast .toast-title{color:var(--white);font-weight:600;margin-bottom:2px;font-size:11px}
+.toast .toast-body{color:var(--text2);white-space:pre-wrap}
+.toast .toast-close{position:absolute;top:6px;right:8px;background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;line-height:1;padding:0;font-family:inherit}
+.toast .toast-close:hover{color:var(--text)}
+
 /* ── CodeMirror container ── */
 .editor-wrap{margin-top:4px;border:1px solid var(--border2);border-radius:4px;overflow:hidden;min-height:360px}
 .editor-wrap .cm-editor{min-height:360px;font-size:12px}
@@ -317,6 +327,8 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 </style>
 </head>
 <body>
+
+<div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
 <header>
   <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" width="28" height="20"><polygon points="8,2 14,2 17,7 14,12 8,12 5,7" fill="var(--accent)" opacity="0.95"/><polygon points="13,8 19,8 22,13 19,18 13,18 10,13" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.55"/></svg>infra-mngmt</span>
@@ -571,6 +583,64 @@ function renderPreviewMarkdown() {
 }
 document.body.addEventListener('htmx:afterSwap', e => {
   if (e.detail.target.id === 'preview') renderPreviewMarkdown();
+});
+
+// ── toast notifications ─────────────────────────────────────────
+// HTMX swallows 4xx/5xx by default (no swap), so without this the user sees
+// nothing on failure. Surface server-side errors as bottom-right toasts.
+function showToast({title, body, kind='error', timeout=8000}) {
+  const stack = document.getElementById('toast-stack');
+  if (!stack) return;
+  const t = document.createElement('div');
+  t.className = 'toast' + (kind === 'info' ? ' info' : '');
+  const close = document.createElement('button');
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'dismiss');
+  close.textContent = '×';
+  close.onclick = () => removeToast(t);
+  if (title) {
+    const h = document.createElement('div');
+    h.className = 'toast-title';
+    h.textContent = title;
+    t.appendChild(h);
+  }
+  if (body) {
+    const b = document.createElement('div');
+    b.className = 'toast-body';
+    b.textContent = body;
+    t.appendChild(b);
+  }
+  t.appendChild(close);
+  stack.appendChild(t);
+  // Force reflow so the transition fires.
+  // eslint-disable-next-line no-unused-expressions
+  t.offsetWidth;
+  t.classList.add('show');
+  if (timeout > 0) setTimeout(() => removeToast(t), timeout);
+}
+function removeToast(t) {
+  if (!t || !t.parentNode) return;
+  t.classList.remove('show');
+  setTimeout(() => t.remove(), 200);
+}
+
+document.body.addEventListener('htmx:responseError', e => {
+  const xhr = e.detail.xhr;
+  const verb = (e.detail.requestConfig && e.detail.requestConfig.verb || '').toUpperCase();
+  const path = (e.detail.requestConfig && e.detail.requestConfig.path) || '';
+  const text = (xhr.responseText || xhr.statusText || 'request failed').trim();
+  // Trim absurdly long bodies; full detail is in the server journal.
+  const body = text.length > 400 ? text.slice(0, 400) + '…' : text;
+  showToast({
+    title: xhr.status + ' ' + (verb ? verb + ' ' : '') + path,
+    body: body,
+  });
+});
+document.body.addEventListener('htmx:sendError', e => {
+  showToast({
+    title: 'network error',
+    body: 'could not reach the server — is infra-mngmt still running?',
+  });
 });
 
 async function startEdit(btn) {
@@ -891,10 +961,118 @@ const servicesHTML = `
      hx-get="/partials/services"
      hx-trigger="every 8s"
      hx-swap="outerHTML">
-{{if not .}}
-  <p style="color:var(--text3);font-style:italic">no process-compose instances configured — add them to config.json</p>
+{{if .Bridges}}
+<div class="svc-instance bridges">
+  <div class="svc-header">
+    <span class="svc-name">network bridges</span>
+    <span class="svc-endpoint">portproxy + firewall (persistent state)</span>
+    <button class="svc-boot-btn"
+            hx-post="/bridges/refresh"
+            hx-target="#services-inner"
+            hx-swap="outerHTML"
+            title="reload bridges.yaml from disk and re-snapshot state">⟳ refresh</button>
+    <button class="svc-boot-btn"
+            hx-post="/bridges/apply"
+            hx-target="#services-inner"
+            hx-swap="outerHTML"
+            title="re-apply every Windows-tier bridge in one UAC prompt">▶ apply all</button>
+  </div>
+  <table class="process-table">
+    <thead><tr>
+      <th>bridge</th><th>tier</th><th>state</th><th>listen</th><th>connect</th><th></th>
+    </tr></thead>
+    <tbody>
+    {{range .Bridges}}
+    <tr>
+      <td>
+        <div class="proc-name">{{.Name}}</div>
+        {{if .DisplayName}}<div class="proc-ns">{{.DisplayName}}</div>{{end}}
+      </td>
+      <td>{{.Tier}}</td>
+      <td><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td><code style="font-size:11px">{{.Listen}}</code></td>
+      <td><code style="font-size:11px">{{.Connect}}</code></td>
+      <td>
+        <div class="proc-actions">
+          <button class="proc-btn start"
+                  hx-post="/bridge/apply?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">apply</button>
+          <button class="proc-btn stop"
+                  hx-post="/bridge/reset?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  hx-confirm="Remove bridge {{.Name}}?">reset</button>
+        </div>
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+{{if .Containers}}
+<div class="svc-instance containers">
+  <div class="svc-header">
+    <span class="svc-name">containers</span>
+    <span class="svc-endpoint">docker: matched by name</span>
+    <button class="svc-boot-btn"
+            hx-post="/containers/refresh"
+            hx-target="#services-inner"
+            hx-swap="outerHTML"
+            title="reload containers.yaml from disk and re-snapshot state">⟳ refresh</button>
+  </div>
+  <table class="process-table">
+    <thead><tr>
+      <th>container</th><th>state</th><th>status</th><th>cpu</th><th>mem</th><th>id</th><th></th>
+    </tr></thead>
+    <tbody>
+    {{range .Containers}}
+    <tr>
+      <td>
+        <div class="proc-name">{{.Name}}</div>
+        {{if .Description}}<div class="proc-ns">{{.Description}}</div>{{end}}
+      </td>
+      <td><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td>{{if .Status}}<code style="font-size:11px">{{.Status}}</code>{{else}}—{{end}}</td>
+      <td>
+        {{if .HasStats}}
+        <div class="usage-bar">
+          <div class="usage-bar-track"><div class="usage-bar-fill {{cpuBarClass .CPU}}" style="width:{{cpuBarWidth .CPU}}%"></div></div>
+          <span class="usage-val">{{printf "%.1f" .CPU}}%</span>
+        </div>
+        {{else}}—{{end}}
+      </td>
+      <td>
+        {{if .HasStats}}
+        <div class="usage-bar">
+          <div class="usage-bar-track"><div class="usage-bar-fill mem" style="width:{{memBarWidth .Mem}}%"></div></div>
+          <span class="usage-val">{{formatMem .Mem}}</span>
+        </div>
+        {{else}}—{{end}}
+      </td>
+      <td>{{if .ID}}<code style="font-size:11px">{{.ID}}</code>{{else}}—{{end}}</td>
+      <td>
+        <div class="proc-actions">
+          {{if eq .StateClass "running"}}
+          <button class="proc-btn stop"
+                  hx-post="/decl-container/stop?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">stop</button>
+          {{else if .ID}}
+          <button class="proc-btn start"
+                  hx-post="/decl-container/start?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">start</button>
+          {{end}}
+        </div>
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+{{if not .Instances}}
+  <p style="color:var(--text3);font-style:italic">no process-compose instances configured — add them to config.yaml</p>
 {{else}}
-{{range $iv := .}}
+{{range $iv := .Instances}}
 <div class="svc-instance">
   <div class="svc-header">
     <span class="online-dot {{if $iv.Online}}online{{else}}offline{{end}}"></span>
@@ -902,6 +1080,11 @@ const servicesHTML = `
     <span class="svc-endpoint">{{$iv.Endpoint}}</span>
     {{if $iv.Online}}
     <span class="svc-running-count">{{runningCount $iv.Processes}}/{{len $iv.Processes}} running</span>
+    <button class="svc-boot-btn"
+            hx-post="/compose/reload?instance={{$iv.Name}}"
+            hx-target="#services-inner"
+            hx-swap="outerHTML"
+            title="re-read compose YAML and reconcile (drops removed entries on recent process-compose versions)">↻ reload</button>
     {{else if $iv.CanBoot}}
     <button class="svc-boot-btn"
             hx-post="/compose/start?instance={{$iv.Name}}"
@@ -943,17 +1126,21 @@ const servicesHTML = `
       <td>{{if .SystemTime}}{{.SystemTime}}{{else}}—{{end}}</td>
       <td>
         <div class="proc-actions">
-          {{if .IsRunning}}
+          {{if canStop .Status}}
           <button class="proc-btn stop"
                   hx-post="/process/stop?instance={{$iv.Name}}&process={{.Name}}"
-                  hx-target="#services-inner" hx-swap="outerHTML">stop</button>
-          <button class="proc-btn restart"
-                  hx-post="/process/restart?instance={{$iv.Name}}&process={{.Name}}"
-                  hx-target="#services-inner" hx-swap="outerHTML">restart</button>
-          {{else}}
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  title="halt the process and stop the restart loop">stop</button>
+          {{end}}
+          {{if canStart .Status}}
           <button class="proc-btn start"
                   hx-post="/process/start?instance={{$iv.Name}}&process={{.Name}}"
                   hx-target="#services-inner" hx-swap="outerHTML">start</button>
+          {{end}}
+          {{if .IsRunning}}
+          <button class="proc-btn restart"
+                  hx-post="/process/restart?instance={{$iv.Name}}&process={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">restart</button>
           {{end}}
           <button class="proc-btn logs"
                   hx-get="/partials/logs?instance={{$iv.Name}}&process={{.Name}}"

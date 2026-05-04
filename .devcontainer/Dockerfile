@@ -28,8 +28,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   wget \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Go (wget is now guaranteed available from the apt block above)
-ARG GO_VERSION=1.24.2
+# Install Go (wget is now guaranteed available from the apt block above).
+# Keep this >= the `go` directive in go.mod, otherwise Go's auto-toolchain
+# mechanism tries to fetch the matching version at every `go build`/`go test`,
+# which fails inside this container: init-firewall.sh resolves and pins
+# Google CDN IPs at startup, but proxy.golang.org's IPs rotate, so the
+# subsequent toolchain download dies with "no route to host". Bumping this
+# in lockstep with go.mod avoids the runtime fetch entirely.
+ARG GO_VERSION=1.25.0
 RUN ARCH="$(dpkg --print-architecture)" && \
   case "$ARCH" in \
     amd64) GOARCH=amd64 ;; \

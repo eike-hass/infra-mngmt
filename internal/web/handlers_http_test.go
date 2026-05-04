@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -69,7 +70,7 @@ func (m *mockSource) addEntity(kind entity.Kind, name string, content []byte) en
 }
 
 func newServerWithSource(srcs ...source.Source) *Server {
-	s := New(srcs, nil, "", nil)
+	s := New(srcs, nil, "", nil, nil, nil, nil, nil)
 	return s
 }
 
@@ -229,7 +230,7 @@ func TestHandleRefreshInvalidatesCache(t *testing.T) {
 // ─── /api/containers (no docker) ────────────────────────────────────────────
 
 func TestHandleContainersNoDocker(t *testing.T) {
-	srv := New(nil, nil, "", nil) // dc = nil
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil) // dc = nil
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/containers", nil))
 	if rr.Code != 200 {
@@ -241,7 +242,7 @@ func TestHandleContainersNoDocker(t *testing.T) {
 }
 
 func TestHandleContainerStartNoDocker(t *testing.T) {
-	srv := New(nil, nil, "", nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/start?id=abc", nil))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -263,7 +264,7 @@ func TestAuthMiddlewareNoTokenAllowsAll(t *testing.T) {
 
 func TestAuthMiddlewareRedirectsWhenNoSession(t *testing.T) {
 	m := newMockSource("host:/x", entity.GlobalScope())
-	srv := New([]source.Source{m}, nil, "secret", nil)
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/sources", nil))
 	if rr.Code != http.StatusSeeOther {
@@ -274,8 +275,177 @@ func TestAuthMiddlewareRedirectsWhenNoSession(t *testing.T) {
 	}
 }
 
+// requestFrom builds a request whose RemoteAddr is the given source IP.
+// httptest.NewRequest defaults to "192.0.2.1:1234" so we override.
+func requestFrom(method, target, sourceIP string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	req.RemoteAddr = sourceIP + ":4242"
+	return req
+}
+
+func TestAuthBypassedFromTrustedNetwork(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil,
+		[]string{"127.0.0.0/8", "172.17.0.0/16"})
+
+	// Loopback bypasses auth without a session cookie.
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, requestFrom(http.MethodGet, "/api/sources", "127.0.0.1"))
+	if rr.Code != 200 {
+		t.Errorf("loopback should bypass auth, got %d", rr.Code)
+	}
+
+	// Docker bridge IP bypasses auth without a session cookie.
+	rr = httptest.NewRecorder()
+	srv.ServeHTTP(rr, requestFrom(http.MethodGet, "/api/sources", "172.17.0.5"))
+	if rr.Code != 200 {
+		t.Errorf("docker-bridge IP should bypass auth, got %d", rr.Code)
+	}
+}
+
+func TestAuthRequiredFromUntrustedNetwork(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil,
+		[]string{"127.0.0.0/8"})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, requestFrom(http.MethodGet, "/api/sources", "10.0.0.5"))
+	if rr.Code != http.StatusSeeOther {
+		t.Errorf("untrusted IP should be redirected to login, got %d", rr.Code)
+	}
+}
+
+func TestAuthBypassRequiresExplicitConfig(t *testing.T) {
+	// Empty trustedNetworks: even loopback needs a session cookie.
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, requestFrom(http.MethodGet, "/api/sources", "127.0.0.1"))
+	if rr.Code != http.StatusSeeOther {
+		t.Errorf("loopback without config should still be redirected, got %d", rr.Code)
+	}
+}
+
+func TestAuthInvalidCIDRsAreSkipped(t *testing.T) {
+	// Garbage entries should be ignored, not crash. Valid one still works.
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil,
+		[]string{"not-a-cidr", "127.0.0.0/8", "still-not-a-cidr"})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, requestFrom(http.MethodGet, "/api/sources", "127.0.0.1"))
+	if rr.Code != 200 {
+		t.Errorf("valid CIDR should still bypass after parse errors; got %d", rr.Code)
+	}
+}
+
+// Smoke-test the /compose/reload route. We can't easily plumb a fake
+// compose.Client into Server (the field is unexported and slice-typed) so
+// this just verifies the route exists and rejects bad input — the
+// happy-path integration is exercised by client_test's Reload tests.
+func TestComposeReloadInvalidInstance(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/compose/reload?instance=has%20space", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid instance name, got %d", rr.Code)
+	}
+}
+
+func TestComposeReloadUnknownInstance(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/compose/reload?instance=ghost", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown instance, got %d", rr.Code)
+	}
+}
+
+func TestBridgesRefreshReloadsYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/bridges.yaml"
+	initial := `bridges:
+  - name: alpha
+    tier: windows
+    type: portproxy+firewall
+    listen: { addr: "${wsl-host-ip}", port: 1000 }
+    connect: { addr: 127.0.0.1, port: 1000, family: auto }
+    firewall: { remote: 10.0.0.0/8, display_name: Alpha }
+`
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv.SetBridgesFile(path)
+
+	// First refresh picks up alpha.
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/bridges/refresh", nil))
+	if rr.Code != 200 {
+		t.Fatalf("first refresh: got %d, body: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "alpha") {
+		t.Errorf("rendered services partial should mention alpha:\n%s", rr.Body.String())
+	}
+
+	// Edit YAML to add beta, refresh again.
+	updated := initial + `  - name: beta
+    tier: windows
+    type: portproxy+firewall
+    listen: { addr: "${wsl-host-ip}", port: 2000 }
+    connect: { addr: 127.0.0.1, port: 2000, family: auto }
+    firewall: { remote: 10.0.0.0/8, display_name: Beta }
+`
+	if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rr = httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/bridges/refresh", nil))
+	if rr.Code != 200 {
+		t.Fatalf("second refresh: got %d, body: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "alpha") || !strings.Contains(body, "beta") {
+		t.Errorf("after edit, refresh should pick up the new entry:\n%s", body)
+	}
+}
+
+func TestBridgesRefreshSurfacesYAMLErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/bridges.yaml"
+	if err := os.WriteFile(path, []byte("bridges:\n  - name: bad\n    tier: nonsense\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv.SetBridgesFile(path)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/bridges/refresh", nil))
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 for bad YAML, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "tier") {
+		t.Errorf("error response should mention the failing field; got %s", rr.Body.String())
+	}
+}
+
+func TestAuthBypassIPv6Loopback(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil,
+		[]string{"::1/128"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sources", nil)
+	req.RemoteAddr = "[::1]:4242"
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Errorf("ipv6 loopback should bypass, got %d", rr.Code)
+	}
+}
+
 func TestLoginPostInvalidToken(t *testing.T) {
-	srv := New(nil, nil, "secret", nil)
+	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	body := strings.NewReader("token=wrong&next=/")
 	req := httptest.NewRequest(http.MethodPost, "/login", body)
@@ -287,7 +457,7 @@ func TestLoginPostInvalidToken(t *testing.T) {
 }
 
 func TestLoginPostValidTokenSetsSession(t *testing.T) {
-	srv := New(nil, nil, "secret", nil)
+	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil)
 	// Login
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/login",
@@ -314,7 +484,7 @@ func TestLoginPostValidTokenSetsSession(t *testing.T) {
 }
 
 func TestLogoutClearsSession(t *testing.T) {
-	srv := New(nil, nil, "secret", nil)
+	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil)
 	// Authenticate
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/login",
@@ -351,7 +521,7 @@ func TestAllEntitiesParallelAndCached(t *testing.T) {
 	b := newMockSource("host:/b", entity.GlobalScope())
 	a.addEntity(entity.KindCommand, "ar", nil)
 	b.addEntity(entity.KindAgent, "br", nil)
-	srv := New([]source.Source{a, b}, nil, "", nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
 
 	ents, err := srv.allEntities(context.Background())
 	if err != nil {
@@ -385,7 +555,7 @@ func TestAllEntitiesIgnoresFailingSource(t *testing.T) {
 	good := newMockSource("host:/g", entity.GlobalScope())
 	good.addEntity(entity.KindCommand, "run", nil)
 	bad := &errSource{mockSource: *newMockSource("host:/b", entity.GlobalScope())}
-	srv := New([]source.Source{good, bad}, nil, "", nil)
+	srv := New([]source.Source{good, bad}, nil, "", nil, nil, nil, nil, nil)
 	ents, err := srv.allEntities(context.Background())
 	if err != nil {
 		t.Fatalf("allEntities should not propagate per-source errors: %v", err)
