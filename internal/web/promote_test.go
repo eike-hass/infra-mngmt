@@ -1,8 +1,11 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -409,6 +412,246 @@ func TestPromoteRenameToExistingNameAtSameSourceRejected(t *testing.T) {
 		"/api/promote?from="+e.ID+"&to="+a.ID(), nil))
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+// ── mirror=true ──────────────────────────────────────────────────────────────
+//
+// mirror=true asks the destination to Clear the entity at (kind, name) before
+// WriteFiles re-populates it. Mostly relevant for skills, where overwrite-
+// only would leave stale files at the destination.
+
+// buildSkillForTest creates <claude>/skills/<name>/ with the given files.
+func buildSkillForTest(t *testing.T, claude, name string, files map[string]string) {
+	t.Helper()
+	for rel, body := range files {
+		p := filepath.Join(claude, "skills", name, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// findSkillEntity walks the source's entities and returns the skill with the
+// given name. Fails the test if it isn't found.
+func findSkillEntity(t *testing.T, s source.Source, name string) entity.Entity {
+	t.Helper()
+	ents, err := s.Entities(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		if e.Kind == entity.KindSkill && e.Name == name {
+			return e
+		}
+	}
+	t.Fatalf("skill %q not found at source %s", name, s.ID())
+	return entity.Entity{}
+}
+
+func TestPromoteSkillWithMirrorRemovesStaleFiles(t *testing.T) {
+	aRoot := t.TempDir()
+	bRoot := t.TempDir()
+	aClaude := filepath.Join(aRoot, ".claude")
+	bClaude := filepath.Join(bRoot, ".claude")
+
+	buildSkillForTest(t, aClaude, "x", map[string]string{
+		"SKILL.md":        "new",
+		"scripts/keep.sh": "k",
+	})
+	buildSkillForTest(t, bClaude, "x", map[string]string{
+		"SKILL.md":         "old",
+		"scripts/stale.sh": "s",
+		"templates/old.md": "ot",
+	})
+
+	a := source.NewHostFS(aClaude, entity.GlobalScope())
+	b := source.NewHostFS(bClaude, entity.GlobalScope())
+	skill := findSkillEntity(t, a, "x")
+
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
+		"/api/promote?from="+skill.ID+"&to="+b.ID()+"&overwrite=true&mirror=true", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// Stale files at B must be gone.
+	for _, p := range []string{"scripts/stale.sh", "templates/old.md"} {
+		if _, err := os.Stat(filepath.Join(bClaude, "skills", "x", filepath.FromSlash(p))); !os.IsNotExist(err) {
+			t.Errorf("mirror=true should have removed %s; got err = %v", p, err)
+		}
+	}
+	// New files must be present with new content.
+	if data, err := os.ReadFile(filepath.Join(bClaude, "skills", "x", "SKILL.md")); err != nil || string(data) != "new" {
+		t.Errorf("SKILL.md after mirror copy: data=%q err=%v, want 'new'", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(bClaude, "skills", "x", "scripts", "keep.sh")); err != nil || string(data) != "k" {
+		t.Errorf("scripts/keep.sh after mirror copy: data=%q err=%v, want 'k'", data, err)
+	}
+}
+
+func TestPromoteSkillWithoutMirrorPreservesStaleFiles(t *testing.T) {
+	// Default (no mirror) is additive — the existing stale.sh stays put.
+	// Documents the current behavior so the opt-in mirror flag is an
+	// explicit choice.
+	aRoot := t.TempDir()
+	bRoot := t.TempDir()
+	aClaude := filepath.Join(aRoot, ".claude")
+	bClaude := filepath.Join(bRoot, ".claude")
+
+	buildSkillForTest(t, aClaude, "x", map[string]string{"SKILL.md": "new"})
+	buildSkillForTest(t, bClaude, "x", map[string]string{
+		"SKILL.md":         "old",
+		"scripts/stale.sh": "s",
+	})
+
+	a := source.NewHostFS(aClaude, entity.GlobalScope())
+	b := source.NewHostFS(bClaude, entity.GlobalScope())
+	skill := findSkillEntity(t, a, "x")
+
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
+		"/api/promote?from="+skill.ID+"&to="+b.ID()+"&overwrite=true", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(bClaude, "skills", "x", "scripts", "stale.sh")); err != nil {
+		t.Errorf("without mirror, stale.sh should be preserved; got err = %v", err)
+	}
+}
+
+func TestPromoteMirrorOnReadOnlyTargetReturnsForbidden(t *testing.T) {
+	a := newMockSource("host:/a", entity.GlobalScope())
+	b := newMockSource("vol:b", entity.GlobalScope())
+	b.readOnly = true
+	e := a.addEntity(entity.KindCommand, "x", []byte("body"))
+	b.addEntity(entity.KindCommand, "x", []byte("orig")) // pre-existing so overwrite path runs
+
+	srv := twoSourceServer(a, b)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
+		"/api/promote?from="+e.ID+"&to="+b.ID()+"&overwrite=true&mirror=true", nil))
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body = %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "read-only") {
+		t.Errorf("body should mention read-only:\n%s", rr.Body.String())
+	}
+	// Read-only target's data must be untouched.
+	if got := string(b.files["command:x"]); got != "orig" {
+		t.Errorf("read-only target was modified: got %q, want %q", got, "orig")
+	}
+}
+
+func TestPromoteMirrorPreservesUnrelatedSkillsAtTarget(t *testing.T) {
+	// Critical: mirror=true on skill X must not delete skill Y at the target.
+	aRoot := t.TempDir()
+	bRoot := t.TempDir()
+	aClaude := filepath.Join(aRoot, ".claude")
+	bClaude := filepath.Join(bRoot, ".claude")
+
+	buildSkillForTest(t, aClaude, "x", map[string]string{"SKILL.md": "new"})
+	buildSkillForTest(t, bClaude, "x", map[string]string{"SKILL.md": "old", "scripts/s.sh": "s"})
+	buildSkillForTest(t, bClaude, "y", map[string]string{"SKILL.md": "y", "scripts/y.sh": "y"})
+
+	a := source.NewHostFS(aClaude, entity.GlobalScope())
+	b := source.NewHostFS(bClaude, entity.GlobalScope())
+	skill := findSkillEntity(t, a, "x")
+
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
+		"/api/promote?from="+skill.ID+"&to="+b.ID()+"&overwrite=true&mirror=true", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	// Skill Y must be intact.
+	for _, p := range []string{"SKILL.md", "scripts/y.sh"} {
+		if _, err := os.Stat(filepath.Join(bClaude, "skills", "y", filepath.FromSlash(p))); err != nil {
+			t.Errorf("unrelated skill 'y' damaged: %s missing: %v", p, err)
+		}
+	}
+}
+
+func TestPromoteMirrorOnNewSkillNoTargetIsOK(t *testing.T) {
+	// mirror=true when the destination doesn't have the entity should still
+	// succeed — Clear returns ErrNotFound which the handler tolerates.
+	aRoot := t.TempDir()
+	bRoot := t.TempDir()
+	aClaude := filepath.Join(aRoot, ".claude")
+	bClaude := filepath.Join(bRoot, ".claude")
+
+	buildSkillForTest(t, aClaude, "x", map[string]string{"SKILL.md": "fresh"})
+	if err := os.MkdirAll(filepath.Join(bClaude, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := source.NewHostFS(aClaude, entity.GlobalScope())
+	b := source.NewHostFS(bClaude, entity.GlobalScope())
+	skill := findSkillEntity(t, a, "x")
+
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
+		"/api/promote?from="+skill.ID+"&to="+b.ID()+"&mirror=true", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	if data, err := os.ReadFile(filepath.Join(bClaude, "skills", "x", "SKILL.md")); err != nil || string(data) != "fresh" {
+		t.Errorf("expected SKILL.md='fresh', got data=%q err=%v", data, err)
+	}
+}
+
+func TestPromotePickerHasMirrorCheckbox(t *testing.T) {
+	a := newMockSource("host:/a", entity.GlobalScope())
+	b := newMockSource("host:/b", entity.GlobalScope())
+	e := a.addEntity(entity.KindCommand, "x", []byte("body"))
+
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/promote-picker?id="+e.ID, nil))
+	body := rr.Body.String()
+
+	if !strings.Contains(body, `id="promote-mirror-input"`) {
+		t.Errorf("picker missing mirror checkbox:\n%s", body)
+	}
+	if !strings.Contains(body, `name="mirror"`) {
+		t.Errorf("mirror checkbox missing name= attribute")
+	}
+	// The picker buttons must include the mirror input via hx-include.
+	if !strings.Contains(body, "promote-mirror-input") || !strings.Contains(body, `hx-include="#promote-rename-input, #promote-mirror-input"`) {
+		t.Errorf("picker buttons should hx-include the mirror checkbox; body:\n%s", body)
+	}
+}
+
+func TestPromoteMirrorPreservedThroughConflictConfirm(t *testing.T) {
+	// When mirror=true causes a conflict (entity exists at target without
+	// overwrite), the confirm-overwrite button must round-trip mirror=true so
+	// the user's intent is preserved across the confirmation step.
+	a := newMockSource("host:/a", entity.GlobalScope())
+	b := newMockSource("host:/b", entity.GlobalScope())
+	e := a.addEntity(entity.KindCommand, "x", []byte("from-a"))
+	b.addEntity(entity.KindCommand, "x", []byte("orig-b"))
+
+	srv := twoSourceServer(a, b)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/promote?from="+e.ID+"&to="+b.ID(),
+		strings.NewReader("mirror=true"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body = %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "mirror=true") {
+		t.Errorf("conflict-confirm should preserve mirror=true; body:\n%s", rr.Body.String())
 	}
 }
 

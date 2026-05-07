@@ -238,41 +238,53 @@ func runBridgesReset(f *bridge.File, names []string) {
 	runBridgesStatus(f)
 }
 
+// collectBuildInfo gathers the binary's identity from the Go toolchain's
+// embedded VCS settings plus the buildEpoch ldflag. Shared by `version` (CLI
+// output) and the /api/version HTTP endpoint so both report the same data.
+func collectBuildInfo() web.BuildInfo {
+	out := web.BuildInfo{BuildEpoch: buildEpoch}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return out
+	}
+	out.GoVersion = info.GoVersion
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			out.Commit = s.Value
+		case "vcs.modified":
+			out.Dirty = s.Value == "true"
+		case "vcs.time":
+			out.VCSTime = s.Value
+		}
+	}
+	if len(out.Commit) > 8 {
+		out.Commit = out.Commit[:8]
+	}
+	return out
+}
+
 // runVersion prints build info embedded by the Go toolchain. Useful to
 // confirm a deployment has the expected commit; "dirty=true" means the
 // binary was built from a working tree with uncommitted changes.
 func runVersion() {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
+	b := collectBuildInfo()
+	if b.Commit == "" && b.GoVersion == "" {
 		fmt.Println("infra-mngmt (build info unavailable)")
 		return
 	}
-	rev := "(unknown)"
-	dirty := false
-	when := ""
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			rev = s.Value
-		case "vcs.modified":
-			dirty = s.Value == "true"
-		case "vcs.time":
-			when = s.Value
-		}
+	commit := b.Commit
+	if commit == "" {
+		commit = "(unknown)"
 	}
-	short := rev
-	if len(short) > 8 {
-		short = short[:8]
+	if b.Dirty {
+		commit += "-dirty"
 	}
-	suffix := ""
-	if dirty {
-		suffix = "-dirty"
-	}
-	stamp := buildEpoch
+	stamp := b.BuildEpoch
 	if stamp == "" {
 		stamp = "(unstamped)"
 	}
-	fmt.Printf("infra-mngmt commit=%s%s vcs_time=%s build_epoch=%s go=%s\n", short, suffix, when, stamp, info.GoVersion)
+	fmt.Printf("infra-mngmt commit=%s vcs_time=%s build_epoch=%s go=%s\n", commit, b.VCSTime, stamp, b.GoVersion)
 }
 
 // loadResolverInputs reads bridges.yaml, dependencies.yaml, and
@@ -439,6 +451,7 @@ func runServer(args []string) {
 	srv := web.New(sources, compose, token, dc, bridgesInfo, depRules, containerDecls, cfg.TrustedNetworks)
 	srv.SetBridgesFile(bridgesPath)
 	srv.SetContainersFile(containersPath)
+	srv.SetBuildInfo(collectBuildInfo())
 	if buildEpoch != "" {
 		log.Printf("infra-mngmt build_epoch=%s", buildEpoch)
 	} else {

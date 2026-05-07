@@ -38,6 +38,11 @@ body{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);colo
 /* ── header ── */
 header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--border);flex-shrink:0;min-height:40px}
 .logo{color:var(--white);font-size:13px;font-weight:600;letter-spacing:.04em;flex-shrink:0;margin-right:4px;display:flex;align-items:center;gap:6px}
+.build-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid var(--border);border-radius:3px;font-family:ui-monospace,monospace;font-size:10px;color:var(--text3);background:var(--bg2);flex-shrink:0;cursor:help}
+.build-chip:hover{color:var(--text2);border-color:var(--border2)}
+.build-chip-commit{color:var(--text2);letter-spacing:.04em}
+.build-chip-when{color:var(--text3)}
+.build-chip-when:empty::before{content:"local"}
 .logo span{color:var(--text3);font-weight:normal}
 .view-tabs{display:flex;gap:2px;flex-shrink:0}
 .view-tab{background:transparent;border:1px solid transparent;color:var(--text2);padding:3px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;transition:all .12s}
@@ -274,6 +279,14 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .promote-rename-label{color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.06em}
 .promote-rename-input{background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:4px;font-family:inherit;font-size:12px;outline:none;transition:border-color .1s}
 .promote-rename-input:focus{border-color:var(--accent)}
+.promote-mirror-row{display:flex;flex-direction:column;gap:4px}
+.promote-mirror{display:flex;align-items:center;gap:8px;color:var(--text);font-size:11px;cursor:pointer;user-select:none}
+.promote-mirror input{accent-color:var(--accent);cursor:pointer}
+.promote-mirror-info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border:1px solid var(--border2);border-radius:50%;color:var(--text3);font-size:9px;font-weight:600;line-height:1;cursor:help;background:var(--bg3);transition:all .1s}
+.promote-mirror-info:hover,.promote-mirror-info:focus{color:var(--text);border-color:var(--text2);outline:none}
+.promote-mirror-info::after{content:attr(data-tooltip);position:absolute;left:0;top:calc(100% + 6px);background:var(--bg);border:1px solid var(--border2);color:var(--text2);padding:8px 10px;border-radius:4px;font-size:10px;font-weight:400;line-height:1.5;width:280px;white-space:normal;display:none;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,.5);text-align:left;cursor:default;letter-spacing:0;text-transform:none}
+.promote-mirror-info:hover::after,.promote-mirror-info:focus::after{display:block}
+.promote-mirror-hint{color:var(--text3);font-size:10px;padding-left:24px;line-height:1.4}
 .promote-empty{color:var(--text3);font-size:11px;padding:14px;text-align:center;background:var(--bg3);border:1px dashed var(--border2);border-radius:4px}
 .promote-group{display:flex;flex-direction:column;gap:6px}
 .promote-group-title{display:flex;align-items:center;gap:8px;color:var(--text2);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin:0}
@@ -417,6 +430,33 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
   </div>
 
   <input id="search" type="text" placeholder="⌘K search" autocomplete="off">
+
+  {{with .Build}}
+  {{if or .BuildEpoch .Commit}}
+  <span class="build-chip" id="build-chip"
+        title="commit {{if .Commit}}{{.Commit}}{{else}}(unknown){{end}}{{if .Dirty}}-dirty{{end}}{{if .VCSTime}} · committed {{.VCSTime}}{{end}}{{if .BuildEpoch}} · built {{.BuildEpoch}}{{end}}{{if .GoVersion}} · {{.GoVersion}}{{end}}"
+        data-epoch="{{.BuildEpoch}}">
+    <span class="build-chip-commit">{{if .Commit}}{{.Commit}}{{else}}local{{end}}{{if .Dirty}}+{{end}}</span>
+    <span class="build-chip-when" id="build-chip-when">{{.BuildEpoch}}</span>
+  </span>
+  <script>
+  (function(){
+    const el = document.getElementById('build-chip-when');
+    const epoch = parseInt(document.getElementById('build-chip').dataset.epoch, 10);
+    if (!epoch) { return; }
+    const fmt = () => {
+      const diff = Date.now()/1000 - epoch;
+      if (diff < 60) return Math.floor(diff)+'s ago';
+      if (diff < 3600) return Math.floor(diff/60)+'m ago';
+      if (diff < 86400) return Math.floor(diff/3600)+'h ago';
+      return Math.floor(diff/86400)+'d ago';
+    };
+    el.textContent = fmt();
+    setInterval(() => { el.textContent = fmt(); }, 30000);
+  })();
+  </script>
+  {{end}}
+  {{end}}
 </header>
 
 <div class="kind-bar" id="kind-bar">
@@ -1329,6 +1369,19 @@ const promotePickerHTML = `
                value="{{.SuggestedName}}"
                class="promote-rename-input" autocomplete="off" spellcheck="false">
       </label>
+      <div class="promote-mirror-row">
+        <label class="promote-mirror">
+          <input id="promote-mirror-input" type="checkbox" name="mirror" value="true">
+          <span>mirror copy</span>
+          <span class="promote-mirror-info" tabindex="0"
+                aria-label="What is mirror copy?"
+                data-tooltip="Without mirror, copying overwrites overlapping files but leaves anything else at the target untouched. With mirror, the target entity is wiped first so it ends up as an exact reflection of the source — useful when a skill's source no longer contains a script or template that the target still has. Single-file kinds (command, agent, memory, claude_md, mcp_server, hook) are already fully replaced on copy, so the flag is a no-op for them.">i</span>
+        </label>
+        <div class="promote-mirror-hint">
+          replace the target with an exact copy of the source — files at the target that aren't in the source get deleted.
+          only meaningful for skills.
+        </div>
+      </div>
 
       {{if not .AnyTargets}}
       <div class="promote-empty">no other sources are configured — promote needs at least one second source as a target</div>
@@ -1346,7 +1399,7 @@ const promotePickerHTML = `
             <button class="promote-target {{if .ReadOnly}}readonly{{end}} {{if .Exists}}exists{{end}}"
                     {{if .ReadOnly}}disabled aria-disabled="true" title="this source is read-only"{{else}}
                     hx-post="/api/promote?from={{$e.ID}}&to={{.SourceID}}"
-                    hx-include="#promote-rename-input"
+                    hx-include="#promote-rename-input, #promote-mirror-input"
                     hx-target="#promote-slot"
                     hx-swap="innerHTML"{{end}}>
               <div class="promote-target-main">
@@ -1419,7 +1472,7 @@ const promoteResultHTML = `
       <p class="promote-result-prompt">overwrite the existing entity at the target?</p>
       <div class="promote-result-actions">
         <button class="promote-confirm"
-                hx-post="/api/promote?from={{.From}}&to={{.To}}&overwrite=true&name={{.NewName}}"
+                hx-post="/api/promote?from={{.From}}&to={{.To}}&overwrite=true&name={{.NewName}}{{if .Mirror}}&mirror=true{{end}}"
                 hx-target="#promote-slot"
                 hx-swap="innerHTML">overwrite</button>
         <button class="promote-cancel"

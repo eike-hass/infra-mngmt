@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -735,6 +736,341 @@ func TestHostFSWriteFilesMCPRejectsInvalidJSON(t *testing.T) {
 		[]EntityFile{{Data: []byte(`not json`)}})
 	if err == nil {
 		t.Fatal("expected error for invalid JSON block")
+	}
+}
+
+// ── Clear ────────────────────────────────────────────────────────────────────
+//
+// Clear deletes user data — these tests are biased toward catching
+// over-deletion. Each test verifies that:
+//  1. The targeted entity is removed
+//  2. Sibling entities at the same source are NOT removed
+//  3. Anything outside the source's directory tree is NOT removed
+// The first half of the suite hammers on path-traversal / empty-name edge
+// cases that could otherwise cause RemoveAll to wipe more than intended.
+
+func TestValidateEntityNameRejectsDangerous(t *testing.T) {
+	for _, name := range []string{
+		"",                 // empty → would resolve to skills/ root
+		".",                // would resolve to "skills/."
+		"..",               // parent dir
+		"../etc",           // traversal
+		"../../etc/passwd", // multi-level traversal
+		"foo/bar",          // unintended subpath
+		"foo\\bar",         // backslash separator (Windows-style)
+		"\x00null",         // NUL byte
+		"foo\x00.md",       // embedded NUL
+	} {
+		if err := validateEntityName(name); err == nil {
+			t.Errorf("validateEntityName(%q) = nil, want error", name)
+		}
+	}
+}
+
+func TestValidateEntityNameAcceptsValid(t *testing.T) {
+	for _, name := range []string{
+		"deploy",
+		"deploy-prod",
+		"deploy.v2",
+		"CLAUDE.md",
+		"CLAUDE.local.md",
+		".bashrc",     // leading dot is allowed (some entity names have it)
+		"foo..bar",    // double-dot in middle is allowed (not a traversal token)
+		"with space",  // spaces allowed
+		"héllo-world", // unicode allowed
+	} {
+		if err := validateEntityName(name); err != nil {
+			t.Errorf("validateEntityName(%q) = %v, want nil", name, err)
+		}
+	}
+}
+
+func TestHostFSClearRejectsEmptyName(t *testing.T) {
+	// CRITICAL: empty name on skills resolves to "<base>/skills/" and
+	// RemoveAll would wipe every skill in the source. The validator must
+	// catch this before the path resolution.
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope)
+	src := NewHostFS(dir, scope)
+
+	for _, kind := range []entity.Kind{entity.KindSkill, entity.KindCommand,
+		entity.KindAgent, entity.KindMemory, entity.KindMCPServer,
+		entity.KindHook, entity.KindClaudeMD,
+	} {
+		if err := src.Clear(context.Background(), kind, ""); err == nil {
+			t.Errorf("Clear(%s, \"\") returned nil; should reject empty name", kind)
+		}
+	}
+	// Skills tree must still be intact after the rejected calls.
+	if _, err := os.Stat(filepath.Join(dir, "skills", "example", "SKILL.md")); err != nil {
+		t.Fatalf("skills tree damaged by empty-name Clear: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "commands", "run.md")); err != nil {
+		t.Fatalf("commands tree damaged by empty-name Clear: %v", err)
+	}
+}
+
+func TestHostFSClearRejectsTraversal(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope)
+	src := NewHostFS(dir, scope)
+
+	// Sentinel files outside .claude/ that must NOT be touched even if a
+	// traversal escape slips past the validator.
+	parentDir := filepath.Dir(dir)
+	sentinel := filepath.Join(parentDir, "do-not-delete")
+	if err := os.WriteFile(sentinel, []byte("sentinel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{
+		"..", ".", "../etc", "../../etc/passwd",
+		"foo/bar", "foo\\bar", "\x00null",
+	} {
+		for _, kind := range []entity.Kind{entity.KindSkill, entity.KindCommand} {
+			if err := src.Clear(context.Background(), kind, name); err == nil {
+				t.Errorf("Clear(%s, %q) returned nil; should reject", kind, name)
+			}
+		}
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("sentinel removed by Clear traversal: %v", err)
+	}
+	// Skills tree should still be intact.
+	if _, err := os.Stat(filepath.Join(dir, "skills", "example", "SKILL.md")); err != nil {
+		t.Fatalf("skills tree damaged by traversal Clear: %v", err)
+	}
+}
+
+func TestHostFSClearSkillRemovesOnlyTargetDir(t *testing.T) {
+	scope := entity.GlobalScope()
+	root := t.TempDir()
+	claude := filepath.Join(root, ".claude")
+	for _, sk := range []string{"keep", "kill"} {
+		skDir := filepath.Join(claude, "skills", sk, "scripts")
+		if err := os.MkdirAll(skDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(claude, "skills", sk, "SKILL.md"),
+			[]byte(sk), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skDir, "a.sh"),
+			[]byte("a"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src := NewHostFS(claude, scope)
+
+	if err := src.Clear(context.Background(), entity.KindSkill, "kill"); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(claude, "skills", "kill")); !os.IsNotExist(err) {
+		t.Errorf("target skill 'kill' not removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(claude, "skills", "keep", "SKILL.md")); err != nil {
+		t.Errorf("sibling skill 'keep' was removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(claude, "skills", "keep", "scripts", "a.sh")); err != nil {
+		t.Errorf("sibling skill nested file was removed: %v", err)
+	}
+}
+
+func TestHostFSClearSkillNotFound(t *testing.T) {
+	scope := entity.GlobalScope()
+	root := t.TempDir()
+	claude := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(filepath.Join(claude, "skills", "exists"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claude, "skills", "exists", "SKILL.md"),
+		[]byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, scope)
+
+	err := src.Clear(context.Background(), entity.KindSkill, "ghost")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+	// 'exists' skill should still be there.
+	if _, err := os.Stat(filepath.Join(claude, "skills", "exists", "SKILL.md")); err != nil {
+		t.Errorf("Clear of missing skill must not affect siblings: %v", err)
+	}
+}
+
+func TestHostFSClearFileBackedKinds(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope)
+	src := NewHostFS(dir, scope)
+
+	if err := src.Clear(context.Background(), entity.KindCommand, "run"); err != nil {
+		t.Fatalf("Clear command: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "commands", "run.md")); !os.IsNotExist(err) {
+		t.Errorf("commands/run.md should be removed")
+	}
+	// Other file-backed kinds untouched.
+	for _, p := range []string{"agents/helper.md", "memory/note.md", "skills/example/SKILL.md"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("collateral damage: %s removed: %v", p, err)
+		}
+	}
+}
+
+func TestHostFSClearFileNotFound(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope)
+	src := NewHostFS(dir, scope)
+	err := src.Clear(context.Background(), entity.KindCommand, "nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestHostFSClearMCPPreservesSiblings(t *testing.T) {
+	// settings.json from buildClaudeDir has local-py + remote MCPs and on-save hook.
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope)
+	src := NewHostFS(dir, scope)
+
+	if err := src.Clear(context.Background(), entity.KindMCPServer, "local-py"); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	// Cleared MCP gone.
+	if _, err := src.Read(context.Background(), entity.KindMCPServer, "local-py"); err == nil {
+		t.Errorf("cleared MCP still readable")
+	}
+	// Sibling MCP preserved.
+	if _, err := src.Read(context.Background(), entity.KindMCPServer, "remote"); err != nil {
+		t.Errorf("sibling MCP 'remote' was removed: %v", err)
+	}
+	// Hook section preserved.
+	if _, err := src.Read(context.Background(), entity.KindHook, "on-save"); err != nil {
+		t.Errorf("hook 'on-save' was removed by MCP clear: %v", err)
+	}
+}
+
+func TestHostFSClearMCPMissingSettingsFile(t *testing.T) {
+	scope := entity.GlobalScope()
+	root := t.TempDir()
+	claude := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, scope)
+	err := src.Clear(context.Background(), entity.KindMCPServer, "x")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound for missing settings.json, got %v", err)
+	}
+	// Settings file must not have been created by the failed Clear.
+	if _, err := os.Stat(filepath.Join(claude, "settings.json")); !os.IsNotExist(err) {
+		t.Errorf("Clear must not create settings.json on missing-file path")
+	}
+}
+
+func TestHostFSClearMCPMissingKey(t *testing.T) {
+	scope := entity.GlobalScope()
+	root := t.TempDir()
+	claude := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := `{"mcpServers":{"x":{"command":"y"}}}`
+	if err := os.WriteFile(filepath.Join(claude, "settings.json"),
+		[]byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, scope)
+	if err := src.Clear(context.Background(), entity.KindMCPServer, "ghost"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound for missing key, got %v", err)
+	}
+	// Settings file untouched (existing key still readable).
+	if _, err := src.Read(context.Background(), entity.KindMCPServer, "x"); err != nil {
+		t.Errorf("missing-key Clear must not touch existing entries: %v", err)
+	}
+}
+
+func TestHostFSClearMCPRemovesEmptySection(t *testing.T) {
+	// After clearing the only MCP, the mcpServers key should be removed
+	// from settings.json (no empty `"mcpServers": {}` left behind).
+	scope := entity.GlobalScope()
+	root := t.TempDir()
+	claude := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claude, "settings.json"),
+		[]byte(`{"mcpServers":{"only":{"command":"y"}},"hooks":{"h1":{"cmd":"x"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, scope)
+	if err := src.Clear(context.Background(), entity.KindMCPServer, "only"); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(claude, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "mcpServers") {
+		t.Errorf("empty mcpServers section should be removed; got: %s", data)
+	}
+	if !strings.Contains(string(data), "hooks") {
+		t.Errorf("unrelated hooks section was removed: %s", data)
+	}
+}
+
+func TestHostFSClearMCPCorruptSettingsLeavesFileIntact(t *testing.T) {
+	// Critical: a parse error must not silently truncate or rewrite the
+	// settings file. Surface the error and leave the file alone.
+	scope := entity.GlobalScope()
+	root := t.TempDir()
+	claude := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := `{not json`
+	if err := os.WriteFile(filepath.Join(claude, "settings.json"),
+		[]byte(corrupt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, scope)
+	if err := src.Clear(context.Background(), entity.KindMCPServer, "x"); err == nil {
+		t.Fatal("expected error on corrupt settings.json, got nil")
+	}
+	data, err := os.ReadFile(filepath.Join(claude, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != corrupt {
+		t.Errorf("corrupt settings.json was modified: %q", data)
+	}
+}
+
+func TestHostFSClearClaudeMDLocalPreservesMain(t *testing.T) {
+	scope := entity.ProjectScope("/proj")
+	root := t.TempDir()
+	claude := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.local.md"), []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, scope)
+
+	if err := src.Clear(context.Background(), entity.KindClaudeMD, "CLAUDE.local.md"); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "CLAUDE.local.md")); !os.IsNotExist(err) {
+		t.Errorf("CLAUDE.local.md should be removed")
+	}
+	data, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if err != nil || string(data) != "main" {
+		t.Errorf("main CLAUDE.md was clobbered: data=%q err=%v", data, err)
 	}
 }
 

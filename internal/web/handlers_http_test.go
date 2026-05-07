@@ -94,6 +94,36 @@ func (m *mockSource) WriteFiles(ctx context.Context, kind entity.Kind, name stri
 	return nil
 }
 
+func (m *mockSource) Clear(_ context.Context, kind entity.Kind, name string) error {
+	if m.readOnly {
+		return source.ErrReadOnly
+	}
+	key := string(kind) + ":" + name
+	if _, ok := m.files[key]; !ok {
+		// Also tolerate a missing entity (already cleared).
+		found := false
+		for _, e := range m.entities {
+			if e.Kind == kind && e.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return source.ErrNotFound
+		}
+	}
+	delete(m.files, key)
+	out := m.entities[:0]
+	for _, e := range m.entities {
+		if e.Kind == kind && e.Name == name {
+			continue
+		}
+		out = append(out, e)
+	}
+	m.entities = out
+	return nil
+}
+
 func (m *mockSource) addEntity(kind entity.Kind, name string, content []byte) entity.Entity {
 	e := entity.Entity{
 		ID:     m.id + ":" + string(kind) + ":" + name,
@@ -112,6 +142,52 @@ func (m *mockSource) addEntity(kind entity.Kind, name string, content []byte) en
 func newServerWithSource(srcs ...source.Source) *Server {
 	s := New(srcs, nil, "", nil, nil, nil, nil, nil)
 	return s
+}
+
+// ─── /api/version ───────────────────────────────────────────────────────────
+
+func TestHandleVersionReturnsBuildInfo(t *testing.T) {
+	srv := newServerWithSource(newMockSource("host:/x", entity.GlobalScope()))
+	srv.SetBuildInfo(BuildInfo{
+		BuildEpoch: "1700000000",
+		Commit:     "abc12345",
+		Dirty:      false,
+		VCSTime:    "2023-11-14T22:13:20Z",
+		GoVersion:  "go1.23.0",
+	})
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/version", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	var got BuildInfo
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v; body = %s", err, rr.Body.String())
+	}
+	if got.BuildEpoch != "1700000000" {
+		t.Errorf("BuildEpoch = %q", got.BuildEpoch)
+	}
+	if got.Commit != "abc12345" {
+		t.Errorf("Commit = %q", got.Commit)
+	}
+	if got.GoVersion != "go1.23.0" {
+		t.Errorf("GoVersion = %q", got.GoVersion)
+	}
+}
+
+func TestHandleVersionUnauthenticatedAllowed(t *testing.T) {
+	// /api/version is a public route — must succeed even when a token is set
+	// AND the request comes from an untrusted source (no session cookie, no
+	// allowlisted CIDR). Deploy scripts should be able to hit it without auth.
+	srv := New(nil, nil, "secret-token", nil, nil, nil, nil, nil)
+	srv.SetBuildInfo(BuildInfo{BuildEpoch: "1700000000", Commit: "deadbeef"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+	req.RemoteAddr = "8.8.8.8:1234" // not in trusted networks
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 even unauthenticated", rr.Code)
+	}
 }
 
 // ─── /api/sources ───────────────────────────────────────────────────────────

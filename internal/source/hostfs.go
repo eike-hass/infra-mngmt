@@ -733,6 +733,129 @@ func (s *HostFSSource) spliceSettings(section, name string, block []byte) error 
 	return os.WriteFile(path, out, 0o644)
 }
 
+// validateEntityName rejects names that could escape the source's directory
+// or otherwise resolve to something the caller didn't mean. Empty names are
+// the most dangerous: filepath.Join(baseDir, "skills", "") = "<baseDir>/skills/",
+// and a follow-up RemoveAll would wipe the whole skills tree.
+func validateEntityName(name string) error {
+	if name == "" {
+		return fmt.Errorf("entity name is empty")
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("entity name %q is not a valid filename", name)
+	}
+	if strings.ContainsAny(name, "/\\\x00") {
+		return fmt.Errorf("entity name %q contains illegal path characters", name)
+	}
+	return nil
+}
+
+// Clear removes the entity from disk. For skills it removes the entire skill
+// directory (the only multi-file kind, where stale files matter). For file-
+// backed kinds it removes the single file. For settings-backed kinds it
+// deletes the named key from settings.json (siblings preserved).
+//
+// Returns ErrNotFound when the entity doesn't exist. promote's mirror=true
+// mode tolerates that — it's the natural state after a clear.
+//
+// The name is validated up-front: empty, "." / "..", and names containing
+// path separators are rejected outright. Without that check, an empty name
+// on a skill would resolve to "<baseDir>/skills/" and RemoveAll would wipe
+// every skill in this source.
+func (s *HostFSSource) Clear(_ context.Context, kind entity.Kind, name string) error {
+	if err := validateEntityName(name); err != nil {
+		return err
+	}
+	switch kind {
+	case entity.KindSkill:
+		root := filepath.Join(s.baseDir, "skills", name)
+		// Defense-in-depth: confirm the resolved path stays inside <baseDir>/skills/
+		// before recursive delete. If the validator above ever lets something
+		// through, this catches the escape.
+		skillsDir := filepath.Join(s.baseDir, "skills")
+		if !strings.HasPrefix(root+string(filepath.Separator), skillsDir+string(filepath.Separator)) {
+			return fmt.Errorf("skill path %q escapes skills root", root)
+		}
+		if _, err := os.Stat(root); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("%w: skill %s", ErrNotFound, name)
+			}
+			return err
+		}
+		return os.RemoveAll(root)
+	case entity.KindMCPServer:
+		return s.clearSettingsKey("mcpServers", name)
+	case entity.KindHook:
+		return s.clearSettingsKey("hooks", name)
+	case entity.KindClaudeMD:
+		path := s.claudeMDPathForName(name)
+		if path == "" {
+			return fmt.Errorf("%w: CLAUDE.md entity %q", ErrNotFound, name)
+		}
+		if err := os.Remove(path); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("%w: %s", ErrNotFound, path)
+			}
+			return err
+		}
+		return nil
+	}
+	path, err := s.filePath(kind, name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", ErrNotFound, path)
+		}
+		return err
+	}
+	return nil
+}
+
+// clearSettingsKey removes section[name] from <baseDir>/settings.json.
+// Returns ErrNotFound if the file or key doesn't exist.
+func (s *HostFSSource) clearSettingsKey(section, name string) error {
+	path := filepath.Join(s.baseDir, "settings.json")
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s/%s", ErrNotFound, section, name)
+		}
+		return err
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(existing, &doc); err != nil {
+		return fmt.Errorf("parse settings.json: %w", err)
+	}
+	rawSection, ok := doc[section]
+	if !ok {
+		return fmt.Errorf("%w: %s/%s", ErrNotFound, section, name)
+	}
+	var sectionMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawSection, &sectionMap); err != nil {
+		return fmt.Errorf("parse settings.json[%s]: %w", section, err)
+	}
+	if _, has := sectionMap[name]; !has {
+		return fmt.Errorf("%w: %s/%s", ErrNotFound, section, name)
+	}
+	delete(sectionMap, name)
+	if len(sectionMap) == 0 {
+		delete(doc, section)
+	} else {
+		updated, err := json.Marshal(sectionMap)
+		if err != nil {
+			return err
+		}
+		doc[section] = updated
+	}
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o644)
+}
+
 // claudeMDPathForName returns the on-disk path for a CLAUDE.md entity name
 // at this scope. Empty result means there's no canonical location for this
 // (scope, name) pair.

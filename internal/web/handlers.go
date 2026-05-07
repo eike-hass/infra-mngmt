@@ -28,6 +28,17 @@ func validProcessName(s string) bool { return validName.MatchString(s) }
 
 // --- JSON API ---
 
+// handleVersion exposes the running binary's build identity. Public so that
+// deploy scripts can confirm a restart picked up the new code without auth:
+//
+//	curl -s http://<host>:<port>/api/version | jq .build_epoch
+//
+// Compare with: `<binary> version` to verify they match.
+func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, s.buildInfo)
+}
+
 func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 	type sourceInfo struct {
 		ID    string `json:"id"`
@@ -112,6 +123,7 @@ type pageData struct {
 	Sources     []projectTab
 	Entities    []entity.Entity
 	MCPStatuses map[string]*MCPStatus
+	Build       BuildInfo // for the version chip in the header
 }
 
 // kindGroup is one section of entities sharing a kind, used for the grouped
@@ -308,7 +320,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	tmpl := template.Must(template.New("index").Funcs(tmplFuncs).Parse(entityListInnerHTML))
 	tmpl = template.Must(tmpl.Parse(indexHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses})
+	_ = tmpl.Execute(w, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses, Build: s.buildInfo})
 }
 
 // handleEntityListPartial returns just the entity-list inner HTML for in-place

@@ -52,6 +52,7 @@ type promoteResult struct {
 	From     string
 	To       string
 	NewName  string // echoed into the conflict-confirm form so rename survives
+	Mirror   bool   // round-trip mirror=true so the conflict-confirm preserves it
 }
 
 // handlePromotePicker returns the modal HTML fragment listing every other
@@ -158,6 +159,11 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 	overwrite := r.URL.Query().Get("overwrite") == "true"
+	// mirror=true asks the destination to clear any existing entity at
+	// (kind, targetName) before WriteFiles runs. Matters mostly for skills,
+	// where overwrite-only would leave stale files (removed scripts, renamed
+	// templates) at the destination.
+	mirror := r.FormValue("mirror") == "true"
 	// FormValue checks both URL query and form body — picker uses hx-include
 	// (form body); the conflict-confirm button rides the rename in the URL.
 	newName := strings.TrimSpace(r.FormValue("name"))
@@ -231,6 +237,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 				From:     from,
 				To:       to,
 				NewName:  targetName,
+				Mirror:   mirror,
 			})
 			return
 		}
@@ -240,6 +247,23 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "read source: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if mirror {
+		// ErrNotFound is fine — the destination is already clear of stale
+		// state. ErrReadOnly bubbles up as a friendly result. Anything else
+		// is a server error since the user already chose to overwrite.
+		if cerr := dstSource.Clear(r.Context(), ent.Kind, targetName); cerr != nil &&
+			!errors.Is(cerr, source.ErrNotFound) {
+			if errors.Is(cerr, source.ErrReadOnly) {
+				s.writePromoteResult(w, http.StatusForbidden, promoteResult{
+					ReadOnly: true,
+					Message:  fmt.Sprintf("%s is read-only — cannot mirror-clear before writing", dstLabel),
+				})
+				return
+			}
+			http.Error(w, "clear target: "+cerr.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	if err := dstSource.WriteFiles(r.Context(), ent.Kind, targetName, files); err != nil {
 		if errors.Is(err, source.ErrReadOnly) {

@@ -268,6 +268,12 @@ func (s *DockerVolumeSource) WriteFiles(_ context.Context, _ entity.Kind, _ stri
 	return fmt.Errorf("%w: writing to Docker volumes is not yet implemented", ErrReadOnly)
 }
 
+// Clear is read-only for the same reason as WriteFiles. promote's mirror=true
+// path surfaces this error to the user.
+func (s *DockerVolumeSource) Clear(_ context.Context, _ entity.Kind, _ string) error {
+	return fmt.Errorf("%w: clearing entries in Docker volumes is not yet implemented", ErrReadOnly)
+}
+
 // settingsEntities reads settings.json from the volume and returns MCP + hook entities.
 func (s *DockerVolumeSource) settingsEntities(ctx context.Context) ([]entity.Entity, error) {
 	data, err := s.docker.ReadVolume(ctx, s.volumeName, "settings.json")

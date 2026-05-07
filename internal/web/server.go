@@ -24,6 +24,18 @@ import (
 	"github.com/eike-hass/infra-mngmt/internal/source"
 )
 
+// BuildInfo describes the binary's identity. Set once at startup via
+// SetBuildInfo and surfaced through /api/version so external clients (deploy
+// scripts, smoke tests, the UI footer) can confirm the running binary matches
+// what was built.
+type BuildInfo struct {
+	BuildEpoch string `json:"build_epoch"` // unix seconds; empty when unstamped
+	Commit     string `json:"commit"`      // short git SHA from runtime/debug.ReadBuildInfo
+	Dirty      bool   `json:"dirty"`       // working tree had uncommitted changes at build
+	VCSTime    string `json:"vcs_time"`    // commit timestamp from VCS
+	GoVersion  string `json:"go_version"`
+}
+
 type Server struct {
 	sources         []source.Source
 	compose         []*compose.Client
@@ -40,6 +52,7 @@ type Server struct {
 	trustedNetworks []netip.Prefix // CIDRs whose source IPs bypass auth
 	sessions        sync.Map       // session ID (string) → struct{}
 	entityCache     entityCacheEntry
+	buildInfo       BuildInfo // populated via SetBuildInfo; surfaced at /api/version
 }
 
 func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *docker.Client, bridges []graph.BridgeInfo, depRules []deps.Rule, containerDecls []containers.Container, trustedCIDRs []string) *Server {
@@ -75,6 +88,11 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 	s.mux.Post("/login", s.handleLoginPost)
 	s.mux.Post("/logout", s.handleLogout)
 	s.mux.Get("/favicon.svg", handleFavicon)
+	// /api/version is public so deploy scripts and external smoke tests can
+	// confirm a restart picked up the new binary without holding a session
+	// cookie. The exposed fields (epoch, short SHA, dirty bit, go version)
+	// are not security-sensitive — they're already in the server log line.
+	s.mux.Get("/api/version", s.handleVersion)
 
 	// All other routes require authentication (when a token is configured).
 	s.mux.Group(func(r chi.Router) {
@@ -134,6 +152,13 @@ func (s *Server) SetBridgesFile(path string) {
 // SetContainersFile records the path to containers.yaml for hot-reload.
 func (s *Server) SetContainersFile(path string) {
 	s.containersFile = path
+}
+
+// SetBuildInfo wires the binary's build identity into the server. Surfaced
+// at /api/version (no auth) and rendered as a footer so deploys can be
+// verified by hitting either endpoint without parsing systemd logs.
+func (s *Server) SetBuildInfo(b BuildInfo) {
+	s.buildInfo = b
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

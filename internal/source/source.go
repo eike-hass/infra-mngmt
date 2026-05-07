@@ -44,6 +44,13 @@ type Source interface {
 	ReadFiles(ctx context.Context, kind entity.Kind, name string) ([]EntityFile, error)
 	// WriteFiles writes a file set into this source. ErrReadOnly if not writable.
 	WriteFiles(ctx context.Context, kind entity.Kind, name string, files []EntityFile) error
+	// Clear removes the entity from this source. Returns ErrNotFound if it
+	// doesn't exist (callers may ignore that), ErrReadOnly if writes aren't
+	// supported. Used by promote's mirror=true mode to wipe stale files at the
+	// destination before WriteFiles re-populates the entity (relevant for
+	// multi-file kinds like skill where overwriting overlapping files would
+	// otherwise leave removed files behind).
+	Clear(ctx context.Context, kind entity.Kind, name string) error
 	// Has reports whether (kind, name) currently exists in this source.
 	Has(ctx context.Context, kind entity.Kind, name string) (bool, error)
 	// Writable reports whether WriteFiles can succeed for this source. Static
