@@ -1,8 +1,10 @@
 package docker
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -227,5 +229,71 @@ func TestMemUsageNoStats(t *testing.T) {
 	s.MemoryStats.Usage = 500_000
 	if got := memUsage(s); got != 500_000 {
 		t.Errorf("memUsage(no stats) = %d, want 500000", got)
+	}
+}
+
+// ── volume cache ──────────────────────────────────────────────────────────────
+
+func newCacheTestClient() *Client {
+	return &Client{
+		volumeCache:          map[string]volumeCacheEntry{},
+		volumeContainerCache: map[string]volumeContainerCacheEntry{},
+	}
+}
+
+func TestVolumeCacheHitWithinTTL(t *testing.T) {
+	c := newCacheTestClient()
+	c.volumeCachePut("read:vol-a:settings.json", []byte("payload"), nil)
+
+	got, ok := c.volumeCacheGet("read:vol-a:settings.json")
+	if !ok {
+		t.Fatal("expected cache hit")
+	}
+	if string(got) != "payload" {
+		t.Errorf("data = %q, want %q", got, "payload")
+	}
+}
+
+func TestVolumeCacheMissAfterTTL(t *testing.T) {
+	c := newCacheTestClient()
+	c.volumeCache["read:vol-a:settings.json"] = volumeCacheEntry{
+		data:    []byte("stale"),
+		fetchAt: time.Now().Add(-2 * volumeCacheTTL),
+	}
+	if _, ok := c.volumeCacheGet("read:vol-a:settings.json"); ok {
+		t.Fatal("expected miss for entry past TTL")
+	}
+}
+
+func TestVolumeCacheDoesNotServeErrors(t *testing.T) {
+	// Errors are stored (so callers see the most recent failure within the
+	// dedupe window) but should not be served as a positive cache hit.
+	c := newCacheTestClient()
+	c.volumeCachePut("read:vol-a:missing", nil, fmt.Errorf("boom"))
+	if _, ok := c.volumeCacheGet("read:vol-a:missing"); ok {
+		t.Errorf("error entry should not be served as a hit")
+	}
+}
+
+func TestInvalidateVolumeCacheTargetsOneVolume(t *testing.T) {
+	c := newCacheTestClient()
+	c.volumeCachePut("list:vol-a", []byte("la"), nil)
+	c.volumeCachePut("read:vol-a:foo", []byte("af"), nil)
+	c.volumeCachePut("list:vol-b", []byte("lb"), nil)
+	c.volumeCachePut("read:vol-b:bar", []byte("bb"), nil)
+
+	c.InvalidateVolumeCache("vol-a")
+
+	if _, ok := c.volumeCacheGet("list:vol-a"); ok {
+		t.Errorf("vol-a list entry should be evicted")
+	}
+	if _, ok := c.volumeCacheGet("read:vol-a:foo"); ok {
+		t.Errorf("vol-a read entry should be evicted")
+	}
+	if _, ok := c.volumeCacheGet("list:vol-b"); !ok {
+		t.Errorf("vol-b list entry should be preserved")
+	}
+	if _, ok := c.volumeCacheGet("read:vol-b:bar"); !ok {
+		t.Errorf("vol-b read entry should be preserved")
 	}
 }

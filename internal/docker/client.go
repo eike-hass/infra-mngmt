@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -18,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"golang.org/x/sync/singleflight"
 )
 
 // Client wraps the official Docker SDK with infra-mngmt-specific helpers
@@ -26,7 +28,44 @@ import (
 // swap implementations later if needed.
 type Client struct {
 	cli *client.Client
+	// volumeIO dedupes concurrent ReadVolume/ListVolume calls so two HTTP
+	// requests for the same (volume, path) only spawn one sidecar. Without
+	// this, an HTMX-driven page render with two volume-backed entities can
+	// double the container churn for nothing.
+	volumeIO singleflight.Group
+
+	// volumeCacheMu guards volumeCache, a per-(volumeName, path) bytes cache.
+	// TTL bounds staleness (Source.Watch is nil so external mutations are
+	// only seen on next refresh). volumeContainerCache stores the result of
+	// ContainerForVolume with a shorter TTL since container lifecycles can
+	// change faster than file contents.
+	volumeCacheMu sync.RWMutex
+	volumeCache   map[string]volumeCacheEntry
+
+	volumeContainerMu    sync.RWMutex
+	volumeContainerCache map[string]volumeContainerCacheEntry
 }
+
+type volumeCacheEntry struct {
+	data    []byte
+	err     error
+	fetchAt time.Time
+}
+
+type volumeContainerCacheEntry struct {
+	id, mountPath string
+	fetchAt       time.Time
+}
+
+const (
+	// volumeCacheTTL bounds staleness on cached file/list bytes from Docker
+	// volumes. 30s matches the entity-list cache TTL above.
+	volumeCacheTTL = 30 * time.Second
+	// volumeContainerCacheTTL bounds staleness of the running-container
+	// lookup. Containers come/go faster than file contents, so TTL is
+	// shorter; 5s is a balance between freshness and not pestering Docker.
+	volumeContainerCacheTTL = 5 * time.Second
+)
 
 func New() (*Client, error) {
 	cli, err := client.NewClientWithOpts(
@@ -36,7 +75,11 @@ func New() (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
-	return &Client{cli: cli}, nil
+	return &Client{
+		cli:                  cli,
+		volumeCache:          map[string]volumeCacheEntry{},
+		volumeContainerCache: map[string]volumeContainerCacheEntry{},
+	}, nil
 }
 
 func (c *Client) Close() error {
@@ -462,13 +505,186 @@ func emitLines(r io.Reader, send func(string) bool) {
 // ── volume access via sidecar containers ─────────────────────────────────────
 
 // ReadVolume reads a single file from a named Docker volume.
+//
+// Order: cache → singleflight → (exec into running container if available,
+// else throwaway sidecar).
+//
+// Cache hits return immediately (typical sub-ms). On miss, singleflight
+// dedupes concurrent fetches for the same (volume, path) so only one Docker
+// call runs per key. The exec fast-path is ~10× faster than container
+// creation; sidecar is the universal fallback.
 func (c *Client) ReadVolume(ctx context.Context, volumeName, path string) ([]byte, error) {
-	return c.runSidecar(ctx, volumeName, true, []string{"cat", "/data/" + path})
+	key := "read:" + volumeName + ":" + path
+	if data, ok := c.volumeCacheGet(key); ok {
+		return data, nil
+	}
+	v, err, _ := c.volumeIO.Do(key, func() (any, error) {
+		// Re-check cache inside the singleflight crit — another caller may
+		// have populated it while we waited for the lock.
+		if data, ok := c.volumeCacheGet(key); ok {
+			return data, nil
+		}
+		data, err := c.readVolumeExecOrSidecar(ctx, volumeName, path)
+		c.volumeCachePut(key, data, err)
+		return data, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]byte), nil
 }
 
 // ListVolume returns `find /data -type f` output for the volume contents.
+// Same caching + singleflight + exec/sidecar layering as ReadVolume.
 func (c *Client) ListVolume(ctx context.Context, volumeName string) ([]byte, error) {
+	key := "list:" + volumeName
+	if data, ok := c.volumeCacheGet(key); ok {
+		return data, nil
+	}
+	v, err, _ := c.volumeIO.Do(key, func() (any, error) {
+		if data, ok := c.volumeCacheGet(key); ok {
+			return data, nil
+		}
+		data, err := c.listVolumeExecOrSidecar(ctx, volumeName)
+		c.volumeCachePut(key, data, err)
+		return data, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]byte), nil
+}
+
+// readVolumeExecOrSidecar tries `docker exec` into a running container that
+// has this volume mounted. Falls back to spawning a throwaway sidecar when
+// no such container exists or when the exec fails for any reason.
+func (c *Client) readVolumeExecOrSidecar(ctx context.Context, volumeName, path string) ([]byte, error) {
+	if ctrID, mountPath, ok := c.containerForVolume(ctx, volumeName); ok {
+		full := mountPath
+		if !strings.HasSuffix(full, "/") {
+			full += "/"
+		}
+		full += path
+		if data, err := c.execStdout(ctx, ctrID, []string{"cat", full}); err == nil {
+			return data, nil
+		}
+	}
+	return c.runSidecar(ctx, volumeName, true, []string{"cat", "/data/" + path})
+}
+
+func (c *Client) listVolumeExecOrSidecar(ctx context.Context, volumeName string) ([]byte, error) {
+	if ctrID, mountPath, ok := c.containerForVolume(ctx, volumeName); ok {
+		if data, err := c.execStdout(ctx, ctrID, []string{"find", mountPath, "-type", "f"}); err == nil {
+			// Sidecar emits paths under /data; rewrite the running-container
+			// paths to that namespace so callers (e.g. parseFileList) don't
+			// need to care which mechanism was used.
+			out := bytes.ReplaceAll(data, []byte(mountPath), []byte("/data"))
+			return out, nil
+		}
+	}
 	return c.runSidecar(ctx, volumeName, true, []string{"find", "/data", "-type", "f"})
+}
+
+// containerForVolume returns (containerID, mountPath, true) for a running
+// container that has volumeName mounted; (false) otherwise. Cached briefly
+// (volumeContainerCacheTTL) since the lookup is more volatile than file
+// contents.
+func (c *Client) containerForVolume(ctx context.Context, volumeName string) (string, string, bool) {
+	c.volumeContainerMu.RLock()
+	if e, ok := c.volumeContainerCache[volumeName]; ok && time.Since(e.fetchAt) < volumeContainerCacheTTL {
+		c.volumeContainerMu.RUnlock()
+		if e.id == "" {
+			return "", "", false
+		}
+		return e.id, e.mountPath, true
+	}
+	c.volumeContainerMu.RUnlock()
+
+	id, mp, ok := c.lookupContainerForVolume(ctx, volumeName)
+	c.volumeContainerMu.Lock()
+	c.volumeContainerCache[volumeName] = volumeContainerCacheEntry{id: id, mountPath: mp, fetchAt: time.Now()}
+	c.volumeContainerMu.Unlock()
+	return id, mp, ok
+}
+
+func (c *Client) lookupContainerForVolume(ctx context.Context, volumeName string) (string, string, bool) {
+	ctrs, err := c.cli.ContainerList(ctx, container.ListOptions{
+		Filters: filters.NewArgs(filters.KeyValuePair{Key: "volume", Value: volumeName}),
+	})
+	if err != nil {
+		return "", "", false
+	}
+	for _, ctr := range ctrs {
+		if ctr.State != "running" {
+			continue
+		}
+		for _, m := range ctr.Mounts {
+			if m.Type == mount.TypeVolume && m.Name == volumeName {
+				return ctr.ID, m.Destination, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// execStdout runs cmd inside a running container via the Docker exec API and
+// returns the captured stdout. Returns an error when the exec exits non-zero.
+func (c *Client) execStdout(ctx context.Context, containerID string, cmd []string) ([]byte, error) {
+	created, err := c.cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		AttachStdout: true, AttachStderr: true, Cmd: cmd,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("exec create: %w", err)
+	}
+	resp, err := c.cli.ContainerExecAttach(ctx, created.ID, container.ExecStartOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("exec attach: %w", err)
+	}
+	defer resp.Close()
+
+	var stdout bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdout, io.Discard, resp.Reader); err != nil {
+		return nil, fmt.Errorf("demux exec output: %w", err)
+	}
+	insp, err := c.cli.ContainerExecInspect(ctx, created.ID)
+	if err == nil && insp.ExitCode != 0 {
+		return nil, fmt.Errorf("exec exited %d", insp.ExitCode)
+	}
+	return stdout.Bytes(), nil
+}
+
+func (c *Client) volumeCacheGet(key string) ([]byte, bool) {
+	c.volumeCacheMu.RLock()
+	defer c.volumeCacheMu.RUnlock()
+	e, ok := c.volumeCache[key]
+	if !ok || time.Since(e.fetchAt) >= volumeCacheTTL {
+		return nil, false
+	}
+	if e.err != nil {
+		return nil, false
+	}
+	return e.data, true
+}
+
+func (c *Client) volumeCachePut(key string, data []byte, err error) {
+	c.volumeCacheMu.Lock()
+	defer c.volumeCacheMu.Unlock()
+	c.volumeCache[key] = volumeCacheEntry{data: data, err: err, fetchAt: time.Now()}
+}
+
+// InvalidateVolumeCache drops cached entries matching volumeName. Called by
+// callers that just wrote to the volume so subsequent reads see the change
+// without waiting for TTL.
+func (c *Client) InvalidateVolumeCache(volumeName string) {
+	c.volumeCacheMu.Lock()
+	defer c.volumeCacheMu.Unlock()
+	prefix := ":" + volumeName + ":"
+	listKey := "list:" + volumeName
+	for k := range c.volumeCache {
+		if k == listKey || strings.Contains(k, prefix) {
+			delete(c.volumeCache, k)
+		}
+	}
 }
 
 // WriteVolume is not yet implemented for the read-only MVP; stubbed to satisfy

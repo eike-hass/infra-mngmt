@@ -575,3 +575,182 @@ func TestParseMCPJSONFlatSkipsNonMCPKeys(t *testing.T) {
 		t.Errorf("expected only 'real' to be picked up, got %v", names)
 	}
 }
+
+// ── ReadFiles / WriteFiles / Has ──────────────────────────────────────────────
+
+func TestHostFSHasFileBacked(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope)
+	src := NewHostFS(dir, scope)
+	if ok, err := src.Has(context.Background(), entity.KindCommand, "run"); err != nil || !ok {
+		t.Errorf("Has(command/run) = %v, %v; want true, nil", ok, err)
+	}
+	if ok, err := src.Has(context.Background(), entity.KindCommand, "missing"); err != nil || ok {
+		t.Errorf("Has(command/missing) = %v, %v; want false, nil", ok, err)
+	}
+}
+
+func TestHostFSHasSettingsBacked(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope)
+	src := NewHostFS(dir, scope)
+	if ok, err := src.Has(context.Background(), entity.KindMCPServer, "local-py"); err != nil || !ok {
+		t.Errorf("Has(mcp/local-py) = %v, %v; want true", ok, err)
+	}
+	if ok, err := src.Has(context.Background(), entity.KindHook, "on-save"); err != nil || !ok {
+		t.Errorf("Has(hook/on-save) = %v, %v; want true", ok, err)
+	}
+	if ok, err := src.Has(context.Background(), entity.KindMCPServer, "ghost"); err != nil || ok {
+		t.Errorf("Has(mcp/ghost) = %v, %v; want false", ok, err)
+	}
+}
+
+func TestHostFSReadFilesSkillRecursive(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope)
+	// Add a nested file under skills/example to verify the walk picks it up.
+	if err := os.MkdirAll(filepath.Join(dir, "skills", "example", "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skills", "example", "scripts", "go.sh"),
+		[]byte("#!/bin/sh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	src := NewHostFS(dir, scope)
+	files, err := src.ReadFiles(context.Background(), entity.KindSkill, "example")
+	if err != nil {
+		t.Fatalf("ReadFiles: %v", err)
+	}
+	got := map[string]string{}
+	for _, f := range files {
+		got[f.RelPath] = string(f.Data)
+	}
+	if got["SKILL.md"] != "skill body" {
+		t.Errorf("SKILL.md content = %q, want %q", got["SKILL.md"], "skill body")
+	}
+	if got["scripts/go.sh"] != "#!/bin/sh" {
+		t.Errorf("nested file = %q, want %q", got["scripts/go.sh"], "#!/bin/sh")
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 files, got %d: %v", len(got), got)
+	}
+}
+
+func TestHostFSWriteFilesSkillRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	claude := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, entity.GlobalScope())
+
+	files := []EntityFile{
+		{RelPath: "SKILL.md", Data: []byte("---\nname: x\n---\nbody")},
+		{RelPath: "templates/foo.md", Data: []byte("template")},
+	}
+	if err := src.WriteFiles(context.Background(), entity.KindSkill, "x", files); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+
+	got1, err := os.ReadFile(filepath.Join(claude, "skills", "x", "SKILL.md"))
+	if err != nil || string(got1) != "---\nname: x\n---\nbody" {
+		t.Errorf("SKILL.md: got %q, err %v", got1, err)
+	}
+	got2, err := os.ReadFile(filepath.Join(claude, "skills", "x", "templates", "foo.md"))
+	if err != nil || string(got2) != "template" {
+		t.Errorf("nested file: got %q, err %v", got2, err)
+	}
+}
+
+func TestHostFSWriteFilesSkillRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	claude := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, entity.GlobalScope())
+	files := []EntityFile{{RelPath: "../etc/passwd", Data: []byte("oops")}}
+	err := src.WriteFiles(context.Background(), entity.KindSkill, "x", files)
+	if err == nil {
+		t.Fatal("expected traversal to be rejected")
+	}
+}
+
+func TestHostFSWriteFilesMCPSpliceCreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	claude := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, entity.GlobalScope())
+
+	block := []byte(`{"command":"node","args":["server.js"]}`)
+	if err := src.WriteFiles(context.Background(), entity.KindMCPServer, "node-srv",
+		[]EntityFile{{Data: block}}); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+	// Read back through the source to confirm round-trip.
+	out, err := src.Read(context.Background(), entity.KindMCPServer, "node-srv")
+	if err != nil {
+		t.Fatalf("Read after splice: %v", err)
+	}
+	if !strings.Contains(string(out), `"command": "node"`) {
+		t.Errorf("readback missing command:\n%s", out)
+	}
+}
+
+func TestHostFSWriteFilesMCPSplicePreservesOthers(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope) // pre-populated settings.json with local-py + remote
+	src := NewHostFS(dir, scope)
+
+	block := []byte(`{"command":"new","args":[]}`)
+	if err := src.WriteFiles(context.Background(), entity.KindMCPServer, "added",
+		[]EntityFile{{Data: block}}); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+
+	// Existing entries must still be readable.
+	for _, name := range []string{"local-py", "remote", "added"} {
+		if _, err := src.Read(context.Background(), entity.KindMCPServer, name); err != nil {
+			t.Errorf("Read(%s) after splice: %v", name, err)
+		}
+	}
+	// Existing hook should also still be readable — the splice must not
+	// drop sibling top-level keys.
+	if _, err := src.Read(context.Background(), entity.KindHook, "on-save"); err != nil {
+		t.Errorf("hook clobbered by mcp splice: %v", err)
+	}
+}
+
+func TestHostFSWriteFilesMCPRejectsInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	claude := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := NewHostFS(claude, entity.GlobalScope())
+	err := src.WriteFiles(context.Background(), entity.KindMCPServer, "bad",
+		[]EntityFile{{Data: []byte(`not json`)}})
+	if err == nil {
+		t.Fatal("expected error for invalid JSON block")
+	}
+}
+
+func TestHostFSReadFilesSingleFileFallback(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := buildClaudeDir(t, scope)
+	src := NewHostFS(dir, scope)
+	// Trigger Entities so pathIndex is primed (Read needs it for some kinds).
+	if _, err := src.Entities(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	files, err := src.ReadFiles(context.Background(), entity.KindCommand, "run")
+	if err != nil {
+		t.Fatalf("ReadFiles: %v", err)
+	}
+	if len(files) != 1 || files[0].RelPath != "" || string(files[0].Data) != "# run" {
+		t.Errorf("unexpected payload: %+v", files)
+	}
+}

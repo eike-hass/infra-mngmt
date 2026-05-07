@@ -76,7 +76,6 @@ for domain in \
     "gopkg.in" \
     "go.googlesource.com" \
     "go.dev" \
-    "proxy.golang.org" \
     "pkg.go.dev" \
     "dl.google.com" \
     "storage.googleapis.com"; do

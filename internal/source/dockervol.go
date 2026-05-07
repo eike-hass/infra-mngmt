@@ -40,6 +40,7 @@ func NewDockerVolume(volumeName string, scope entity.Scope, dc *docker.Client) *
 
 func (s *DockerVolumeSource) ID() string          { return s.id }
 func (s *DockerVolumeSource) Scope() entity.Scope { return s.scope }
+func (s *DockerVolumeSource) Writable() bool      { return false }
 
 func (s *DockerVolumeSource) Entities(ctx context.Context) ([]entity.Entity, error) {
 	raw, err := s.docker.ListVolume(ctx, s.volumeName)
@@ -199,6 +200,72 @@ func (s *DockerVolumeSource) volumePath(kind entity.Kind, name string) (string, 
 
 func (s *DockerVolumeSource) Watch(_ context.Context) (<-chan ChangeEvent, error) {
 	return nil, nil // Docker volumes don't support filesystem events
+}
+
+// Has reports whether (kind, name) exists inside the volume. Triggers a fresh
+// Entities() scan to ensure the answer reflects current state.
+func (s *DockerVolumeSource) Has(ctx context.Context, kind entity.Kind, name string) (bool, error) {
+	ents, err := s.Entities(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range ents {
+		if e.Kind == kind && e.Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// ReadFiles returns the file set for an entity. For skills it enumerates the
+// skill directory inside the volume; for everything else it falls back to a
+// single-file payload via Read.
+func (s *DockerVolumeSource) ReadFiles(ctx context.Context, kind entity.Kind, name string) ([]EntityFile, error) {
+	if kind == entity.KindSkill {
+		return s.readVolumeSkillFiles(ctx, name)
+	}
+	data, err := s.Read(ctx, kind, name)
+	if err != nil {
+		return nil, err
+	}
+	return []EntityFile{{Data: data}}, nil
+}
+
+func (s *DockerVolumeSource) readVolumeSkillFiles(ctx context.Context, name string) ([]EntityFile, error) {
+	raw, err := s.docker.ListVolume(ctx, s.volumeName)
+	if err != nil {
+		return nil, err
+	}
+	prefix := "/data/skills/" + name + "/"
+	var out []EntityFile
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	for scanner.Scan() {
+		path := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		rel := strings.TrimPrefix(path, prefix)
+		if rel == "" {
+			continue
+		}
+		volRel := strings.TrimPrefix(path, "/data/")
+		data, err := s.docker.ReadVolume(ctx, s.volumeName, volRel)
+		if err != nil {
+			return nil, fmt.Errorf("read %s from volume %s: %w", volRel, s.volumeName, err)
+		}
+		out = append(out, EntityFile{RelPath: rel, Data: data})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%w: skill %s not in volume %s", ErrNotFound, name, s.volumeName)
+	}
+	return out, nil
+}
+
+// WriteFiles is read-only for now; Docker volume writes will be added when the
+// sidecar gains write support. Promote handlers should reject this source as a
+// destination via this error.
+func (s *DockerVolumeSource) WriteFiles(_ context.Context, _ entity.Kind, _ string, _ []EntityFile) error {
+	return fmt.Errorf("%w: writing to Docker volumes is not yet implemented", ErrReadOnly)
 }
 
 // settingsEntities reads settings.json from the volume and returns MCP + hook entities.

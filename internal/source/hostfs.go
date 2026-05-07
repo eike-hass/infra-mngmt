@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,6 +39,7 @@ func hostKey(kind entity.Kind, name string) string { return string(kind) + ":" +
 
 func (s *HostFSSource) ID() string          { return s.id }
 func (s *HostFSSource) Scope() entity.Scope { return s.scope }
+func (s *HostFSSource) Writable() bool      { return true }
 
 func (s *HostFSSource) Entities(ctx context.Context) ([]entity.Entity, error) {
 	s.pathIndex = map[string]string{} // reset on each scan
@@ -517,4 +519,235 @@ func (s *HostFSSource) filePath(kind entity.Kind, name string) (string, error) {
 // Watch returns nil — polling is used instead of push-based watching for now.
 func (s *HostFSSource) Watch(_ context.Context) (<-chan ChangeEvent, error) {
 	return nil, nil
+}
+
+// Has reports whether (kind, name) exists at this source. For file-backed
+// kinds it stats the canonical path; for settings-backed kinds (MCP, hook) it
+// scans the same set of settings files Read consults.
+func (s *HostFSSource) Has(ctx context.Context, kind entity.Kind, name string) (bool, error) {
+	switch kind {
+	case entity.KindMCPServer:
+		_, err := s.readSettingsBlock("mcpServers", name)
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	case entity.KindHook:
+		_, err := s.readSettingsBlock("hooks", name)
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	case entity.KindClaudeMD:
+		// Name is the basename; resolve it to the actual file location.
+		path := s.claudeMDPathForName(name)
+		if path == "" {
+			return false, nil
+		}
+		_, err := os.Stat(path)
+		if err == nil {
+			return true, nil
+		}
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	path, err := s.filePath(kind, name)
+	if err != nil {
+		return false, nil
+	}
+	_, err = os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+// ReadFiles returns the full file set comprising an entity. For skills, walks
+// the skill directory; for settings-backed kinds returns the JSON block as a
+// single file with empty RelPath.
+func (s *HostFSSource) ReadFiles(ctx context.Context, kind entity.Kind, name string) ([]EntityFile, error) {
+	if kind == entity.KindSkill {
+		return s.readSkillFiles(name)
+	}
+	data, err := s.Read(ctx, kind, name)
+	if err != nil {
+		return nil, err
+	}
+	return []EntityFile{{Data: data}}, nil
+}
+
+// readSkillFiles walks <baseDir>/skills/<name>/ and returns every regular
+// file with its path relative to the skill root.
+func (s *HostFSSource) readSkillFiles(name string) ([]EntityFile, error) {
+	root := filepath.Join(s.baseDir, "skills", name)
+	info, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: skill %s", ErrNotFound, name)
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%w: skills/%s is not a directory", ErrNotFound, name)
+	}
+	var out []EntityFile
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		// Normalize to forward slashes so the payload is portable across OS.
+		out = append(out, EntityFile{RelPath: filepath.ToSlash(rel), Data: data})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// WriteFiles writes a file set into this source. For skills it writes the
+// directory tree; for settings-backed kinds it splices into settings.json.
+func (s *HostFSSource) WriteFiles(ctx context.Context, kind entity.Kind, name string, files []EntityFile) error {
+	switch kind {
+	case entity.KindSkill:
+		return s.writeSkillFiles(name, files)
+	case entity.KindMCPServer:
+		if len(files) != 1 {
+			return fmt.Errorf("mcp_server write expects exactly one file, got %d", len(files))
+		}
+		return s.spliceSettings("mcpServers", name, files[0].Data)
+	case entity.KindHook:
+		if len(files) != 1 {
+			return fmt.Errorf("hook write expects exactly one file, got %d", len(files))
+		}
+		return s.spliceSettings("hooks", name, files[0].Data)
+	case entity.KindClaudeMD:
+		if len(files) != 1 {
+			return fmt.Errorf("claude_md write expects exactly one file, got %d", len(files))
+		}
+		path := s.claudeMDPathForName(name)
+		if path == "" {
+			return fmt.Errorf("%w: cannot determine CLAUDE.md path for name %q", ErrNotFound, name)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(path, files[0].Data, 0o644)
+	}
+	if len(files) != 1 {
+		return fmt.Errorf("kind %s write expects exactly one file, got %d", kind, len(files))
+	}
+	return s.Write(ctx, kind, name, files[0].Data)
+}
+
+// writeSkillFiles writes a skill's file set under <baseDir>/skills/<name>/.
+// Existing files at the same paths are overwritten; files outside the file
+// set are left in place (caller decides whether to clean up first).
+func (s *HostFSSource) writeSkillFiles(name string, files []EntityFile) error {
+	root := filepath.Join(s.baseDir, "skills", name)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	for _, f := range files {
+		if f.RelPath == "" {
+			return fmt.Errorf("skill file requires non-empty RelPath")
+		}
+		if strings.Contains(f.RelPath, "..") {
+			return fmt.Errorf("skill file path %q escapes skill root", f.RelPath)
+		}
+		dst := filepath.Join(root, filepath.FromSlash(f.RelPath))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, f.Data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// spliceSettings loads <baseDir>/settings.json (or starts a new doc), sets
+// section[name] to the given JSON block, and writes the file back. The block
+// is parsed first to ensure it's valid JSON, since Read returns pretty-printed
+// bytes that need to round-trip.
+func (s *HostFSSource) spliceSettings(section, name string, block []byte) error {
+	path := filepath.Join(s.baseDir, "settings.json")
+	var doc map[string]json.RawMessage
+	if existing, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(existing, &doc); err != nil {
+			return fmt.Errorf("parse existing settings.json: %w", err)
+		}
+	}
+	if doc == nil {
+		doc = map[string]json.RawMessage{}
+	}
+	var sectionMap map[string]json.RawMessage
+	if existing, ok := doc[section]; ok {
+		if err := json.Unmarshal(existing, &sectionMap); err != nil {
+			return fmt.Errorf("parse settings.json[%s]: %w", section, err)
+		}
+	}
+	if sectionMap == nil {
+		sectionMap = map[string]json.RawMessage{}
+	}
+	// Validate the block parses as JSON before splicing in.
+	var probe any
+	if err := json.Unmarshal(block, &probe); err != nil {
+		return fmt.Errorf("invalid JSON for %s/%s: %w", section, name, err)
+	}
+	sectionMap[name] = json.RawMessage(block)
+	updatedSection, err := json.Marshal(sectionMap)
+	if err != nil {
+		return err
+	}
+	doc[section] = updatedSection
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o644)
+}
+
+// claudeMDPathForName returns the on-disk path for a CLAUDE.md entity name
+// at this scope. Empty result means there's no canonical location for this
+// (scope, name) pair.
+func (s *HostFSSource) claudeMDPathForName(name string) string {
+	if s.scope.Global {
+		// Only one canonical location at global scope.
+		return filepath.Join(s.baseDir, "CLAUDE.md")
+	}
+	repoRoot := filepath.Dir(s.baseDir)
+	switch name {
+	case "CLAUDE.md":
+		return filepath.Join(repoRoot, "CLAUDE.md")
+	case "CLAUDE.local.md":
+		return filepath.Join(repoRoot, "CLAUDE.local.md")
+	}
+	// Default: project-root CLAUDE.md.
+	return filepath.Join(repoRoot, "CLAUDE.md")
 }

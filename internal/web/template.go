@@ -251,6 +251,61 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 
 /* ── edit toolbar ── */
 .preview-actions{display:flex;justify-content:flex-end;padding:6px 0 2px;gap:6px;align-items:center}
+.preview-toolbar{display:flex;justify-content:flex-end;margin-top:8px;gap:6px}
+.promote-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 9px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .1s;position:relative}
+.promote-btn:hover{border-color:var(--accent);color:var(--accent)}
+.promote-btn:disabled{opacity:.5;cursor:wait}
+.promote-btn.htmx-request::after{content:"";display:inline-block;width:8px;height:8px;margin-left:5px;border:1px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-1px}
+.promote-slot:empty{display:none}
+/* ── promote modal ── */
+.promote-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding-top:8vh;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);animation:promoteFadeIn .12s ease-out}
+@keyframes promoteFadeIn{from{opacity:0}to{opacity:1}}
+.promote-modal-card{background:var(--bg2);border:1px solid var(--border2);border-radius:8px;width:min(560px,calc(100vw - 32px));max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:promoteSlideIn .14s ease-out}
+@keyframes promoteSlideIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0);opacity:1}}
+.promote-modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.promote-modal-titles{flex:1;min-width:0}
+.promote-modal-title{color:var(--white);font-size:13px;font-weight:500;margin-bottom:3px}
+.promote-modal-title strong{color:var(--accent);font-weight:600}
+.promote-modal-title .promote-kind{color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-right:2px}
+.promote-modal-sub{color:var(--text3);font-size:11px;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.promote-modal-sub span{color:var(--text2)}
+.promote-modal-body{padding:14px 16px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.promote-rename{display:flex;flex-direction:column;gap:4px}
+.promote-rename-label{color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+.promote-rename-input{background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:4px;font-family:inherit;font-size:12px;outline:none;transition:border-color .1s}
+.promote-rename-input:focus{border-color:var(--accent)}
+.promote-empty{color:var(--text3);font-size:11px;padding:14px;text-align:center;background:var(--bg3);border:1px dashed var(--border2);border-radius:4px}
+.promote-group{display:flex;flex-direction:column;gap:6px}
+.promote-group-title{display:flex;align-items:center;gap:8px;color:var(--text2);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin:0}
+.promote-group-title::after{content:"";flex:1;height:1px;background:var(--border)}
+.promote-group-count{background:var(--bg3);color:var(--text3);font-size:9px;padding:1px 6px;border-radius:8px;font-weight:500;letter-spacing:0;text-transform:none}
+.promote-targets{list-style:none;display:flex;flex-direction:column;gap:4px}
+.promote-target{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:12px;text-align:left;transition:all .1s}
+.promote-target:not(:disabled):hover{border-color:var(--accent);background:var(--bg2);transform:translateX(2px)}
+.promote-target.exists{border-color:#553f1a}
+.promote-target.exists:not(:disabled):hover{border-color:#dca97d}
+.promote-target.readonly,.promote-target:disabled{cursor:not-allowed;opacity:.42;background:var(--bg)}
+.promote-target-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.promote-target-label{color:var(--white);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.promote-target-path{color:var(--text3);font-size:10px;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.promote-target-flags{display:flex;gap:5px;align-items:center;flex-shrink:0}
+.promote-flag{font-size:9px;text-transform:uppercase;letter-spacing:.06em;padding:2px 6px;border-radius:3px;font-weight:600}
+.promote-flag.new{background:#0e1f17;color:#5cb088;border:1px solid #1d4d3c}
+.promote-flag.exists{background:#241c10;color:#dca97d;border:1px solid #553f1a}
+.promote-flag.readonly{background:#1c1c1c;color:var(--text3);border:1px solid var(--border2)}
+/* result variants */
+.promote-result-card.ok .promote-result-icon{color:#7ddca7}
+.promote-result-card.warn .promote-result-icon{color:#dca97d}
+.promote-result-card.error .promote-result-icon{color:var(--red)}
+.promote-result-icon{margin-right:6px}
+.promote-result-prompt{color:var(--text2);font-size:12px;margin:0}
+.promote-result-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
+.promote-confirm{background:#dca97d;border:1px solid #dca97d;color:#1a0e02;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;transition:all .1s}
+.promote-confirm:hover{filter:brightness(1.1)}
+.promote-cancel{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;transition:all .1s}
+.promote-cancel:hover{border-color:var(--text);color:var(--text)}
+.promote-close{background:transparent;border:none;color:var(--text3);font-size:20px;line-height:1;cursor:pointer;padding:0 6px;border-radius:3px;transition:all .1s}
+.promote-close:hover{color:var(--white);background:var(--bg3)}
 .edit-btn,.save-btn,.cancel-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 9px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .1s}
 .edit-btn:hover{border-color:var(--accent);color:var(--accent)}
 .save-btn:hover{border-color:var(--green);color:var(--green)}
@@ -919,6 +974,14 @@ const previewHTML = `
   </div>
   {{end}}
   <div class="preview-path">{{$e.Path}}</div>
+  <div class="preview-toolbar">
+    <button class="promote-btn"
+            hx-get="/partials/promote-picker?id={{$e.ID}}"
+            hx-target="#promote-slot"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this">promote →</button>
+  </div>
+  <div id="promote-slot" class="promote-slot"></div>
 </div>
 {{if $c}}
 <div class="preview-body" data-entity-id="{{$e.ID}}">
@@ -1236,4 +1299,155 @@ button:hover{opacity:.88}
 </form>
 </body>
 </html>
+`
+
+// promotePickerHTML renders the target-picker modal. The whole modal lives
+// inside #promote-slot but uses position:fixed so it escapes the preview
+// pane's box and overlays the viewport. Clicking the backdrop or pressing
+// Esc closes it (the inline script wires those up).
+const promotePickerHTML = `
+{{$e := .Entity}}
+<div class="promote-modal" id="promote-modal"
+     onclick="if(event.target===this){document.getElementById('promote-close-btn').click();}">
+  <div class="promote-modal-card" role="dialog" aria-label="Promote entity">
+    <header class="promote-modal-head">
+      <div class="promote-modal-titles">
+        <div class="promote-modal-title">copy <span class="promote-kind">{{$e.Kind}}</span> <strong>{{$e.Name}}</strong></div>
+        <div class="promote-modal-sub">from <span>{{$e.Source}}</span></div>
+      </div>
+      <button id="promote-close-btn" class="promote-close"
+              hx-get="/partials/promote-clear"
+              hx-target="#promote-slot"
+              hx-swap="innerHTML"
+              aria-label="close">×</button>
+    </header>
+
+    <div class="promote-modal-body">
+      <label class="promote-rename">
+        <span class="promote-rename-label">name at target</span>
+        <input id="promote-rename-input" type="text" name="name"
+               value="{{.SuggestedName}}"
+               class="promote-rename-input" autocomplete="off" spellcheck="false">
+      </label>
+
+      {{if not .AnyTargets}}
+      <div class="promote-empty">no other sources are configured — promote needs at least one second source as a target</div>
+      {{else}}
+      {{range .Groups}}
+      {{if .Targets}}
+      <section class="promote-group">
+        <h3 class="promote-group-title">
+          <span>{{.Title}}</span>
+          <span class="promote-group-count">{{len .Targets}}</span>
+        </h3>
+        <ul class="promote-targets">
+          {{range .Targets}}
+          <li>
+            <button class="promote-target {{if .ReadOnly}}readonly{{end}} {{if .Exists}}exists{{end}}"
+                    {{if .ReadOnly}}disabled aria-disabled="true" title="this source is read-only"{{else}}
+                    hx-post="/api/promote?from={{$e.ID}}&to={{.SourceID}}"
+                    hx-include="#promote-rename-input"
+                    hx-target="#promote-slot"
+                    hx-swap="innerHTML"{{end}}>
+              <div class="promote-target-main">
+                <div class="promote-target-label">{{.Label}}</div>
+                {{if .ProjectPath}}<div class="promote-target-path">{{.ProjectPath}}</div>{{end}}
+              </div>
+              <div class="promote-target-flags">
+                {{if .Exists}}<span class="promote-flag exists">replaces</span>{{end}}
+                {{if .ReadOnly}}<span class="promote-flag readonly">read-only</span>{{end}}
+                {{if and (not .Exists) (not .ReadOnly)}}<span class="promote-flag new">new</span>{{end}}
+              </div>
+            </button>
+          </li>
+          {{end}}
+        </ul>
+      </section>
+      {{end}}
+      {{end}}
+      {{end}}
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const close = () => document.getElementById('promote-close-btn')?.click();
+  const onKey = (e) => {
+    if(e.key === 'Escape'){
+      e.preventDefault();
+      document.removeEventListener('keydown', onKey);
+      close();
+    }
+  };
+  document.addEventListener('keydown', onKey);
+  // Auto-focus the rename input so power users can edit immediately.
+  setTimeout(()=>{
+    const i = document.getElementById('promote-rename-input');
+    if(i){ i.focus(); i.select(); }
+  }, 0);
+})();
+</script>
+`
+
+// promoteResultHTML renders success / conflict / read-only / generic-error
+// fragments inside the modal shell so the user stays in context after the
+// action. Conflict adds a confirm-overwrite button that re-POSTs with the
+// preserved rename + overwrite=true.
+const promoteResultHTML = `
+<div class="promote-modal" id="promote-modal"
+     onclick="if(event.target===this){document.getElementById('promote-close-btn').click();}">
+  <div class="promote-modal-card promote-result-card {{if .OK}}ok{{else if .Conflict}}warn{{else}}error{{end}}"
+       role="dialog" aria-label="Promote result">
+    <header class="promote-modal-head">
+      <div class="promote-modal-titles">
+        <div class="promote-modal-title">
+          {{if .OK}}<span class="promote-result-icon">✓</span> done{{end}}
+          {{if .Conflict}}<span class="promote-result-icon">⚠</span> already exists{{end}}
+          {{if .ReadOnly}}<span class="promote-result-icon">✖</span> read-only target{{end}}
+          {{if and (not .OK) (not .Conflict) (not .ReadOnly)}}<span class="promote-result-icon">✖</span> error{{end}}
+        </div>
+        <div class="promote-modal-sub">{{.Message}}</div>
+      </div>
+      <button id="promote-close-btn" class="promote-close"
+              hx-get="/partials/promote-clear"
+              hx-target="#promote-slot"
+              hx-swap="innerHTML"
+              aria-label="close">×</button>
+    </header>
+    <div class="promote-modal-body promote-result-body">
+      {{if .Conflict}}
+      <p class="promote-result-prompt">overwrite the existing entity at the target?</p>
+      <div class="promote-result-actions">
+        <button class="promote-confirm"
+                hx-post="/api/promote?from={{.From}}&to={{.To}}&overwrite=true&name={{.NewName}}"
+                hx-target="#promote-slot"
+                hx-swap="innerHTML">overwrite</button>
+        <button class="promote-cancel"
+                hx-get="/partials/promote-clear"
+                hx-target="#promote-slot"
+                hx-swap="innerHTML">cancel</button>
+      </div>
+      {{else}}
+      <div class="promote-result-actions">
+        <button class="promote-cancel"
+                hx-get="/partials/promote-clear"
+                hx-target="#promote-slot"
+                hx-swap="innerHTML">close</button>
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const onKey = (e) => {
+    if(e.key === 'Escape'){
+      e.preventDefault();
+      document.removeEventListener('keydown', onKey);
+      document.getElementById('promote-close-btn')?.click();
+    }
+  };
+  document.addEventListener('keydown', onKey);
+})();
+</script>
 `

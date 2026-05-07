@@ -88,6 +88,9 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Post("/api/entity", s.handleEntityWrite)
 		r.Get("/partials/entity", s.handleEntityPreview)
 		r.Get("/partials/entity-list", s.handleEntityListPartial)
+		r.Get("/partials/promote-picker", s.handlePromotePicker)
+		r.Get("/partials/promote-clear", s.handlePromoteClear)
+		r.Post("/api/promote", s.handlePromote)
 
 		// services routes
 		r.Get("/partials/services", s.handleServicesPartial)

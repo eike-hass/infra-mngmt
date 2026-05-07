@@ -33,6 +33,7 @@ func newMockSource(id string, scope entity.Scope) *mockSource {
 
 func (m *mockSource) ID() string          { return m.id }
 func (m *mockSource) Scope() entity.Scope { return m.scope }
+func (m *mockSource) Writable() bool      { return !m.readOnly }
 func (m *mockSource) Entities(_ context.Context) ([]entity.Entity, error) {
 	atomic.AddInt32(&m.calls, 1)
 	return m.entities, nil
@@ -52,6 +53,45 @@ func (m *mockSource) Write(_ context.Context, kind entity.Kind, name string, dat
 }
 func (m *mockSource) Watch(_ context.Context) (<-chan source.ChangeEvent, error) {
 	return nil, nil
+}
+
+func (m *mockSource) Has(_ context.Context, kind entity.Kind, name string) (bool, error) {
+	for _, e := range m.entities {
+		if e.Kind == kind && e.Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *mockSource) ReadFiles(ctx context.Context, kind entity.Kind, name string) ([]source.EntityFile, error) {
+	data, err := m.Read(ctx, kind, name)
+	if err != nil {
+		return nil, err
+	}
+	return []source.EntityFile{{Data: data}}, nil
+}
+
+func (m *mockSource) WriteFiles(ctx context.Context, kind entity.Kind, name string, files []source.EntityFile) error {
+	if m.readOnly {
+		return source.ErrReadOnly
+	}
+	if len(files) != 1 {
+		// mockSource collapses multi-file payloads — sufficient for the
+		// promote handler tests that don't exercise skill copy here.
+		return source.ErrReadOnly
+	}
+	if err := m.Write(ctx, kind, name, files[0].Data); err != nil {
+		return err
+	}
+	// Ensure the entity is listed (Write alone updates files map).
+	for _, e := range m.entities {
+		if e.Kind == kind && e.Name == name {
+			return nil
+		}
+	}
+	m.addEntity(kind, name, files[0].Data)
+	return nil
 }
 
 func (m *mockSource) addEntity(kind entity.Kind, name string, content []byte) entity.Entity {
