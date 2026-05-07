@@ -200,18 +200,44 @@ func runningCount(procs []compose.ProcessState) int {
 	return n
 }
 
+// activeBridgeCount returns the number of bridges whose state pill maps to
+// "running" (i.e. fully active). Used for the bridges-panel header summary.
+func activeBridgeCount(bs []bridgeView) int {
+	n := 0
+	for _, b := range bs {
+		if b.StateClass == "running" {
+			n++
+		}
+	}
+	return n
+}
+
+// runningContainerCount returns the number of declared containers reported as
+// running by Docker. Used for the containers-panel header summary.
+func runningContainerCount(cs []containerView) int {
+	n := 0
+	for _, c := range cs {
+		if c.StateClass == "running" {
+			n++
+		}
+	}
+	return n
+}
+
 var tmplFuncs = template.FuncMap{
-	"kindIcon":     kindIcon,
-	"formatMem":    formatMem,
-	"statusClass":  statusClass,
-	"healthClass":  healthClass,
-	"cpuBarWidth":  cpuBarWidth,
-	"cpuBarClass":  cpuBarClass,
-	"memBarWidth":  memBarWidth,
-	"runningCount": runningCount,
-	"canStop":      canStop,
-	"canStart":     canStart,
-	"entityLevel":  func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
+	"kindIcon":              kindIcon,
+	"formatMem":             formatMem,
+	"statusClass":           statusClass,
+	"healthClass":           healthClass,
+	"cpuBarWidth":           cpuBarWidth,
+	"cpuBarClass":           cpuBarClass,
+	"memBarWidth":           memBarWidth,
+	"runningCount":          runningCount,
+	"activeBridgeCount":     activeBridgeCount,
+	"runningContainerCount": runningContainerCount,
+	"canStop":               canStop,
+	"canStart":              canStart,
+	"entityLevel":           func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
 	"entityLevelShort": func(e entity.Entity) string {
 		switch sourceLevel(e.Source, e.Scope.Global) {
 		case "global":
@@ -695,6 +721,7 @@ func (s *Server) handleServicesPartial(w http.ResponseWriter, r *http.Request) {
 		Instances:  s.buildInstanceViews(r.Context()),
 		Bridges:    s.rebuildBridgeViews(r.Context()),
 		Containers: s.rebuildContainerViews(r.Context()),
+		Docker:     s.dockerHealth(r.Context()),
 	}
 	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/eike-hass/infra-mngmt/internal/containers"
 	"github.com/eike-hass/infra-mngmt/internal/graph"
@@ -109,6 +110,24 @@ func shortID(id string) string {
 		return id[:12]
 	}
 	return id
+}
+
+// dockerHealth pings the daemon to drive the LED in the containers panel
+// header. Configured=false suppresses the indicator entirely when no Docker
+// client was discovered at startup.
+func (s *Server) dockerHealth(ctx context.Context) dockerHealthView {
+	if s.docker == nil {
+		return dockerHealthView{}
+	}
+	v := dockerHealthView{Configured: true, Endpoint: s.docker.DaemonHost()}
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := s.docker.Ping(pingCtx); err != nil {
+		v.Error = err.Error()
+		return v
+	}
+	v.Online = true
+	return v
 }
 
 func containerStateCSS(s graph.ContainerState) string {

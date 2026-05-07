@@ -46,6 +46,28 @@ func (c *Client) Close() error {
 	return c.cli.Close()
 }
 
+// Ping verifies the Docker daemon is reachable. The SDK already retries the
+// API-version probe internally, so a single Ping is enough for a UI health LED.
+func (c *Client) Ping(ctx context.Context) error {
+	if c == nil || c.cli == nil {
+		return fmt.Errorf("docker client: not initialized")
+	}
+	if _, err := c.cli.Ping(ctx); err != nil {
+		return fmt.Errorf("docker ping: %w", err)
+	}
+	return nil
+}
+
+// DaemonHost returns the resolved host of the Docker daemon (e.g.
+// "unix:///var/run/docker.sock" or "tcp://10.0.0.5:2375"). Empty string when
+// no client is configured.
+func (c *Client) DaemonHost() string {
+	if c == nil || c.cli == nil {
+		return ""
+	}
+	return c.cli.DaemonHost()
+}
+
 // ── public types ──────────────────────────────────────────────────────────────
 
 // ManagedContainer describes a container discovered by infra-mngmt, either

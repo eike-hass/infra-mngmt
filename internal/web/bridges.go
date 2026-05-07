@@ -262,4 +262,15 @@ type servicesPageData struct {
 	Instances  []instanceView
 	Bridges    []bridgeView
 	Containers []containerView
+	Docker     dockerHealthView
+}
+
+// dockerHealthView drives the LED in the containers panel header. Configured
+// is false when no Docker client was wired up at startup (e.g. the daemon
+// socket wasn't available); in that case the panel hides the indicator.
+type dockerHealthView struct {
+	Configured bool
+	Online     bool
+	Endpoint   string
+	Error      string
 }

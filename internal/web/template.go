@@ -146,6 +146,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .svc-offline-title{color:var(--text2);font-size:12px}
 .svc-offline-endpoint{color:var(--text3);font-size:10px}
 .svc-offline-hint{color:var(--text3);font-size:10px;margin-top:2px}
+.svc-offline .svc-boot-btn{margin-left:0;margin-top:4px}
 /* CPU/mem bars in services table */
 .usage-bar{display:flex;align-items:center;gap:5px}
 .usage-bar-track{width:36px;height:4px;border-radius:2px;background:var(--bg4);overflow:hidden;flex-shrink:0}
@@ -160,6 +161,13 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .process-table td{padding:6px 14px;border-bottom:1px solid var(--border);font-size:11px;vertical-align:middle}
 .process-table tr:last-child td{border-bottom:none}
 .process-table tr:hover td{background:var(--bg3)}
+.process-table code{font-size:11px;color:var(--text2)}
+.process-table .col-name{width:220px;max-width:220px}
+.process-table .col-name .proc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.process-table .col-state{width:96px}
+.process-table .col-pid{width:64px}
+.process-table .col-actions{width:1%;white-space:nowrap;text-align:right}
+.svc-icon{display:inline-block;width:16px;text-align:center;color:var(--text2);font-size:13px;line-height:1;flex-shrink:0}
 .status-pill{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:10px;font-size:10px}
 .status-pill .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
 .status-pill.running{background:#1a3a1a;color:var(--green)}.status-pill.running .dot{background:var(--green)}
@@ -175,7 +183,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .exit-code{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:10px;font-size:9px;background:#3a1a1a;color:var(--red);vertical-align:middle}
 .proc-name{color:var(--text)}
 .proc-ns{color:var(--text3);font-size:9px;letter-spacing:.04em;text-transform:uppercase;margin-top:1px}
-.proc-actions{display:flex;gap:4px}
+.proc-actions{display:inline-flex;gap:4px}
 .proc-btn{background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 7px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .1s}
 .proc-btn:hover{border-color:var(--border2);color:var(--text)}
 .proc-btn.start:hover{border-color:var(--green);color:var(--green)}
@@ -964,35 +972,37 @@ const servicesHTML = `
 {{if .Bridges}}
 <div class="svc-instance bridges">
   <div class="svc-header">
+    <span class="svc-icon" title="network bridges">⇆</span>
     <span class="svc-name">network bridges</span>
     <span class="svc-endpoint">portproxy + firewall (persistent state)</span>
-    <button class="svc-boot-btn"
-            hx-post="/bridges/refresh"
-            hx-target="#services-inner"
-            hx-swap="outerHTML"
-            title="reload bridges.yaml from disk and re-snapshot state">⟳ refresh</button>
+    <span class="svc-running-count">{{activeBridgeCount .Bridges}}/{{len .Bridges}} active</span>
     <button class="svc-boot-btn"
             hx-post="/bridges/apply"
             hx-target="#services-inner"
             hx-swap="outerHTML"
             title="re-apply every Windows-tier bridge in one UAC prompt">▶ apply all</button>
+    <button class="svc-boot-btn"
+            hx-post="/bridges/refresh"
+            hx-target="#services-inner"
+            hx-swap="outerHTML"
+            title="reload bridges.yaml from disk and re-snapshot state">⟳ refresh</button>
   </div>
   <table class="process-table">
     <thead><tr>
-      <th>bridge</th><th>tier</th><th>state</th><th>listen</th><th>connect</th><th></th>
+      <th class="col-name">bridge</th><th>tier</th><th class="col-state">state</th><th>listen</th><th>connect</th><th class="col-actions"></th>
     </tr></thead>
     <tbody>
     {{range .Bridges}}
     <tr>
-      <td>
+      <td class="col-name">
         <div class="proc-name">{{.Name}}</div>
         {{if .DisplayName}}<div class="proc-ns">{{.DisplayName}}</div>{{end}}
       </td>
       <td>{{.Tier}}</td>
-      <td><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
-      <td><code style="font-size:11px">{{.Listen}}</code></td>
-      <td><code style="font-size:11px">{{.Connect}}</code></td>
-      <td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td><code>{{.Listen}}</code></td>
+      <td><code>{{.Connect}}</code></td>
+      <td class="col-actions">
         <div class="proc-actions">
           <button class="proc-btn start"
                   hx-post="/bridge/apply?name={{.Name}}"
@@ -1012,8 +1022,14 @@ const servicesHTML = `
 {{if .Containers}}
 <div class="svc-instance containers">
   <div class="svc-header">
+    <span class="svc-icon" title="docker containers">⬢</span>
+    {{if .Docker.Configured}}
+    <span class="online-dot {{if .Docker.Online}}online{{else}}offline{{end}}"
+          title="docker daemon {{if .Docker.Online}}reachable{{else}}unreachable{{if .Docker.Error}} — {{.Docker.Error}}{{end}}{{end}}"></span>
+    {{end}}
     <span class="svc-name">containers</span>
-    <span class="svc-endpoint">docker: matched by name</span>
+    <span class="svc-endpoint">{{if .Docker.Endpoint}}docker: {{.Docker.Endpoint}}{{else}}docker: matched by name{{end}}</span>
+    <span class="svc-running-count">{{runningContainerCount .Containers}}/{{len .Containers}} running</span>
     <button class="svc-boot-btn"
             hx-post="/containers/refresh"
             hx-target="#services-inner"
@@ -1022,17 +1038,17 @@ const servicesHTML = `
   </div>
   <table class="process-table">
     <thead><tr>
-      <th>container</th><th>state</th><th>status</th><th>cpu</th><th>mem</th><th>id</th><th></th>
+      <th class="col-name">container</th><th class="col-state">state</th><th>status</th><th>cpu</th><th>mem</th><th>id</th><th class="col-actions"></th>
     </tr></thead>
     <tbody>
     {{range .Containers}}
     <tr>
-      <td>
+      <td class="col-name">
         <div class="proc-name">{{.Name}}</div>
         {{if .Description}}<div class="proc-ns">{{.Description}}</div>{{end}}
       </td>
-      <td><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
-      <td>{{if .Status}}<code style="font-size:11px">{{.Status}}</code>{{else}}—{{end}}</td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td>{{if .Status}}<code>{{.Status}}</code>{{else}}—{{end}}</td>
       <td>
         {{if .HasStats}}
         <div class="usage-bar">
@@ -1049,8 +1065,8 @@ const servicesHTML = `
         </div>
         {{else}}—{{end}}
       </td>
-      <td>{{if .ID}}<code style="font-size:11px">{{.ID}}</code>{{else}}—{{end}}</td>
-      <td>
+      <td>{{if .ID}}<code>{{.ID}}</code>{{else}}—{{end}}</td>
+      <td class="col-actions">
         <div class="proc-actions">
           {{if eq .StateClass "running"}}
           <button class="proc-btn stop"
@@ -1075,6 +1091,7 @@ const servicesHTML = `
 {{range $iv := .Instances}}
 <div class="svc-instance">
   <div class="svc-header">
+    <span class="svc-icon" title="process-compose instance">⚙</span>
     <span class="online-dot {{if $iv.Online}}online{{else}}offline{{end}}"></span>
     <span class="svc-name">{{$iv.Name}}</span>
     <span class="svc-endpoint">{{$iv.Endpoint}}</span>
@@ -1084,7 +1101,7 @@ const servicesHTML = `
             hx-post="/compose/reload?instance={{$iv.Name}}"
             hx-target="#services-inner"
             hx-swap="outerHTML"
-            title="re-read compose YAML and reconcile (drops removed entries on recent process-compose versions)">↻ reload</button>
+            title="re-read compose YAML and reconcile (drops removed entries on recent process-compose versions)">⟳ refresh</button>
     {{else if $iv.CanBoot}}
     <button class="svc-boot-btn"
             hx-post="/compose/start?instance={{$iv.Name}}"
@@ -1095,21 +1112,21 @@ const servicesHTML = `
   {{if $iv.Online}}
   <table class="process-table">
     <thead><tr>
-      <th>process</th><th>status</th><th>pid</th><th>restarts</th><th>cpu</th><th>mem</th><th>age</th><th></th>
+      <th class="col-name">process</th><th class="col-state">status</th><th class="col-pid">pid</th><th>restarts</th><th>cpu</th><th>mem</th><th>age</th><th class="col-actions"></th>
     </tr></thead>
     <tbody>
     {{range $iv.Processes}}
     <tr>
-      <td>
+      <td class="col-name">
         <div class="proc-name">{{.Name}}</div>
         {{if and .Namespace (ne .Namespace "default")}}<div class="proc-ns">{{.Namespace}}</div>{{end}}
       </td>
-      <td>
+      <td class="col-state">
         <span class="status-pill {{statusClass .Status}}"><span class="dot"></span>{{.Status}}</span>
         {{if .HasHealthProbe}}<span class="health-pill {{healthClass .Health}}" title="readiness: {{.Health}}">{{.Health}}</span>{{end}}
         {{if and (not .IsRunning) (ne .ExitCode 0)}}<span class="exit-code" title="exit code">{{.ExitCode}}</span>{{end}}
       </td>
-      <td>{{if .Pid}}{{.Pid}}{{else}}—{{end}}</td>
+      <td class="col-pid">{{if .Pid}}{{.Pid}}{{else}}—{{end}}</td>
       <td>{{.Restarts}}</td>
       <td>
         <div class="usage-bar">
@@ -1124,7 +1141,7 @@ const servicesHTML = `
         </div>
       </td>
       <td>{{if .SystemTime}}{{.SystemTime}}{{else}}—{{end}}</td>
-      <td>
+      <td class="col-actions">
         <div class="proc-actions">
           {{if canStop .Status}}
           <button class="proc-btn stop"
@@ -1159,7 +1176,7 @@ const servicesHTML = `
     <div class="svc-offline-title">process-compose unreachable</div>
     <div class="svc-offline-endpoint">{{$iv.Endpoint}}</div>
     {{if $iv.CanBoot}}
-    <button class="svc-boot-btn" style="margin-left:0;margin-top:4px"
+    <button class="svc-boot-btn"
             hx-post="/compose/start?instance={{$iv.Name}}"
             hx-target="#services-inner"
             hx-swap="outerHTML">▶ start process-compose</button>
