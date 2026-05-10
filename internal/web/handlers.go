@@ -304,6 +304,14 @@ var tmplFuncs = template.FuncMap{
 	"canStop":               canStop,
 	"canStart":              canStart,
 	"isInternalProcess":     IsInternalProcess,
+	"pctClass":              pctClass,
+	"pctWidth":              pctWidth,
+	"formatTokensPerSec":    formatTokensPerSec,
+	"formatCount":           formatCount,
+	"slotProgress":          slotProgress,
+	"add":                   addInts,
+	"statusHelp":            statusHelp,
+	"exitCodeHelp":          exitCodeHelp,
 	"entityLevel":           func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
 	"entityLevelShort": func(e entity.Entity) string {
 		switch sourceLevel(e.Source, e.Scope.Global) {

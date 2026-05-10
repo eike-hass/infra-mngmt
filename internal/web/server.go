@@ -22,8 +22,20 @@ import (
 	"github.com/eike-hass/infra-mngmt/internal/deps"
 	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/graph"
+	"github.com/eike-hass/infra-mngmt/internal/llama"
 	"github.com/eike-hass/infra-mngmt/internal/source"
 )
+
+// LlamaEntry is a flat struct mirroring config.LlamaServer, kept here so the
+// web layer doesn't import config. The (Instance, Process) pair is matched
+// against process-compose process rows to decide whether to render the
+// "llama" stats button on a row.
+type LlamaEntry struct {
+	Instance string
+	Process  string
+	Endpoint string
+	APIKey   string
+}
 
 // BuildInfo describes the binary's identity. Set once at startup via
 // SetBuildInfo and surfaced through /api/version so external clients (deploy
@@ -59,6 +71,8 @@ type Server struct {
 	containersFile     string                 // path to containers.yaml so /containers/refresh can reload
 	depRules           []deps.Rule            // dependencies.yaml rules
 	docker             *docker.Client         // nil if Docker unavailable
+	llamaServers       []LlamaEntry           // declared in config.yaml; lookup keyed by (Instance,Process)
+	llamaClients       map[string]*llama.Client
 	mux                *chi.Mux
 	token              string         // required bearer token; empty = auth disabled
 	trustedNetworks    []netip.Prefix // CIDRs whose source IPs bypass auth
@@ -151,6 +165,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Post("/decl-container/stop", s.handleContainerStopByName)   // ?name=
 		r.Post("/containers/refresh", s.handleContainersRefresh)
 		r.Get("/partials/logs", s.handleProcessLogs) // ?instance=&process=
+		r.Get("/partials/llama", s.handleLlamaAll)           // standalone "llama" view body
 		r.Post("/api/refresh", s.handleRefresh)
 		r.Get("/api/containers", s.handleContainers)
 		r.Post("/api/container/start", s.handleContainerStart)
@@ -215,6 +230,37 @@ func (s *Server) SetBridgesComposeFile(path string) {
 // SetContainersFile records the path to containers.yaml for hot-reload.
 func (s *Server) SetContainersFile(path string) {
 	s.containersFile = path
+}
+
+// SetLlamaServers wires the configured llama-server endpoints. The web layer
+// keeps both the flat declaration (so templates can decide which rows show
+// the "llama" button) and a per-entry probe Client cache (so each refresh
+// doesn't allocate a new http.Client).
+func (s *Server) SetLlamaServers(entries []LlamaEntry) {
+	s.llamaServers = entries
+	clients := make(map[string]*llama.Client, len(entries))
+	for _, e := range entries {
+		clients[llamaKey(e.Instance, e.Process)] = llama.New(e.Endpoint, e.APIKey)
+	}
+	s.llamaClients = clients
+}
+
+// llamaKey is the lookup key for a llama-server entry. Instance+Process is
+// already validated by validProcessName at call sites, so the `|` separator
+// is unambiguous.
+func llamaKey(instance, process string) string { return instance + "|" + process }
+
+// findComposeClient returns the *compose.Client for the named instance, or
+// nil if no such client is configured. Used by the llama view to tail logs
+// for the underlying process from the same compose instance that supervises
+// it.
+func (s *Server) findComposeClient(instance string) *compose.Client {
+	for _, c := range s.compose {
+		if c.Name() == instance {
+			return c
+		}
+	}
+	return nil
 }
 
 // SetBuildInfo wires the binary's build identity into the server. Surfaced

@@ -155,6 +155,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 
 /* ── services view ── */
 #view-services{flex:1;overflow-y:auto;padding:16px 24px;display:none;flex-direction:column}
+#view-llama{flex:1;overflow-y:auto;padding:16px 24px;display:none;flex-direction:column}
 .svc-grid{display:flex;flex-direction:column;gap:20px;max-width:1400px;width:100%;margin:0 auto}
 .svc-instance{background:var(--bg2);border:1px solid var(--border);border-radius:6px;overflow:hidden}
 .svc-header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3)}
@@ -230,6 +231,88 @@ body.show-internals tr.proc-internal{display:table-row}
 .logs-panel .log-line{color:var(--text2)}
 .logs-panel .log-time{color:var(--text3);margin-right:8px}
 .logs-panel .no-logs{color:var(--text3);font-style:italic}
+/* ── llama view ── */
+.llama-page-empty{color:var(--text3);font-style:italic;padding:20px}
+.llama-page-empty code{background:var(--bg3);color:var(--text2);padding:1px 5px;border-radius:3px;font-size:11px}
+.llama-grid{display:flex;flex-direction:column;gap:14px}
+.llama-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px 18px;display:flex;flex-direction:column;gap:10px;font-size:11px;color:var(--text)}
+.llama-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.llama-card-name{color:var(--white);font-weight:600;letter-spacing:.02em}
+.llama-endpoint{color:var(--text2);font-family:ui-monospace,monospace;font-size:10px}
+.llama-pill{padding:1px 6px;border-radius:10px;font-size:10px;display:inline-flex;align-items:center;gap:4px}
+.llama-pill.good{background:#1a3a1a;color:var(--green)}
+.llama-pill.warn{background:#2a2a1a;color:var(--yellow)}
+.llama-pill.bad{background:#3a1a1a;color:var(--red)}
+.llama-pill.mode{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}
+.llama-build{color:var(--text3);font-family:ui-monospace,monospace;font-size:10px;margin-left:auto}
+.llama-identity{display:flex;flex-wrap:wrap;gap:4px 18px;color:var(--text2);font-size:10px}
+.llama-identity .lbl{color:var(--text3);margin-right:4px;text-transform:uppercase;letter-spacing:.04em}
+.llama-identity code{color:var(--text);background:var(--bg3);padding:1px 5px;border-radius:3px;font-size:10px}
+.llama-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px 16px;align-items:center}
+.llama-stat{display:flex;flex-direction:column;gap:2px}
+.llama-stat .lbl{color:var(--text3);font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+.llama-stat .val{color:var(--text);font-family:ui-monospace,monospace}
+.llama-stat .val.warn{color:var(--yellow)}
+.llama-kv{display:flex;flex-direction:column;gap:3px}
+.llama-kv-label{display:flex;justify-content:space-between;font-size:10px}
+.llama-kv-label .lbl{color:var(--text3);text-transform:uppercase;letter-spacing:.04em}
+.llama-kv-label .val{color:var(--text2);font-family:ui-monospace,monospace}
+.llama-kv .usage-bar-track{width:100%;height:6px}
+.llama-kv .usage-bar-fill.low{background:var(--green)}
+.llama-kv .usage-bar-fill.med{background:var(--yellow)}
+.llama-kv .usage-bar-fill.high{background:var(--orange)}
+.llama-row-err{color:var(--red);font-size:10px}
+.llama-row-hint{color:var(--text3);font-style:italic;font-size:10px}
+.llama-row-hint code{background:var(--bg3);color:var(--text2);padding:1px 4px;border-radius:3px;font-size:10px}
+.llama-models{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.llama-model{padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--text3);border-radius:4px;background:var(--bg);display:flex;flex-direction:column;gap:6px}
+.llama-model-loaded{border-left-color:var(--green)}
+.llama-model-sleeping{border-left-color:var(--yellow)}
+.llama-model-loading{border-left-color:var(--accent)}
+.llama-model-unloaded{border-left-color:var(--text3);opacity:.6}
+.llama-model.failed{border-left-color:var(--red);opacity:.7}
+.llama-model.synthetic{border-left-color:var(--accent);opacity:.55;border-style:dashed}
+.llama-model-path{display:flex;align-items:baseline;gap:8px;font-size:10px;color:var(--text2)}
+.llama-model-path .lbl{color:var(--text3);text-transform:uppercase;letter-spacing:.04em;font-size:9px}
+.llama-model-path code{color:var(--text);background:var(--bg3);padding:1px 5px;border-radius:3px;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:520px;display:inline-block;vertical-align:bottom}
+.llama-model-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.llama-model-status{font-size:9px;text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:3px;color:var(--text3);background:var(--bg3)}
+.llama-model-status.status-loaded{color:var(--green);background:#1a3a1a}
+.llama-model-status.status-sleeping{color:var(--yellow);background:#2a2a1a}
+.llama-model-status.status-loading{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.llama-model-id{color:var(--text);font-family:ui-monospace,monospace;font-size:10px;background:var(--bg3);padding:1px 5px;border-radius:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:560px}
+.llama-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}
+.llama-slot{padding:9px 12px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);display:flex;flex-direction:column;gap:8px;font-size:11px}
+.llama-slot.busy{border-color:var(--kind-claude_md);background:color-mix(in srgb,var(--kind-claude_md) 4%,var(--bg2))}
+.llama-slot-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.llama-slot-id{color:var(--text2);font-family:ui-monospace,monospace;font-weight:600;letter-spacing:.04em}
+.llama-slot.busy .llama-slot-id{color:var(--kind-claude_md)}
+.llama-slot-state{font-size:9px;text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:3px}
+.llama-slot-state.busy{color:var(--kind-claude_md);background:color-mix(in srgb,var(--kind-claude_md) 14%,transparent)}
+.llama-slot-state.idle{color:var(--text3);background:var(--bg3)}
+.llama-slot-task{color:var(--text3);font-family:ui-monospace,monospace;font-size:10px;margin-left:auto}
+.llama-slot-tag{font-size:9px;padding:1px 5px;border-radius:3px;font-family:ui-monospace,monospace;color:var(--text3);background:var(--bg3)}
+.llama-slot-tag.spec{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.llama-slot-progress{display:flex;flex-direction:column;gap:3px}
+.llama-slot-bar{height:5px;border-radius:3px;background:var(--bg4);overflow:hidden}
+.llama-slot-fill{height:100%;background:var(--kind-claude_md);transition:width .3s}
+.llama-slot-progress-label{display:flex;justify-content:space-between;color:var(--text2);font-family:ui-monospace,monospace;font-size:10px}
+.llama-slot-detail{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0;font-size:10px}
+.llama-slot-detail dt{color:var(--text3);text-transform:uppercase;letter-spacing:.04em;font-size:9px;align-self:center}
+.llama-slot-detail dd{margin:0;color:var(--text);font-family:ui-monospace,monospace}
+.llama-slot-detail dd .muted{color:var(--text3)}
+.llama-logs-section{margin-top:4px;border-top:1px solid var(--border);padding-top:8px}
+.llama-logs-section summary{cursor:pointer;color:var(--text2);font-size:10px;display:flex;align-items:center;gap:8px;padding:2px 0;list-style:none;outline:none}
+.llama-logs-section summary::-webkit-details-marker{display:none}
+.llama-logs-section summary::before{content:"▸";color:var(--text3);font-size:9px;width:9px;display:inline-block;transition:transform .12s}
+.llama-logs-section[open] summary::before{transform:rotate(90deg)}
+.llama-logs-section summary:hover{color:var(--text)}
+.llama-logs-section .lbl{color:var(--text3);text-transform:uppercase;letter-spacing:.04em;font-size:9px}
+.llama-logs-count{color:var(--text3);font-family:ui-monospace,monospace;font-size:10px;margin-left:auto}
+.llama-logs-body{margin-top:4px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;max-height:200px;overflow-y:auto;font-size:10px;line-height:1.55;font-family:ui-monospace,monospace}
+.llama-log-line{color:var(--text2);white-space:pre-wrap;word-break:break-all}
+.llama-log-time{color:var(--text3);margin-right:8px}
+.llama-logs-empty{color:var(--text3);font-style:italic;font-size:10px;padding:4px 0}
 
 /* ── runtime status dots on entity cards ── */
 /* MCP runtime badge — 14×14 tinted square with a 5px dot inside */
@@ -445,6 +528,7 @@ body.show-internals tr.proc-internal{display:table-row}
 
   <div class="view-tabs">
     <button class="view-tab active" id="vtab-config" onclick="showView('config')">config</button>
+    <button class="view-tab" id="vtab-llama" onclick="showView('llama')">llama</button>
     <button class="view-tab" id="vtab-services" onclick="showView('services')">services</button>
   </div>
 
@@ -516,15 +600,24 @@ body.show-internals tr.proc-internal{display:table-row}
   <p style="color:var(--text3);font-style:italic;padding:20px">loading services…</p>
 </div>
 
+<div id="view-llama"
+     hx-get="/partials/llama"
+     hx-trigger="revealed, every 10s"
+     hx-swap="innerHTML">
+  <p style="color:var(--text3);font-style:italic;padding:20px">loading llama servers…</p>
+</div>
+
 <script>
 // ── view switching ──
 function showView(v) {
   document.getElementById('view-config').style.display   = v === 'config'   ? 'flex' : 'none';
   document.getElementById('view-services').style.display = v === 'services' ? 'flex' : 'none';
+  document.getElementById('view-llama').style.display    = v === 'llama'    ? 'flex' : 'none';
   document.getElementById('kind-bar').style.display      = v === 'config'   ? 'flex' : 'none';
   document.getElementById('tab-scroll-wrap').style.display = v === 'config' ? 'flex' : 'none';
   document.getElementById('vtab-config').classList.toggle('active',   v === 'config');
   document.getElementById('vtab-services').classList.toggle('active', v === 'services');
+  document.getElementById('vtab-llama').classList.toggle('active',    v === 'llama');
   if (v === 'config') updateProjectOverview(); else document.getElementById('project-overview').style.display = 'none';
 }
 
@@ -659,17 +752,46 @@ function applyShowInternalsFromStorage() {
   }
 }
 
+// ── llama logs <details> persistence ──
+// The /partials/llama view re-renders every 10s; <details open> attribute
+// resets to closed each time. Persist per-card open state in localStorage
+// keyed by "instance|process" so user-opened panels stay open across the
+// poll cycle. Same pattern as bridge-composite expansion + show-internals.
+const LLAMA_LOGS_OPEN_KEY = 'im_llama_logs_open';
+function onLlamaLogsToggle(el) {
+  const key = el.getAttribute('data-llama-logs-key');
+  if (!key) return;
+  let set;
+  try { set = new Set(JSON.parse(localStorage.getItem(LLAMA_LOGS_OPEN_KEY) || '[]')); }
+  catch (_) { set = new Set(); }
+  if (el.open) set.add(key); else set.delete(key);
+  try { localStorage.setItem(LLAMA_LOGS_OPEN_KEY, JSON.stringify([...set])); } catch (_) {}
+}
+function applyLlamaLogsOpenFromStorage() {
+  let set;
+  try { set = new Set(JSON.parse(localStorage.getItem(LLAMA_LOGS_OPEN_KEY) || '[]')); }
+  catch (_) { return; }
+  document.querySelectorAll('details.llama-logs-section[data-llama-logs-key]').forEach(d => {
+    if (set.has(d.getAttribute('data-llama-logs-key'))) d.open = true;
+  });
+}
+
 // Re-apply both states whenever htmx swaps in fresh services HTML.
 document.addEventListener('htmx:afterSwap', (e) => {
-  if (e.target && (e.target.id === 'services-inner' || e.target.id === 'view-services')) {
+  if (!e.target) return;
+  if (e.target.id === 'services-inner' || e.target.id === 'view-services') {
     applyShowInternalsFromStorage();
     reapplyCompositeExpansion();
+  }
+  if (e.target.id === 'view-llama') {
+    applyLlamaLogsOpenFromStorage();
   }
 });
 // And on initial load.
 document.addEventListener('DOMContentLoaded', () => {
   applyShowInternalsFromStorage();
   reapplyCompositeExpansion();
+  applyLlamaLogsOpenFromStorage();
 });
 
 function toggleKindGroup(headerEl) {
@@ -1694,6 +1816,237 @@ const logsHTML = `
   {{end}}
   {{end}}
 </div>
+`
+
+// llamaPageHTML is the full body of the standalone "llama" view. Each
+// configured llama-server gets its own card; in router mode the card holds a
+// list of model tiles, each with its own per-model slot grid + metrics.
+//
+// The whole tree re-renders every 10s — see the wrapper hx-get on #view-llama.
+// 10s is the safe cadence for router-mode probes against models actively
+// decoding (per-call latency can spike to several seconds while waiting for
+// the inference mutex between decode steps).
+// Re-rendering the entire view is fine: the data is small (one HTTP call per
+// server, plus one per loaded model) and avoids the partial-state bookkeeping
+// of granular swaps.
+const llamaPageHTML = `
+{{if not .Servers}}
+<div class="llama-page-empty">
+  no <code>llama_servers</code> declared in config.yaml — add at least one entry to populate this view
+</div>
+{{else}}
+<div class="llama-grid">
+{{range .Servers}}
+<div class="llama-card">
+  <div class="llama-head">
+    <span class="llama-card-name" title="process-compose instance / process — matches the row in the services view">{{.Instance}} / {{.Process}}</span>
+    <span class="llama-endpoint" title="base URL probed every 10s; /health, /props, /v1/models, /metrics, /slots">{{.Endpoint}}</span>
+    {{if .HealthErr}}
+      <span class="llama-pill bad" title="GET /health failed: {{.HealthErr}}">unreachable</span>
+    {{else if .Health.OK}}
+      <span class="llama-pill good" title="GET /health → 200 {status: ok}">healthy</span>
+    {{else}}
+      <span class="llama-pill warn" title="GET /health returned a non-200 status — server is alive but not ready">{{.Health.Status}}</span>
+    {{end}}
+    {{if .HasProps}}
+      {{if .Props.IsSleeping}}<span class="llama-pill warn" title="--sleep-idle-seconds elapsed; model unloaded from VRAM. KV-cache metrics will be 0 until next request reloads it.">sleeping</span>{{end}}
+      {{if .Router}}<span class="llama-pill mode" title="multi-model router detected via /v1/models[].status — /metrics and /slots are proxied to a child process selected by ?model=">router</span>{{end}}
+      {{if .Props.BuildInfo}}<span class="llama-build" title="llama.cpp build identifier from /props.build_info — format b<num>-<commit>; useful for spotting drift across tiers">{{.Props.BuildInfo}}</span>{{end}}
+    {{end}}
+  </div>
+
+  {{if .HasProps}}
+  <div class="llama-identity">
+    {{if .Props.ModelPath}}{{if ne .Props.ModelPath "none"}}<div title="from /props.model_path — full path to the loaded GGUF on the server's filesystem"><span class="lbl">model</span> <code>{{.Props.ModelPath}}</code></div>{{end}}{{end}}
+    {{if .Props.TotalSlots}}<div title="from /props.total_slots — concurrent generation slots, set at startup via -np/--parallel and fixed for process lifetime"><span class="lbl">slots</span> {{.Props.TotalSlots}}</div>{{end}}
+    {{if .Props.NCtx}}<div title="from /props.default_generation_settings.n_ctx — per-slot context budget; total_ctx ≈ n_ctx × total_slots"><span class="lbl">n_ctx</span> {{.Props.NCtx}}</div>{{end}}
+  </div>
+  {{else if .PropsErr}}
+  <div class="llama-row-err">props: {{.PropsErr}}</div>
+  {{end}}
+
+  {{if .Router}}
+    {{if .ModelsErr}}
+    <div class="llama-row-err">models: {{.ModelsErr}}</div>
+    {{else if not .Models}}
+    <div class="llama-row-hint">no models declared in router config</div>
+    {{else}}
+    <div class="llama-models">
+      {{range .Models}}
+      <div class="llama-model llama-model-{{or .Status "unknown"}}{{if .Failed}} failed{{end}}{{if .Synthetic}} synthetic{{end}}">
+        <div class="llama-model-head">
+          <span class="llama-model-status status-{{or .Status "unknown"}}" title="{{statusHelp .Status}}">{{or .Status "unknown"}}</span>
+          <code class="llama-model-id" title="model id from /v1/models[].id — pass as ?model=&lt;urlencoded&gt; on /metrics and /slots&#10;{{.ID}}">{{.ID}}</code>
+          {{if .Synthetic}}
+            <span class="llama-pill mode" title="auto-injected by the router as a fallback when no [default] is defined in your preset INI. Has no --model arg so it can never launch — this is benign upstream behavior, not a config bug.">router default (synthetic)</span>
+          {{else if .Failed}}
+            <span class="llama-pill bad" title="upstream /v1/models reports status.failed=true with exit_code={{.ExitCode}}. NOTE: the router uses the same flag for 'preset failed to launch' AND 'LRU-evicted child didn't shut down cleanly' — the exit code is the only discriminator available in the JSON.&#10;&#10;Code {{.ExitCode}}: {{exitCodeHelp .ExitCode}}">failed (exit {{.ExitCode}})</span>
+          {{end}}
+        </div>
+        {{if and .ModelPath (or .Failed (eq .Status "loaded") (eq .Status "sleeping"))}}
+        <div class="llama-model-path" title="value of --model from /v1/models[].status.args — verify the file exists at this path on the llama-server host">
+          <span class="lbl">model file</span>
+          <code>{{.ModelPath}}</code>
+        </div>
+        {{end}}
+        {{if or (eq .Status "loaded") (eq .Status "sleeping")}}
+          {{if .Metrics.Available}}
+          {{template "llama-metrics-row" .Metrics}}
+          {{else if .MetricsErr}}
+          <div class="llama-row-err">metrics: {{.MetricsErr}}</div>
+          {{else}}
+          <div class="llama-row-hint">metrics endpoint disabled — start llama-server with <code>--metrics</code> to enable</div>
+          {{end}}
+
+          {{if .SlotsDisabled}}
+          <div class="llama-row-hint">slots endpoint disabled — start without <code>--no-slots</code> to enable</div>
+          {{else if .SlotsErr}}
+          <div class="llama-row-err">slots: {{.SlotsErr}}</div>
+          {{else if .Slots}}
+          {{template "llama-slot-grid" .Slots}}
+          {{end}}
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  {{else}}
+    {{if .Metrics.Available}}
+    {{template "llama-metrics-row" .Metrics}}
+    {{else if .MetricsErr}}
+    <div class="llama-row-err">metrics: {{.MetricsErr}}</div>
+    {{else}}
+    <div class="llama-row-hint">metrics endpoint disabled — start llama-server with <code>--metrics</code> to enable</div>
+    {{end}}
+
+    {{if .SlotsDisabled}}
+    <div class="llama-row-hint">slots endpoint disabled — start without <code>--no-slots</code> to enable</div>
+    {{else if .SlotsErr}}
+    <div class="llama-row-err">slots: {{.SlotsErr}}</div>
+    {{else if .Slots}}
+    {{template "llama-slot-grid" .Slots}}
+    {{end}}
+  {{end}}
+
+  <details class="llama-logs-section" data-llama-logs-key="{{.Instance}}|{{.Process}}" ontoggle="onLlamaLogsToggle(this)">
+    <summary title="last 150 lines from the process-compose log buffer for {{.Instance}}/{{.Process}} — refreshes with the panel every 10s. Open/closed state is persisted across panel refreshes via localStorage.">
+      <span class="lbl">logs</span>
+      <span class="llama-logs-count">{{len .Logs}}{{if .LogsErr}} · err{{end}}</span>
+    </summary>
+    {{if .LogsErr}}
+    <div class="llama-row-err">logs: {{.LogsErr}}</div>
+    {{else if .Logs}}
+    <div class="llama-logs-body">
+      {{range .Logs}}<div class="llama-log-line">{{if .Time}}<span class="llama-log-time">{{.Time}}</span>{{end}}{{.Message}}</div>{{end}}
+    </div>
+    {{else}}
+    <div class="llama-logs-empty">no log lines yet</div>
+    {{end}}
+  </details>
+</div>
+{{end}}
+</div>
+{{end}}
+
+{{define "llama-metrics-row"}}
+<div class="llama-stats">
+  <div class="llama-stat" title="token-weighted prompt-eval throughput averaged over ALL completions since process start — NOT a rolling window. Stale-when-idle: keeps showing the historical mean indefinitely. (llamacpp:prompt_tokens_seconds gauge = Σtokens / Σms)">
+    <span class="lbl">prompt</span>
+    <span class="val">{{formatTokensPerSec .PromptTokensPerSec}}</span>
+  </div>
+  <div class="llama-stat" title="token-weighted generation throughput averaged over ALL completions since process start — NOT a rolling window. Updates only when a generation finishes (slot::release). For current speed, derive via PromQL rate() on the *_total counters. (llamacpp:predicted_tokens_seconds gauge = Σtokens / Σms)">
+    <span class="lbl">predict</span>
+    <span class="val">{{formatTokensPerSec .PredictedPerSec}}</span>
+  </div>
+  <div class="llama-stat" title="active requests (llamacpp:requests_processing gauge)">
+    <span class="lbl">in flight</span>
+    <span class="val">{{printf "%.0f" .RequestsProcessing}}</span>
+  </div>
+  <div class="llama-stat" title="queued waiting for a free slot (llamacpp:requests_deferred gauge)">
+    <span class="lbl">deferred</span>
+    <span class="val {{if gt .RequestsDeferred 0.0}}warn{{end}}">{{printf "%.0f" .RequestsDeferred}}</span>
+  </div>
+  <div class="llama-stat" title="avg busy slots per llama_decode() call (llamacpp:n_busy_slots_per_decode counter — closer to total_slots = better batch packing)">
+    <span class="lbl">batch util</span>
+    <span class="val">{{printf "%.2f" .NBusySlotsPerDecode}}</span>
+  </div>
+  <div class="llama-stat" title="cumulative since process start (llamacpp:tokens_predicted_total counter — resets on restart)">
+    <span class="lbl">decoded</span>
+    <span class="val">{{formatCount .TokensPredictedTotal}}</span>
+  </div>
+</div>
+{{end}}
+
+{{define "llama-slot-grid"}}
+<div class="llama-slots">
+  {{range .}}
+  <div class="llama-slot {{if .IsProcessing}}busy{{else}}idle{{end}}">
+    <div class="llama-slot-head">
+      <span class="llama-slot-id" title="slot index from /slots[].id">slot #{{.ID}}</span>
+      {{if .IsProcessing}}
+        <span class="llama-slot-state busy" title="slot is actively decoding">busy</span>
+        <span class="llama-slot-task" title="server-assigned task id from /slots[].id_task — useful for correlating with logs">task {{.IDTask}}</span>
+      {{else}}
+        <span class="llama-slot-state idle" title="slot is free; next request will land here">idle</span>
+      {{end}}
+      {{if .Speculative}}<span class="llama-slot-tag spec" title="speculative decoding active for this slot — draft model is generating candidate tokens that the main model verifies in parallel">spec</span>{{end}}
+    </div>
+
+    {{if .IsProcessing}}
+    <div class="llama-slot-progress" title="decoded / total — total = n_decoded + n_remain. Progress within the per-task n_predict budget, NOT the slot's n_ctx.">
+      <div class="llama-slot-bar">
+        <div class="llama-slot-fill" style="width:{{slotProgress .Progress.NDecoded .Progress.NRemain}}%"></div>
+      </div>
+      <div class="llama-slot-progress-label">
+        <span>{{.Progress.NDecoded}} / {{add .Progress.NDecoded .Progress.NRemain}} tok</span>
+        <span>{{slotProgress .Progress.NDecoded .Progress.NRemain}}%</span>
+      </div>
+    </div>
+    {{end}}
+
+    <dl class="llama-slot-detail">
+      {{if .IsProcessing}}
+      <dt title="sampling temperature — higher = more diverse, 0 = greedy">temperature</dt>
+      <dd>{{printf "%.2f" .Params.Temperature}}</dd>
+
+      {{if gt .Params.TopK 0}}
+      <dt title="top_k — keep only the K most-likely candidates before sampling">top_k</dt>
+      <dd>{{.Params.TopK}}</dd>
+      {{end}}
+
+      {{if and (gt .Params.TopP 0.0) (lt .Params.TopP 1.0)}}
+      <dt title="top_p (nucleus) — keep candidates whose cumulative probability ≤ p">top_p</dt>
+      <dd>{{printf "%.2f" .Params.TopP}}</dd>
+      {{end}}
+
+      {{if gt .Params.MinP 0.0}}
+      <dt title="min_p — drop candidates whose probability < p × max_prob">min_p</dt>
+      <dd>{{printf "%.2f" .Params.MinP}}</dd>
+      {{end}}
+
+      {{if gt .Params.NPredict 0}}
+      <dt title="n_predict — max generation budget for this task (params.n_predict)">budget</dt>
+      <dd>{{.Params.NPredict}} tok{{if gt .Params.NKeep 0}} · keep {{.Params.NKeep}}{{end}}</dd>
+      {{end}}
+
+      {{if .Params.ChatFormat}}
+      <dt title="chat_format — prompt template applied by the server">format</dt>
+      <dd>{{.Params.ChatFormat}}{{if .Params.ReasoningFormat}} <span class="muted">· reasoning={{.Params.ReasoningFormat}}</span>{{end}}</dd>
+      {{end}}
+
+      {{if and .Params.SpeculativeType (ne .Params.SpeculativeType "none")}}
+      <dt title="speculative-decoding strategy">spec</dt>
+      <dd>{{.Params.SpeculativeType}}</dd>
+      {{end}}
+      {{end}}
+
+      <dt title="per-slot context budget from /slots[].n_ctx — total context across all slots ≈ n_ctx × total_slots">n_ctx</dt>
+      <dd>{{.NCtx}}</dd>
+    </dl>
+  </div>
+  {{end}}
+</div>
+{{end}}
 `
 
 const loginHTML = `<!DOCTYPE html>

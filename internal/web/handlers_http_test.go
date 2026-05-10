@@ -643,6 +643,147 @@ func TestBridgesRefreshReloadsYAML(t *testing.T) {
 	}
 }
 
+// ─── /partials/llama (top-level llama view) ──────────────────────────────
+
+func TestLlamaPageEmptyWhenNoServersConfigured(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "no <code>llama_servers</code>") {
+		t.Errorf("body should hint at empty config; got: %s", rr.Body.String())
+	}
+}
+
+func TestLlamaPageSingleModel(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+	mux.HandleFunc("/props", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"model_path":"/m/llama-7b.gguf","total_slots":2,"build_info":"b3000-abc","is_sleeping":false,"default_generation_settings":{"n_ctx":4096}}`))
+	})
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, _ *http.Request) {
+		// No `status` field → single-model mode.
+		_, _ = w.Write([]byte(`{"data":[{"id":"single","object":"model","owned_by":"llamacpp"}]}`))
+	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("llamacpp:kv_cache_usage_ratio 0.33\nllamacpp:requests_processing 1\n"))
+	})
+	mux.HandleFunc("/slots", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":0,"id_task":1,"n_ctx":4096,"is_processing":true,"next_token":[{"has_next_token":true,"n_remain":40,"n_decoded":60}]}]`))
+	})
+	upstream := httptest.NewServer(mux)
+	defer upstream.Close()
+
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv.SetLlamaServers([]LlamaEntry{{Instance: "wsl", Process: "llama-server", Endpoint: upstream.URL}})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		"wsl / llama-server",
+		"healthy",
+		"/m/llama-7b.gguf",
+		"b3000-abc",
+		"in flight",
+		"slot #0",
+		"60 / 100 tok",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered page missing %q\nbody: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "router") {
+		t.Errorf("single-model server should NOT show router pill; body: %s", body)
+	}
+}
+
+func TestLlamaPageRouterMode(t *testing.T) {
+	var slotsCalls, metricsCalls int
+	var slotsModel, metricsModel string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+	mux.HandleFunc("/props", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"model_path":"none","total_slots":0,"build_info":"b9080-abcdef","is_sleeping":false,"default_generation_settings":{"n_ctx":0}}`))
+	})
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"alpha-q4","object":"model","owned_by":"llamacpp","status":{"value":"loaded","args":["--alias","alpha"]}},
+			{"id":"beta-q8","object":"model","owned_by":"llamacpp","status":{"value":"unloaded","exit_code":10,"failed":true}}
+		]}`))
+	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		metricsCalls++
+		metricsModel = r.URL.Query().Get("model")
+		_, _ = w.Write([]byte("llamacpp:kv_cache_usage_ratio 0.5\nllamacpp:requests_processing 1\n"))
+	})
+	mux.HandleFunc("/slots", func(w http.ResponseWriter, r *http.Request) {
+		slotsCalls++
+		slotsModel = r.URL.Query().Get("model")
+		_, _ = w.Write([]byte(`[{"id":0,"id_task":7,"n_ctx":8192,"is_processing":false,"next_token":[{"has_next_token":false,"n_remain":0,"n_decoded":0}]}]`))
+	})
+	upstream := httptest.NewServer(mux)
+	defer upstream.Close()
+
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv.SetLlamaServers([]LlamaEntry{{Instance: "windows", Process: "llama-server", Endpoint: upstream.URL}})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+
+	// Router-mode pill present.
+	if !strings.Contains(body, ">router<") {
+		t.Errorf("expected router pill; body: %s", body)
+	}
+	// Both models rendered.
+	for _, want := range []string{"alpha-q4", "beta-q8", "loaded", "unloaded", "failed"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered page missing %q\nbody: %s", want, body)
+		}
+	}
+	// Loaded model gets a slot probe with ?model=; failed/unloaded do not.
+	if slotsCalls != 1 {
+		t.Errorf("slots calls = %d, want 1 (loaded model only)", slotsCalls)
+	}
+	if metricsCalls != 1 {
+		t.Errorf("metrics calls = %d, want 1 (loaded model only)", metricsCalls)
+	}
+	if slotsModel != "alpha-q4" {
+		t.Errorf("slots model param = %q, want alpha-q4", slotsModel)
+	}
+	if metricsModel != "alpha-q4" {
+		t.Errorf("metrics model param = %q, want alpha-q4", metricsModel)
+	}
+}
+
+func TestLlamaPageRendersHealthErrorWithoutCrash(t *testing.T) {
+	// Server unreachable — no goroutine should panic; the card still renders
+	// with the unreachable pill.
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv.SetLlamaServers([]LlamaEntry{{Instance: "ghost", Process: "llama-server", Endpoint: "http://127.0.0.1:1"}})
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "unreachable") {
+		t.Errorf("body should show unreachable pill; got: %s", rr.Body.String())
+	}
+}
+
 func TestBridgesRefreshSurfacesYAMLErrors(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/bridges.yaml"
