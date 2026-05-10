@@ -37,18 +37,25 @@ func TestNormalizeDevcontainerPathWSL(t *testing.T) {
 	}
 }
 
-func TestIsClaudeMount(t *testing.T) {
+func TestIsConfigDirMount(t *testing.T) {
 	cases := map[string]bool{
+		// Claude Code paths.
 		"/root/.claude":           true,
 		"/home/node/.claude":      true,
 		"/workspaces/foo/.claude": true,
-		"/root/.config":           false,
-		"/.claude/foo":            false,
-		"":                        false,
+		// OpenCode paths.
+		"/root/.opencode":           true,
+		"/home/node/.opencode":      true,
+		"/workspaces/foo/.opencode": true,
+		// Negative cases.
+		"/root/.config":  false,
+		"/.claude/foo":   false,
+		"/.opencode/bar": false,
+		"":               false,
 	}
 	for in, want := range cases {
-		if got := isClaudeMount(in); got != want {
-			t.Errorf("isClaudeMount(%q) = %v, want %v", in, got, want)
+		if got := isConfigDirMount(in); got != want {
+			t.Errorf("isConfigDirMount(%q) = %v, want %v", in, got, want)
 		}
 	}
 }
@@ -131,6 +138,31 @@ func TestToManagedExplicitProjectRootWins(t *testing.T) {
 	mc := toManaged(ctr)
 	if mc.ProjectRoot != "/explicit/root" {
 		t.Errorf("explicit project_root label should win; got %q", mc.ProjectRoot)
+	}
+}
+
+func TestFindWorkspaceMount(t *testing.T) {
+	mounts := []types.MountPoint{
+		{Type: mount.TypeBind, Source: "/home/u/repo", Destination: "/workspace"},
+		{Type: mount.TypeBind, Source: "/etc/cfg", Destination: "/etc/cfg"},
+		{Type: mount.TypeVolume, Name: "vol", Destination: "/var/data"},
+	}
+	if got := findWorkspaceMount(mounts, "/home/u/repo"); got != "/workspace" {
+		t.Errorf("matching bind: got %q, want %q", got, "/workspace")
+	}
+	if got := findWorkspaceMount(mounts, "/missing"); got != "" {
+		t.Errorf("non-matching: got %q, want empty", got)
+	}
+	if got := findWorkspaceMount(mounts, ""); got != "" {
+		t.Errorf("empty projectRoot: got %q, want empty", got)
+	}
+	// A volume mount whose name happens to match projectRoot must NOT be
+	// treated as the workspace — only bind mounts represent the host project.
+	volOnly := []types.MountPoint{
+		{Type: mount.TypeVolume, Name: "/home/u/repo", Destination: "/wrong"},
+	}
+	if got := findWorkspaceMount(volOnly, "/home/u/repo"); got != "" {
+		t.Errorf("volume should not match: got %q, want empty", got)
 	}
 }
 

@@ -44,6 +44,38 @@ func TestValidProcessName(t *testing.T) {
 	}
 }
 
+func TestSourceTool(t *testing.T) {
+	cases := []struct {
+		id   string
+		want string
+	}{
+		// host paths — tool comes from the trailing config-dir name
+		{"host:/home/u/.claude", "claude"},
+		{"host:/home/u/.opencode", "opencode"},
+		{"host:/home/u/repo/.claude", "claude"},
+		{"host:/home/u/repo/.opencode", "opencode"},
+		// host paths that don't end in a recognized config dir
+		{"host:/home/u/repo/.something-else", ""},
+		{"host:/some/random/path", ""},
+		// volume sources — tool comes from the leading token of the volume name
+		{"vol:claude-code-config-abcdef", "claude"},
+		{"vol:opencode-config-xyz", "opencode"},
+		{"vol:other-volume-name", ""},
+		{"vol:noprefix", ""},
+		// container sources don't encode the tool
+		{"ctr:abc123", ""},
+		// malformed inputs
+		{"", ""},
+		{"host:", ""},
+		{"weird:thing", ""},
+	}
+	for _, tc := range cases {
+		if got := sourceTool(tc.id); got != tc.want {
+			t.Errorf("sourceTool(%q) = %q, want %q", tc.id, got, tc.want)
+		}
+	}
+}
+
 func TestSourceLevel(t *testing.T) {
 	cases := []struct {
 		id     string

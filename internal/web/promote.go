@@ -21,6 +21,8 @@ type promoteTarget struct {
 	Scope       string // "global" / "project"
 	Level       string // "global" / "project" / "devcontainer"
 	ProjectPath string // for project-scoped targets, the repo root
+	Tool        string // "claude" / "opencode" / "" (unknown — typically ctr: sources)
+	CrossTool   bool   // true when target tool differs from the source entity's tool
 	Exists      bool   // (kind, name) already present at this target
 	ReadOnly    bool   // WriteFiles will reject (e.g. Docker volumes)
 }
@@ -103,19 +105,26 @@ func (s *Server) handlePromotePicker(w http.ResponseWriter, r *http.Request) {
 		"devcontainer": "Devcontainers",
 	}
 
-	for _, src := range s.sources {
+	srcTool := sourceTool(ent.Source)
+	for _, src := range s.allSources() {
 		if src.ID() == ent.Source {
 			continue
 		}
 		level := sourceLevel(src.ID(), src.Scope().Global)
+		dstTool := sourceTool(src.ID())
 		t := promoteTarget{
 			SourceID:    src.ID(),
 			Label:       sourceLabel(src.ID(), src.Scope().Global, src.Scope().Project),
 			Scope:       src.Scope().Label(),
 			Level:       level,
 			ProjectPath: src.Scope().Project,
-			Exists:      existsAt[existsKey{src.ID(), ent.Kind, ent.Name}],
-			ReadOnly:    !src.Writable(),
+			Tool:        dstTool,
+			// Only flag cross-tool when both ends are known. Unknown (ctr:)
+			// sources stay neutral — we don't warn on something we can't be
+			// sure about.
+			CrossTool: srcTool != "" && dstTool != "" && srcTool != dstTool,
+			Exists:    existsAt[existsKey{src.ID(), ent.Kind, ent.Name}],
+			ReadOnly:  !src.Writable(),
 		}
 		if groupsByLevel[level] == nil {
 			groupsByLevel[level] = &promoteGroup{Title: titles[level], Level: level}
@@ -203,7 +212,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var srcSource, dstSource source.Source
-	for _, src := range s.sources {
+	for _, src := range s.allSources() {
 		if src.ID() == ent.Source {
 			srcSource = src
 		}

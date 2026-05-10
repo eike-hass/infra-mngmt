@@ -45,14 +45,23 @@ func TestServicesTemplateRendersOfflineCard(t *testing.T) {
 // TestServicesTemplateRendersAPIBadges verifies that the conditional UI bits
 // driven by process-compose API fields — health pill, exit code, namespace
 // label, system_time — actually render when the corresponding fields are set.
+//
+// Note on health pill: redundant in the running+ready case (the common happy
+// path), so the template suppresses it there. We assert it shows only when
+// it adds information — see the worker process below for a probe-backed
+// process that's NOT ready, which should surface the pill.
 func TestServicesTemplateRendersAPIBadges(t *testing.T) {
 	views := []instanceView{{
 		Name:     "wsl",
 		Endpoint: "http://localhost:9998",
 		Online:   true,
 		Processes: []compose.ProcessState{
-			// Healthy probe-backed process in a non-default namespace
+			// Healthy probe-backed process in a non-default namespace.
+			// Health pill should be SUPPRESSED here — Running+Ready is implicit.
 			{Name: "api", Namespace: "web", Status: "Running", IsRunning: true, Pid: 7, SystemTime: "5m12s", Health: "Ready", HasHealthProbe: true},
+			// Probe-backed process that's running but probe is failing —
+			// health pill MUST surface so the user sees the unhealthy state.
+			{Name: "starting", Namespace: "default", Status: "Running", IsRunning: true, Pid: 8, Health: "Not Ready", HasHealthProbe: true},
 			// Crashed process — exit code badge should appear
 			{Name: "worker", Namespace: "default", Status: "Error", IsRunning: false, ExitCode: 137, SystemTime: "2s"},
 		},
@@ -64,7 +73,7 @@ func TestServicesTemplateRendersAPIBadges(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		`health-pill ready`, `>Ready<`, // health badge for api
+		`health-pill`, `>Not Ready<`, // health badge for the unhealthy probe-backed process
 		`exit-code`, `>137<`, // exit code badge for worker
 		`proc-ns">web<`, // namespace label for api
 		`>5m12s<`,       // system_time rendered directly
@@ -72,6 +81,11 @@ func TestServicesTemplateRendersAPIBadges(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q\n%s", want, out)
 		}
+	}
+	// Running+Ready combination must NOT render a health pill — it's redundant.
+	// (Other processes have a health-pill above; we look for the specific Ready text.)
+	if strings.Contains(out, `>Ready<`) {
+		t.Errorf("Running+Ready should suppress redundant health pill, but found `>Ready<`:\n%s", out)
 	}
 	// Default namespace should NOT render the proc-ns label
 	if strings.Contains(out, `proc-ns">default<`) {

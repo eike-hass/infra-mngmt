@@ -116,12 +116,13 @@ func (c *Client) DaemonHost() string {
 // ManagedContainer describes a container discovered by infra-mngmt, either
 // via standard devcontainer labels or the explicit claude.managed=true label.
 type ManagedContainer struct {
-	ID          string
-	Name        string
-	Labels      map[string]string
-	ConfigMount *ClaudeMount
-	ProjectRoot string
-	State       string // "running", "exited", "paused", etc.
+	ID              string
+	Name            string
+	Labels          map[string]string
+	ConfigMount     *ClaudeMount
+	ProjectRoot     string
+	WorkspaceFolder string // in-container path of the host-bind workspace mount; "" if not detected
+	State           string // "running", "exited", "paused", etc.
 }
 
 // ClaudeMount describes how the .claude config directory is exposed in a container.
@@ -171,6 +172,7 @@ func (c *Client) ListManaged(ctx context.Context) ([]ManagedContainer, error) {
 					}
 				}
 			}
+			mc.WorkspaceFolder = findWorkspaceMount(ctr.Mounts, mc.ProjectRoot)
 			seen[ctr.ID] = true
 			out = append(out, mc)
 		}
@@ -183,7 +185,9 @@ func (c *Client) ListManaged(ctx context.Context) ([]ManagedContainer, error) {
 				continue
 			}
 			seen[ctr.ID] = true
-			out = append(out, toManaged(ctr))
+			mc := toManaged(ctr)
+			mc.WorkspaceFolder = findWorkspaceMount(ctr.Mounts, mc.ProjectRoot)
+			out = append(out, mc)
 		}
 	}
 
@@ -202,6 +206,21 @@ func (c *Client) listByLabel(ctx context.Context, key, value string) ([]types.Co
 	})
 }
 
+// findWorkspaceMount returns the in-container destination of the bind mount
+// whose host-side Source matches projectRoot. Used for VS Code attach URIs
+// so the remote opens at the workspace folder rather than the container root.
+func findWorkspaceMount(mounts []types.MountPoint, projectRoot string) string {
+	if projectRoot == "" {
+		return ""
+	}
+	for _, m := range mounts {
+		if m.Type == mount.TypeBind && m.Source == projectRoot {
+			return m.Destination
+		}
+	}
+	return ""
+}
+
 // toManaged converts an SDK Container summary into our ManagedContainer.
 func toManaged(ctr types.Container) ManagedContainer {
 	mc := ManagedContainer{
@@ -217,7 +236,7 @@ func toManaged(ctr types.Container) ManagedContainer {
 		mc.ProjectRoot = p
 	}
 	for _, m := range ctr.Mounts {
-		if !isClaudeMount(m.Destination) {
+		if !isConfigDirMount(m.Destination) {
 			continue
 		}
 		switch m.Type {
@@ -239,8 +258,22 @@ func toManaged(ctr types.Container) ManagedContainer {
 	return mc
 }
 
-func isClaudeMount(dst string) bool {
-	return strings.HasSuffix(dst, "/.claude") || dst == "/root/.claude"
+// configMountDirs is the set of in-container destination paths that count as
+// a coding-assistant config mount. Each entry is matched both as a suffix
+// (e.g. /home/node/.claude, /workspaces/foo/.claude) and as the absolute
+// path under /root (devcontainers running as root).
+var configMountDirs = []string{".claude", ".opencode"}
+
+// isConfigDirMount reports whether dst is a mount destination for a
+// recognized coding-assistant config dir. Currently matches Claude Code
+// (.claude) and OpenCode (.opencode); add new tools to configMountDirs.
+func isConfigDirMount(dst string) bool {
+	for _, name := range configMountDirs {
+		if strings.HasSuffix(dst, "/"+name) || dst == "/root/"+name {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeDevcontainerPath converts Windows UNC paths written by VS Code on

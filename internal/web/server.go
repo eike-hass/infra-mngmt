@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -36,29 +37,41 @@ type BuildInfo struct {
 	GoVersion  string `json:"go_version"`
 }
 
+// RediscoverFn returns a fresh slice of sources from the configured discovery
+// path (host fs walk + docker container scan). The server uses it to satisfy
+// /api/sources/rescan: the returned slice is merged with the current source
+// list by ID, so existing sources keep their cached entity IDs while newly
+// discovered ones become visible without a process restart.
+type RediscoverFn func() []source.Source
+
 type Server struct {
-	sources         []source.Source
-	compose         []*compose.Client
-	booters         map[string]*compose.Bootstrapper // keyed by client name
-	bridges         []graph.BridgeInfo               // bridges.yaml entries with observed state; mutated under bridgesMu
-	bridgesMu       sync.RWMutex
-	bridgesFile     string                 // path to bridges.yaml so /bridges/refresh can reload
-	containerDecls  []containers.Container // containers.yaml entries
-	containersFile  string                 // path to containers.yaml so /containers/refresh can reload
-	depRules        []deps.Rule            // dependencies.yaml rules
-	docker          *docker.Client         // nil if Docker unavailable
-	mux             *chi.Mux
-	token           string         // required bearer token; empty = auth disabled
-	trustedNetworks []netip.Prefix // CIDRs whose source IPs bypass auth
-	sessions        sync.Map       // session ID (string) → struct{}
-	entityCache     entityCacheEntry
-	buildInfo       BuildInfo // populated via SetBuildInfo; surfaced at /api/version
+	sources            []source.Source
+	sourcesMu          sync.RWMutex // guards sources during /api/sources/rescan
+	rediscover         RediscoverFn // optional; nil → /api/sources/rescan returns 503
+	compose            []*compose.Client
+	booters            map[string]*compose.Bootstrapper // keyed by client name
+	bridges            []graph.BridgeInfo               // bridges.yaml entries with observed state; mutated under bridgesMu
+	bridgesMu          sync.RWMutex
+	bridgesFile        string                 // path to bridges.yaml so /bridges/refresh can reload
+	bridgesComposeFile string                 // path to process-compose.bridges.yaml for tier=wsl apply
+	composeFiles       map[string]string      // compose-instance name → its compose_file path; used to find the WSL PC
+	containerDecls     []containers.Container // containers.yaml entries
+	containersFile     string                 // path to containers.yaml so /containers/refresh can reload
+	depRules           []deps.Rule            // dependencies.yaml rules
+	docker             *docker.Client         // nil if Docker unavailable
+	mux                *chi.Mux
+	token              string         // required bearer token; empty = auth disabled
+	trustedNetworks    []netip.Prefix // CIDRs whose source IPs bypass auth
+	sessions           sync.Map       // session ID (string) → struct{}
+	entityCache        entityCacheEntry
+	buildInfo          BuildInfo // populated via SetBuildInfo; surfaced at /api/version
 }
 
 func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *docker.Client, bridges []graph.BridgeInfo, depRules []deps.Rule, containerDecls []containers.Container, trustedCIDRs []string) *Server {
 	s := &Server{
 		sources:         sources,
 		booters:         map[string]*compose.Bootstrapper{},
+		composeFiles:    map[string]string{},
 		token:           token,
 		docker:          dc,
 		bridges:         bridges,
@@ -68,6 +81,9 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 	}
 	for _, e := range composeCfg {
 		s.compose = append(s.compose, compose.New(e.Name, e.Endpoint, e.Token))
+		if e.ComposeFile != "" {
+			s.composeFiles[e.Name] = e.ComposeFile
+		}
 		if e.Binary != "" && e.ComposeFile != "" {
 			s.booters[e.Name] = &compose.Bootstrapper{
 				Name:        e.Name,
@@ -78,6 +94,11 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 			}
 		}
 	}
+	// Inject the bridges fragment as an extra `-f` for the bootstrapper of the
+	// WSL PC instance — keeps the user's main YAML untouched while still
+	// loading the generated socat relays. We can't do this in the loop above
+	// because the bridges fragment path is set later via SetBridgesComposeFile.
+	// See attachBridgesFragmentToBootstrap, called from that setter.
 
 	s.mux = chi.NewRouter()
 	s.mux.Use(middleware.Logger)
@@ -109,6 +130,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Get("/partials/promote-picker", s.handlePromotePicker)
 		r.Get("/partials/promote-clear", s.handlePromoteClear)
 		r.Post("/api/promote", s.handlePromote)
+		r.Post("/api/sources/rescan", s.handleSourcesRescan)
 
 		// services routes
 		r.Get("/partials/services", s.handleServicesPartial)
@@ -118,8 +140,9 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Post("/compose/start", s.handleComposeStart)   // ?instance=  — bootstrap
 		r.Post("/compose/reload", s.handleComposeReload) // ?instance=  — re-read YAML, reconcile
 		// bridge routes
-		r.Post("/bridge/apply", s.handleBridgeApply) // ?name=
-		r.Post("/bridge/reset", s.handleBridgeReset) // ?name=
+		r.Post("/bridge/apply", s.handleBridgeApply) // ?name=  — bring active (UAC if windows missing/drifted)
+		r.Post("/bridge/pause", s.handleBridgePause) // ?name=  — pause WSL relay; no UAC, leaves netsh in place
+		r.Post("/bridge/reset", s.handleBridgeReset) // ?name=  — full removal incl. netsh (UAC for windows)
 		r.Post("/bridges/apply", s.handleBridgesApplyAll)
 		r.Post("/bridges/refresh", s.handleBridgesRefresh)
 		// container routes (declared via containers.yaml; distinct from
@@ -132,6 +155,8 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Get("/api/containers", s.handleContainers)
 		r.Post("/api/container/start", s.handleContainerStart)
 		r.Post("/api/container/stop", s.handleContainerStop)
+		r.Post("/api/container/devcontainer-up", s.handleContainerDevcontainerUp)
+		r.Post("/api/container/open-vscode", s.handleContainerOpenVSCode)
 		r.Get("/api/container/events-stream", s.handleContainerEventsStream)
 	})
 
@@ -147,6 +172,44 @@ type ComposeEntry struct {
 // route can reload it on demand without a server restart.
 func (s *Server) SetBridgesFile(path string) {
 	s.bridgesFile = path
+}
+
+// SetRediscover wires the source-discovery callback used by
+// /api/sources/rescan. main.go passes a closure capturing the loaded config
+// so the web layer doesn't need to import config.
+func (s *Server) SetRediscover(fn RediscoverFn) {
+	s.rediscover = fn
+}
+
+// allSources returns the current source slice as a snapshot. Callers iterate
+// the returned slice without holding the lock — the slice header is captured,
+// and rescan only ever replaces the slice (it never mutates the underlying
+// array in place), so a reader's snapshot stays consistent for its lifetime.
+func (s *Server) allSources() []source.Source {
+	s.sourcesMu.RLock()
+	defer s.sourcesMu.RUnlock()
+	return s.sources
+}
+
+// SetBridgesComposeFile records the path to the generated process-compose
+// fragment that runs tier=wsl, type=socat bridges. /bridge/apply uses this
+// to materialize new socat relays without dropping to the CLI. Also propagates
+// the path into the matching PC instance's bootstrap config so a /compose/start
+// loads the fragment alongside the user's main YAML.
+func (s *Server) SetBridgesComposeFile(path string) {
+	s.bridgesComposeFile = path
+	if path == "" {
+		return
+	}
+	wantDir := filepath.Dir(path)
+	for name, cfPath := range s.composeFiles {
+		if filepath.Dir(cfPath) != wantDir {
+			continue
+		}
+		if b, ok := s.booters[name]; ok {
+			b.ExtraFiles = append([]string(nil), path)
+		}
+	}
 }
 
 // SetContainersFile records the path to containers.yaml for hot-reload.

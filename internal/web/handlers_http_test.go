@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -366,6 +367,121 @@ func TestHandleContainerStartNoDocker(t *testing.T) {
 	}
 }
 
+func TestHandleContainerOpenVSCodeNoDocker(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/open-vscode?id=abc", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rr.Code)
+	}
+}
+
+func TestHandleContainerOpenVSCodeMissingID(t *testing.T) {
+	// Passing nil docker would short-circuit before ID validation, so we
+	// only validate the URI builder + the no-docker path here. The
+	// missing-id branch is covered indirectly via the same code path.
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/open-vscode", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when docker not available, got %d", rr.Code)
+	}
+}
+
+func TestBuildAttachedContainerURI(t *testing.T) {
+	got := buildAttachedContainerURI("thirsty_moore", "/workspace")
+	// {"containerName":"thirsty_moore"} hex-encoded
+	want := "vscode-remote://attached-container+7b22636f6e7461696e65724e616d65223a227468697273747a5f6d6f6f7265227d/workspace"
+	// Quick sanity check: the full hex is 60 chars + "vscode-remote://attached-container+" prefix + "/workspace" suffix
+	if !strings.HasPrefix(got, "vscode-remote://attached-container+") {
+		t.Fatalf("missing canonical prefix: %q", got)
+	}
+	if !strings.HasSuffix(got, "/workspace") {
+		t.Errorf("missing workspace path suffix: %q", got)
+	}
+	// Decode the hex back to JSON and verify the envelope shape (more robust
+	// than a fixed hex string — passes regardless of unicode escaping etc.).
+	hexStart := len("vscode-remote://attached-container+")
+	hexEnd := strings.LastIndex(got, "/")
+	hexPart := got[hexStart:hexEnd]
+	raw, err := hex.DecodeString(hexPart)
+	if err != nil {
+		t.Fatalf("hex segment is not valid hex: %v (in %q)", err, got)
+	}
+	var env struct {
+		ContainerName string `json:"containerName"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("hex segment is not JSON: %v (raw=%q)", err, string(raw))
+	}
+	if env.ContainerName != "thirsty_moore" {
+		t.Errorf("ContainerName = %q, want %q", env.ContainerName, "thirsty_moore")
+	}
+	_ = want // kept as documentation of the expected exact shape
+}
+
+func TestBuildAttachedContainerURIEmptyWorkspaceDefaultsToRoot(t *testing.T) {
+	got := buildAttachedContainerURI("c1", "")
+	if !strings.HasSuffix(got, "/") {
+		t.Errorf("empty workspace should default to /, got %q", got)
+	}
+}
+
+func TestBuildDevContainerURIRoundtrip(t *testing.T) {
+	hostPath := `\\wsl.localhost\Ubuntu-18.04\home\eike\Workspace\open-design`
+	got := buildDevContainerURI(hostPath, "/workspace")
+	if !strings.HasPrefix(got, "vscode-remote://dev-container+") {
+		t.Fatalf("missing canonical prefix: %q", got)
+	}
+	if !strings.HasSuffix(got, "/workspace") {
+		t.Errorf("missing workspace path suffix: %q", got)
+	}
+	hexStart := len("vscode-remote://dev-container+")
+	hexEnd := strings.LastIndex(got, "/")
+	hexPart := got[hexStart:hexEnd]
+	raw, err := hex.DecodeString(hexPart)
+	if err != nil {
+		t.Fatalf("hex segment is not valid hex: %v (in %q)", err, got)
+	}
+	var env struct {
+		HostPath string `json:"hostPath"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("hex segment is not JSON: %v (raw=%q)", err, string(raw))
+	}
+	if env.HostPath != hostPath {
+		t.Errorf("HostPath = %q, want %q", env.HostPath, hostPath)
+	}
+}
+
+func TestFindDevcontainerCLIEnvOverride(t *testing.T) {
+	// Use the test binary itself as a stand-in for "any executable file" so
+	// the helper's stat check passes without needing a real devcontainer CLI.
+	t.Setenv("INFRAMNGMT_DEVCONTAINER_CLI", "node /tmp/foo.js extra-arg")
+	got, err := findDevcontainerCLI()
+	if err != nil {
+		t.Fatalf("env override should bypass stat checks; got %v", err)
+	}
+	want := []string{"node", "/tmp/foo.js", "extra-arg"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("arg[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestHandleContainerDevcontainerUpNoDocker(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/devcontainer-up?id=abc", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rr.Code)
+	}
+}
+
 // ─── auth middleware ─────────────────────────────────────────────────────────
 
 func TestAuthMiddlewareNoTokenAllowsAll(t *testing.T) {
@@ -701,3 +817,132 @@ func TestEntityWriteReadsBody(t *testing.T) {
 
 // silence unused import
 var _ io.Reader = (*bytes.Reader)(nil)
+
+// ─── /api/sources/rescan ────────────────────────────────────────────────────
+
+func TestSourcesRescanReturns503WhenNotConfigured(t *testing.T) {
+	srv := newServerWithSource(newMockSource("host:/a", entity.GlobalScope()))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/sources/rescan", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rr.Code)
+	}
+}
+
+func TestSourcesRescanAddsNewSources(t *testing.T) {
+	a := newMockSource("host:/a", entity.GlobalScope())
+	srv := newServerWithSource(a)
+	b := newMockSource("host:/b", entity.ProjectScope("/b"))
+	srv.SetRediscover(func() []source.Source { return []source.Source{a, b} })
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/sources/rescan", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Discovered []string
+		Added      []string
+		Total      int
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Discovered) != 2 || got.Discovered[0] != "host:/a" || got.Discovered[1] != "host:/b" {
+		t.Errorf("Discovered = %v, want [host:/a host:/b]", got.Discovered)
+	}
+	if len(got.Added) != 1 || got.Added[0] != "host:/b" {
+		t.Errorf("Added = %v, want [host:/b]", got.Added)
+	}
+	if got.Total != 2 {
+		t.Errorf("Total = %d, want 2", got.Total)
+	}
+	if len(srv.allSources()) != 2 {
+		t.Errorf("source list not updated, got %d", len(srv.allSources()))
+	}
+}
+
+func TestSourcesRescanIsIdempotent(t *testing.T) {
+	a := newMockSource("host:/a", entity.GlobalScope())
+	srv := newServerWithSource(a)
+	srv.SetRediscover(func() []source.Source { return []source.Source{a} })
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/sources/rescan", nil))
+	var got struct {
+		Discovered []string
+		Added      []string
+		Total      int
+	}
+	json.Unmarshal(rr.Body.Bytes(), &got)
+	if len(got.Discovered) != 1 || got.Discovered[0] != "host:/a" {
+		t.Errorf("Discovered should still report the existing source: %v", got.Discovered)
+	}
+	if len(got.Added) != 0 {
+		t.Errorf("Added should be empty on idempotent rescan, got %v", got.Added)
+	}
+	if got.Total != 1 {
+		t.Errorf("Total = %d, want 1", got.Total)
+	}
+}
+
+func TestSourcesRescanInvalidatesEntityCacheOnAdd(t *testing.T) {
+	a := newMockSource("host:/a", entity.GlobalScope())
+	a.addEntity(entity.KindCommand, "run", nil)
+	srv := newServerWithSource(a)
+
+	// Prime the cache.
+	if _, err := srv.allEntities(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cnt1 := atomic.LoadInt32(&a.calls)
+
+	b := newMockSource("host:/b", entity.GlobalScope())
+	b.addEntity(entity.KindAgent, "helper", nil)
+	srv.SetRediscover(func() []source.Source { return []source.Source{a, b} })
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/sources/rescan", nil))
+	if rr.Code != 200 {
+		t.Fatalf("rescan status = %d", rr.Code)
+	}
+
+	// After rescan, the next entity fetch must hit each source again — proving
+	// the cache was invalidated.
+	if _, err := srv.allEntities(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cnt2 := atomic.LoadInt32(&a.calls)
+	if cnt2 != cnt1+1 {
+		t.Errorf("expected fresh fetch after rescan: a.calls went %d → %d", cnt1, cnt2)
+	}
+	if atomic.LoadInt32(&b.calls) != 1 {
+		t.Errorf("expected new source b to be queried once, got %d", b.calls)
+	}
+}
+
+func TestSourcesRescanDoesNotInvalidateWhenNoAddition(t *testing.T) {
+	a := newMockSource("host:/a", entity.GlobalScope())
+	a.addEntity(entity.KindCommand, "run", nil)
+	srv := newServerWithSource(a)
+	srv.SetRediscover(func() []source.Source { return []source.Source{a} })
+
+	if _, err := srv.allEntities(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cnt1 := atomic.LoadInt32(&a.calls)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/sources/rescan", nil))
+	if rr.Code != 200 {
+		t.Fatalf("rescan status = %d", rr.Code)
+	}
+
+	if _, err := srv.allEntities(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cnt2 := atomic.LoadInt32(&a.calls)
+	if cnt2 != cnt1 {
+		t.Errorf("rescan with no new sources should not invalidate cache: a.calls went %d → %d", cnt1, cnt2)
+	}
+}

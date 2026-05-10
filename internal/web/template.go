@@ -38,11 +38,16 @@ body{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);colo
 /* ── header ── */
 header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--border);flex-shrink:0;min-height:40px}
 .logo{color:var(--white);font-size:13px;font-weight:600;letter-spacing:.04em;flex-shrink:0;margin-right:4px;display:flex;align-items:center;gap:6px}
-.build-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid var(--border);border-radius:3px;font-family:ui-monospace,monospace;font-size:10px;color:var(--text3);background:var(--bg2);flex-shrink:0;cursor:help}
-.build-chip:hover{color:var(--text2);border-color:var(--border2)}
+.build-chip{position:fixed;bottom:8px;right:12px;z-index:50;display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid var(--border);border-radius:3px;font-family:ui-monospace,monospace;font-size:10px;color:var(--text3);background:var(--bg2);flex-shrink:0;cursor:help;opacity:.75}
+.build-chip:hover{opacity:1;color:var(--text2);border-color:var(--border2)}
 .build-chip-commit{color:var(--text2);letter-spacing:.04em}
 .build-chip-when{color:var(--text3)}
 .build-chip-when:empty::before{content:"local"}
+.build-chip.stale{opacity:1;color:var(--accent);border-color:var(--accent);cursor:pointer}
+.build-chip.stale:hover{background:color-mix(in srgb,var(--accent) 14%,var(--bg2));color:var(--white);border-color:var(--accent)}
+.build-chip.stale .build-chip-commit,.build-chip.stale .build-chip-when{color:inherit}
+.build-chip-reload{background:none;border:none;color:inherit;cursor:pointer;padding:0;margin-left:2px;font:inherit;font-size:11px;line-height:1;display:none;pointer-events:none}
+.build-chip.stale .build-chip-reload{display:inline-block}
 .logo span{color:var(--text3);font-weight:normal}
 .view-tabs{display:flex;gap:2px;flex-shrink:0}
 .view-tab{background:transparent;border:1px solid transparent;color:var(--text2);padding:3px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;transition:all .12s}
@@ -52,6 +57,10 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .tab-scroll-wrap{display:flex;align-items:center;flex:1;min-width:0;gap:4px}
 .tab-scroll-btn{background:var(--bg3);border:1px solid var(--border2);color:var(--text2);padding:2px 7px;border-radius:3px;cursor:pointer;font-size:12px;line-height:1.4;flex-shrink:0;font-family:inherit;transition:all .12s}
 .tab-scroll-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--bg4)}
+.topbar-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:13px;line-height:1.3;flex-shrink:0;font-family:inherit;transition:all .12s;height:22px;display:inline-flex;align-items:center;justify-content:center;min-width:26px}
+.topbar-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--bg3)}
+.topbar-btn.spinning{animation:spin .7s linear infinite;color:var(--accent);border-color:var(--accent)}
+.topbar-btn:disabled{opacity:.5;cursor:wait}
 .source-tabs{display:flex;gap:4px;flex:1;overflow-x:auto;scrollbar-width:none;padding:0 4px}
 .source-tabs::-webkit-scrollbar{display:none}
 .tab{background:transparent;border:1px solid transparent;color:var(--text2);padding:3px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;white-space:nowrap;transition:all .12s}
@@ -61,12 +70,18 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .tab .scope-badge.global{background:color-mix(in srgb,var(--level-global) 12%,transparent);color:var(--level-global)}
 .tab .scope-badge.project{background:color-mix(in srgb,var(--level-project) 12%,transparent);color:var(--level-project)}
 .tab .scope-badge.devcontainer{background:color-mix(in srgb,var(--level-devcontainer) 12%,transparent);color:var(--level-devcontainer)}
-#search{background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:4px 8px;border-radius:4px;font-family:inherit;font-size:11px;width:180px;outline:none;flex-shrink:0}
-#search:focus{border-color:#444}
+.search-wrap{position:relative;display:inline-flex;align-items:center;flex-shrink:0;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;width:26px;height:24px;transition:width .18s ease,border-color .12s,background .12s;overflow:hidden;cursor:text;margin-left:auto}
+.search-wrap:hover{background:var(--bg4);border-color:var(--border2)}
+.search-wrap:focus-within,.search-wrap.has-value{width:200px;background:var(--bg3)}
+.search-wrap:focus-within{border-color:#444}
+.search-icon{position:absolute;left:7px;top:50%;transform:translateY(-50%);width:12px;height:12px;color:var(--text3);pointer-events:none;transition:color .12s}
+.search-wrap:hover .search-icon,.search-wrap:focus-within .search-icon,.search-wrap.has-value .search-icon{color:var(--text2)}
+#search{background:transparent;border:none;color:var(--text);padding:4px 8px 4px 24px;border-radius:4px;font-family:inherit;font-size:11px;width:100%;outline:none;min-width:0}
 #search::placeholder{color:var(--text3)}
 
 /* ── kind filter bar ── */
-.kind-bar{display:flex;gap:4px;padding:8px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.kind-bar{display:flex;align-items:center;gap:4px;padding:8px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.kind-bar-refresh{margin-left:auto;height:20px;min-width:24px;padding:0 6px;font-size:12px}
 .pill{background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 8px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .12s}
 .pill:hover{border-color:var(--border2);color:var(--text)}
 .pill.active{color:var(--white)}
@@ -109,6 +124,10 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .entity-scope-tag.global{background:color-mix(in srgb,var(--level-global) 12%,transparent);color:var(--level-global)}
 .entity-scope-tag.project{background:color-mix(in srgb,var(--level-project) 12%,transparent);color:var(--level-project)}
 .entity-scope-tag.devcontainer{background:color-mix(in srgb,var(--level-devcontainer) 12%,transparent);color:var(--level-devcontainer)}
+.entity-tool-tag{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0 4px;border-radius:3px;height:16px;font-size:9px;letter-spacing:.02em;border:1px solid transparent;gap:3px}
+.entity-tool-tag svg{display:block}
+.entity-tool-tag.claude{background:color-mix(in srgb,#D97757 12%,transparent);border-color:color-mix(in srgb,#D97757 25%,transparent)}
+.entity-tool-tag.opencode{background:color-mix(in srgb,#cccccc 10%,transparent);color:#d8d8d8;border-color:color-mix(in srgb,#cccccc 18%,transparent)}
 .empty-list{color:var(--text3);padding:24px 16px;font-style:italic}
 /* ── kind groups in entity list ── */
 .kind-group-header{display:flex;align-items:center;gap:6px;padding:8px 16px 4px;cursor:pointer;user-select:none}
@@ -187,6 +206,18 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .health-pill.unknown{background:#1e1e1e;color:var(--text3);border-color:var(--border)}
 .exit-code{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:10px;font-size:9px;background:#3a1a1a;color:var(--red);vertical-align:middle}
 .proc-name{color:var(--text)}
+.bridge-composite{cursor:pointer}
+.bridge-composite:hover{background:var(--bg2)}
+.bridge-composite.expanded .bridge-disclosure{transform:rotate(90deg)}
+.bridge-disclosure{display:inline-block;color:var(--text3);font-size:9px;width:12px;transition:transform .12s ease}
+.bridge-composite-summary{color:var(--text3);font-style:italic;font-size:11px}
+.bridge-member > td{background:var(--bg1);border-top:1px dashed var(--border)}
+.bridge-member-name{padding-left:6px !important}
+.bridge-member-indent{color:var(--text3);font-family:monospace;margin-right:6px}
+/* Server renders bridge-namespace processes always; CSS hides them by default
+   so the toggle is purely client-side. body.show-internals flips the rule. */
+tr.proc-internal{display:none}
+body.show-internals tr.proc-internal{display:table-row}
 .proc-ns{color:var(--text3);font-size:9px;letter-spacing:.04em;text-transform:uppercase;margin-top:1px}
 .proc-actions{display:inline-flex;gap:4px}
 .proc-btn{background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 7px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .1s}
@@ -306,6 +337,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .promote-flag.new{background:#0e1f17;color:#5cb088;border:1px solid #1d4d3c}
 .promote-flag.exists{background:#241c10;color:#dca97d;border:1px solid #553f1a}
 .promote-flag.readonly{background:#1c1c1c;color:var(--text3);border:1px solid var(--border2)}
+.promote-flag.cross-tool{background:#1c1228;color:#b89cda;border:1px solid #3a285a}
 /* result variants */
 .promote-result-card.ok .promote-result-icon{color:#7ddca7}
 .promote-result-card.warn .promote-result-icon{color:#dca97d}
@@ -362,9 +394,11 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .ov-detail{padding:2px 16px 7px;font-size:10px;color:var(--text3)}
 /* ── container controls in overview ── */
 .ov-ctr{display:flex;align-items:center;gap:4px;flex-shrink:0}
-.ov-ctr-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.ov-ctr-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;transition:background .2s}
 .ov-ctr-dot.running{background:#3a3}
 .ov-ctr-dot.exited,.ov-ctr-dot.stopped{background:var(--text3)}
+.ov-ctr-dot.starting{background:#3a3;animation:ctrPulse 1.2s ease-in-out infinite}
+@keyframes ctrPulse{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:1;transform:scale(1.5)}}
 .ov-ctr-label{font-size:10px;color:var(--text2)}
 .ov-ctr-btn{background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-size:10px;padding:1px 7px;border-radius:3px;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-flex;align-items:center}
 .ov-ctr-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -374,8 +408,8 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .ctr-log-bar{display:flex;justify-content:space-between;align-items:center;padding:4px 16px;font-size:10px;color:var(--text3)}
 .ctr-log-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0;line-height:1}
 .ctr-log-close:hover{color:var(--text)}
-.ctr-log-pre{margin:0 8px 8px;padding:8px;font-size:10px;line-height:1.4;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:3px;max-height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-.ctr-event-list{margin:0 8px 8px;padding:6px 8px;font-size:10px;background:var(--bg);border:1px solid var(--border);border-radius:3px;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.ctr-log-pre{margin:0 8px 8px;padding:8px;font-size:10px;line-height:1.4;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:3px;height:240px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.ctr-event-list{margin:0 8px 8px;padding:6px 8px;font-size:10px;background:var(--bg);border:1px solid var(--border);border-radius:3px;height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
 .ctr-event{display:flex;align-items:center;gap:8px;line-height:1.5}
 .ctr-event-time{color:var(--text3);flex-shrink:0;font-variant-numeric:tabular-nums}
 .ctr-event-glyph{flex-shrink:0;width:10px;text-align:center}
@@ -422,41 +456,22 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
       <button class="tab active" data-project="__all__">all</button>
       {{range .Sources}}
       <button class="tab" data-project="{{.Key}}">
-        {{.Label}}{{range .Levels}}<span class="scope-badge {{.}}">{{.}}</span>{{end}}
+        {{.Label}}{{range .Levels}}<span class="scope-badge {{.}}" title="{{.}}">{{levelShort .}}</span>{{end}}
       </button>
       {{end}}
     </div>
     <button class="tab-scroll-btn" onclick="document.getElementById('source-tabs-bar').scrollBy({left:140,behavior:'smooth'})">›</button>
   </div>
 
-  <input id="search" type="text" placeholder="⌘K search" autocomplete="off">
+  <button class="topbar-btn" id="ov-rescan" onclick="doRescan(event)" title="Rescan sources — discover new projects / devcontainers">⤺</button>
 
-  {{with .Build}}
-  {{if or .BuildEpoch .Commit}}
-  <span class="build-chip" id="build-chip"
-        title="commit {{if .Commit}}{{.Commit}}{{else}}(unknown){{end}}{{if .Dirty}}-dirty{{end}}{{if .VCSTime}} · committed {{.VCSTime}}{{end}}{{if .BuildEpoch}} · built {{.BuildEpoch}}{{end}}{{if .GoVersion}} · {{.GoVersion}}{{end}}"
-        data-epoch="{{.BuildEpoch}}">
-    <span class="build-chip-commit">{{if .Commit}}{{.Commit}}{{else}}local{{end}}{{if .Dirty}}+{{end}}</span>
-    <span class="build-chip-when" id="build-chip-when">{{.BuildEpoch}}</span>
-  </span>
-  <script>
-  (function(){
-    const el = document.getElementById('build-chip-when');
-    const epoch = parseInt(document.getElementById('build-chip').dataset.epoch, 10);
-    if (!epoch) { return; }
-    const fmt = () => {
-      const diff = Date.now()/1000 - epoch;
-      if (diff < 60) return Math.floor(diff)+'s ago';
-      if (diff < 3600) return Math.floor(diff/60)+'m ago';
-      if (diff < 86400) return Math.floor(diff/3600)+'h ago';
-      return Math.floor(diff/86400)+'d ago';
-    };
-    el.textContent = fmt();
-    setInterval(() => { el.textContent = fmt(); }, 30000);
-  })();
-  </script>
-  {{end}}
-  {{end}}
+  <label class="search-wrap" for="search" title="Search (⌘K)">
+    <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.5"></circle>
+      <path d="M10.5 10.5l3 3"></path>
+    </svg>
+    <input id="search" type="text" placeholder="⌘K search" autocomplete="off">
+  </label>
 </header>
 
 <div class="kind-bar" id="kind-bar">
@@ -468,6 +483,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
   <button class="pill" data-kind="hook"><span class="pill-icon">↪</span> hooks</button>
   <button class="pill" data-kind="memory"><span class="pill-icon">▤</span> memory</button>
   <button class="pill" data-kind="claude_md"><span class="pill-icon">#</span> CLAUDE.md</button>
+  <button class="topbar-btn kind-bar-refresh" id="ov-refresh" onclick="doRefresh(event)" title="Refresh entities — re-read all known sources">↻</button>
 </div>
 
 <div id="project-overview" style="display:none">
@@ -478,7 +494,6 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
     <span class="ov-counts" id="ov-counts" style="display:none"></span>
     <span class="ov-spacer"></span>
     <div class="ov-ctr" id="ov-ctr"></div>
-    <button class="ov-refresh" id="ov-refresh" onclick="doRefresh(event)" title="Refresh entities">↻</button>
     <span class="ov-toggle" id="ov-toggle" style="display:none" onclick="toggleOverview()">▾</span>
   </div>
   <div class="ov-detail" id="ov-detail" style="display:none"></div>
@@ -522,6 +537,10 @@ function rebuildFuse() {
   fuse = new Fuse(fuseData, {keys:['name','kind'],threshold:0.35});
 }
 rebuildFuse();
+// Initial load: activeProject is '__all__', so apply any persisted collapse
+// state from a previous session. (Project views always start expanded.)
+// Defined later in this script — run on next tick so the function is in scope.
+queueMicrotask(() => applyCollapsedStateForAllView());
 
 function applyFilters() {
   const ids = fuseResults ? new Set(fuseResults.map(r=>r.item.id)) : null;
@@ -553,8 +572,118 @@ function applyFilters() {
   document.getElementById('empty-list').style.display = any ? 'none' : '';
 }
 
+// ── kind-group collapse/expand persistence ──
+// Persisted only for the 'all' view (activeProject === '__all__'). Project
+// tabs always start fully expanded — collapsing while on a project is
+// ephemeral and gets reset on the next tab switch.
+const COLLAPSED_KEY = 'infra-mngmt:groups-collapsed';
+
+function readCollapsedSet() {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch (_) { return new Set(); }
+}
+
+function writeCollapsedSet(set) {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set])); } catch (_) {}
+}
+
+function applyCollapsedStateForAllView() {
+  const collapsed = readCollapsedSet();
+  document.querySelectorAll('.kind-group').forEach(g => {
+    g.classList.toggle('collapsed', collapsed.has(g.dataset.kind));
+  });
+}
+
+function expandAllKindGroups() {
+  document.querySelectorAll('.kind-group.collapsed').forEach(g => g.classList.remove('collapsed'));
+}
+
+// ── composite bridge expand/collapse ──
+// Click on a composite row toggles visibility of its member rows. State is
+// kept in localStorage so it survives the every-8s panel refresh (htmx
+// re-renders the partial; we re-apply expand state from storage on each
+// htmx:afterSwap below).
+function toggleCompositeMembers(name, ev) {
+  // Action buttons on the composite row stop propagation themselves; this
+  // guard catches clicks that reached us via bubbling from non-button areas.
+  if (ev && ev.target && ev.target.closest('.proc-actions')) return;
+  const expanded = !document.querySelector('tr.bridge-composite[data-composite="'+name+'"]')?.classList.contains('expanded');
+  setCompositeExpanded(name, expanded);
+}
+function setCompositeExpanded(name, expanded) {
+  const row = document.querySelector('tr.bridge-composite[data-composite="'+name+'"]');
+  if (!row) return;
+  row.classList.toggle('expanded', expanded);
+  document.querySelectorAll('tr.bridge-member[data-member-of="'+name+'"]').forEach(m => {
+    if (expanded) m.removeAttribute('hidden');
+    else m.setAttribute('hidden', '');
+  });
+  // Persist preference per-composite.
+  const key = 'im_composite_expanded';
+  const set = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  if (expanded) set.add(name); else set.delete(name);
+  localStorage.setItem(key, JSON.stringify([...set]));
+}
+function reapplyCompositeExpansion() {
+  const key = 'im_composite_expanded';
+  const set = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  document.querySelectorAll('tr.bridge-composite[data-composite]').forEach(row => {
+    const name = row.getAttribute('data-composite');
+    if (set.has(name)) setCompositeExpanded(name, true);
+  });
+}
+
+// ── show internals toggle ──
+// Body class gates CSS visibility of bridge-* PC processes; localStorage
+// persists. Faster than a server round-trip — toggle is instant.
+function toggleShowInternals() {
+  const want = !document.body.classList.contains('show-internals');
+  document.body.classList.toggle('show-internals', want);
+  localStorage.setItem('im_show_internals', want ? '1' : '0');
+  // Also flip any in-DOM toggle button labels so they reflect the new state.
+  document.querySelectorAll('[data-toggle="show-internals"]').forEach(b => {
+    b.textContent = want ? 'hide internals' : 'show internals';
+    b.title = want ? 'hide internal bridge-* processes (already shown in bridges panel)'
+                   : 'show internal bridge-* processes for debugging';
+  });
+}
+function applyShowInternalsFromStorage() {
+  if (localStorage.getItem('im_show_internals') === '1') {
+    document.body.classList.add('show-internals');
+    document.querySelectorAll('[data-toggle="show-internals"]').forEach(b => {
+      b.textContent = 'hide internals';
+      b.title = 'hide internal bridge-* processes (already shown in bridges panel)';
+    });
+  }
+}
+
+// Re-apply both states whenever htmx swaps in fresh services HTML.
+document.addEventListener('htmx:afterSwap', (e) => {
+  if (e.target && (e.target.id === 'services-inner' || e.target.id === 'view-services')) {
+    applyShowInternalsFromStorage();
+    reapplyCompositeExpansion();
+  }
+});
+// And on initial load.
+document.addEventListener('DOMContentLoaded', () => {
+  applyShowInternalsFromStorage();
+  reapplyCompositeExpansion();
+});
+
 function toggleKindGroup(headerEl) {
-  headerEl.parentElement.classList.toggle('collapsed');
+  const group = headerEl.parentElement;
+  group.classList.toggle('collapsed');
+  // Only persist while on the all view; per-project collapse is intentionally
+  // session-only so each project tab opens with everything visible.
+  if (activeProject === '__all__') {
+    const collapsed = readCollapsedSet();
+    const kind = group.dataset.kind;
+    if (group.classList.contains('collapsed')) collapsed.add(kind);
+    else collapsed.delete(kind);
+    writeCollapsedSet(collapsed);
+  }
 }
 
 // ── project overview ──
@@ -614,6 +743,63 @@ function toggleOverview() {
   document.getElementById('ov-toggle').className = 'ov-toggle' + (ovExpanded ? ' open' : '');
 }
 
+async function doRescan(e) {
+  e.stopPropagation();
+  const btn = document.getElementById('ov-rescan');
+  btn.classList.add('spinning');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/sources/rescan', {method:'POST'});
+    if (!r.ok) {
+      showRescanToast('rescan failed: HTTP ' + r.status, 'error');
+      return;
+    }
+    const body = await r.json();
+    const added = (body.added || []).length;
+    const discovered = (body.discovered || []).length;
+    if (added > 0) {
+      // Refresh the entity list so the new sources actually render. Pass a
+      // synthetic event because doRefresh() calls e.stopPropagation().
+      await doRefresh({stopPropagation:()=>{}});
+      showRescanToast('added ' + added + ' new source' + (added===1?'':'s') + ': ' + body.added.join(', '), 'ok');
+    } else {
+      // Surface what was actually scanned so the user can debug "why didn't
+      // my new project show up?". The list is the universe of sources
+      // discovery currently sees; if their new project isn't there, the
+      // problem is upstream (no .claude/, no devcontainer label, not in a
+      // scanned workspace dir, etc.).
+      showRescanToast(
+        'no new sources (scanned ' + discovered + '): ' + (body.discovered || []).join(', '),
+        'info'
+      );
+    }
+  } catch (err) {
+    showRescanToast('rescan error: ' + err, 'error');
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
+}
+
+function showRescanToast(msg, kind) {
+  let host = document.getElementById('rescan-toast-host');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'rescan-toast-host';
+    host.style.cssText = 'position:fixed;top:54px;right:14px;z-index:9999;display:flex;flex-direction:column;gap:6px;max-width:520px';
+    document.body.appendChild(host);
+  }
+  const t = document.createElement('div');
+  const palette = kind === 'ok'    ? 'background:#11201a;border:1px solid #1d4d3c;color:#7ddca7'
+                : kind === 'error' ? 'background:#2a1212;border:1px solid #5a1818;color:#e06c6c'
+                :                    'background:#16161b;border:1px solid #2a2a2a;color:#c9c9c9';
+  t.style.cssText = palette + ';padding:8px 12px;border-radius:4px;font-size:11px;font-family:ui-monospace,monospace;line-height:1.5;word-break:break-all;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .2s';
+  t.textContent = msg;
+  t.onclick = () => t.remove();
+  host.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 8000);
+}
+
 async function doRefresh(e) {
   e.stopPropagation();
   const btn = document.getElementById('ov-refresh');
@@ -626,6 +812,8 @@ async function doRefresh(e) {
     const html = await fetch('/partials/entity-list').then(r => r.text());
     document.getElementById('entity-list').innerHTML = html;
     rebuildFuse();
+    // Re-apply collapse state since the swap rebuilt the .kind-group elements.
+    if (activeProject === '__all__') applyCollapsedStateForAllView();
     if (prevSelectedId) {
       const card = document.querySelector('.entity-card[data-id="'+prevSelectedId.replace(/"/g,'\\"')+'"]');
       if (card) card.classList.add('selected');
@@ -643,7 +831,16 @@ async function doRefresh(e) {
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  t.classList.add('active'); activeProject = t.dataset.project; selectedEntityProject = null; closeLogStream(); applyFilters(); updateProjectOverview();
+  t.classList.add('active');
+  activeProject = t.dataset.project;
+  selectedEntityProject = null;
+  closeLogStream();
+  // Switching to a project tab expands everything (project views start fresh);
+  // switching back to all re-applies the persisted collapse state.
+  if (activeProject === '__all__') applyCollapsedStateForAllView();
+  else expandAllKindGroups();
+  applyFilters();
+  updateProjectOverview();
 }));
 document.querySelectorAll('.pill').forEach(p => p.addEventListener('click', () => {
   document.querySelectorAll('.pill').forEach(x=>x.classList.remove('active'));
@@ -651,14 +848,23 @@ document.querySelectorAll('.pill').forEach(p => p.addEventListener('click', () =
 }));
 
 const search = document.getElementById('search');
+const searchWrap = search.closest('.search-wrap');
+function setSearchHasValue() {
+  // Keep the wrap expanded while there's content even after the input blurs;
+  // the collapse animation only fires when blurring an empty input.
+  searchWrap.classList.toggle('has-value', search.value.trim() !== '');
+}
 search.addEventListener('input', () => {
   const q = search.value.trim();
   fuseResults = q ? fuse.search(q) : null;
+  setSearchHasValue();
   applyFilters();
 });
 document.addEventListener('keydown', e => {
   if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); search.focus(); search.select(); }
-  if (e.key==='Escape' && document.activeElement===search) { search.value=''; fuseResults=null; applyFilters(); search.blur(); }
+  if (e.key==='Escape' && document.activeElement===search) {
+    search.value=''; fuseResults=null; setSearchHasValue(); applyFilters(); search.blur();
+  }
 });
 
 // ── entity preview ──
@@ -811,6 +1017,10 @@ function cancelEdit(btn) {
 let containers = [];
 let _logEventSource = null;
 let _logContainerId = null;
+// IDs of containers whose start/devup is in flight. Survives tab switches
+// (closeLogStream resets _logContainerId but leaves this alone) so the
+// pulsing-dot indicator stays visible while devcontainer up grinds away.
+let _pendingStarts = new Set();
 
 async function fetchContainers() {
   try {
@@ -832,24 +1042,60 @@ function isContainerReady(ctr) {
 function renderContainerControls(displayProject) {
   const el = document.getElementById('ov-ctr');
   if (!el) return;
-  const ctr = containers.find(c => c.projectRoot === displayProject);
-  if (!ctr) { el.innerHTML = ''; return; }
+  // devcontainer up creates a NEW container on devcontainer.json hash drift
+  // and orphans the old one (also: VS Code/Dev Containers does the same on
+  // rebuild). Multiple containers can therefore share one projectRoot.
+  // Pick the running one if any, else the most relevant: starting > exited.
+  const matches = containers.filter(c => c.projectRoot === displayProject);
+  if (!matches.length) { el.innerHTML = ''; return; }
+  const ctr = matches.find(c => c.state === 'running')
+           || matches.find(c => _pendingStarts.has(c.id))
+           || matches[0];
   const running = ctr.state === 'running';
-  const starting = _logContainerId === ctr.id && !running;
-  const stateClass = running ? 'running' : (ctr.state || 'exited');
-  const stateLabel = starting ? 'starting…'
+  // _pendingStarts survives tab switches and re-renders, so the pulsing
+  // dot keeps animating while devcontainer up runs in the background.
+  const isStarting = _pendingStarts.has(ctr.id) && !running;
+  const stateClass = running ? 'running' : (isStarting ? 'starting' : (ctr.state || 'exited'));
+  const stateLabel = isStarting ? 'starting'
     : (ctr.health && ctr.health !== 'healthy' && ctr.health !== '' ? ctr.state+' ('+ctr.health+')' : ctr.state);
   const ready = isContainerReady(ctr);
+  // When the container has a known project root, "start" runs devcontainer
+  // up \u2014 it creates if missing, starts if stopped, AND runs lifecycle
+  // scripts (postCreate / postStart / postAttach). Plain docker start
+  // skips all hooks. Label flips to "\u2191 up" so the user sees which path
+  // will fire.
+  // Architectural decision: devcontainers (containers with projectRoot)
+  // are exclusively brought up via VS Code's "Reopen in Container" \u2014 it's
+  // the only path that gets full lifecycle + the user-space port forwarding
+  // VS Code owns. infra-mngmt offers stop + attach. Standalone services
+  // should be managed via raw docker / docker compose / process-compose.
+  const hasDev = !!ctr.projectRoot;
+  const showActBtn = running || !hasDev;
   const actLabel = running ? '\u25a0 stop' : '\u25b6 start';
   const actFn   = running ? 'stop' : 'start';
-  const vsHref  = ready ? 'href="vscode://ms-vscode-remote.remote-containers/openFolder?containerId=' + ctr.shortId + '"' : '';
-  const vsCls   = 'ov-ctr-btn' + (ready ? '' : ' disabled');
-  const vsTitle = ready ? 'Open in VS Code' : 'waiting for container to be ready';
-  const vsBtn   = running ? '<a class="' + vsCls + '" ' + vsHref + ' title="' + vsTitle + '">VS Code</a>' : '';
+  const actTitle = running ? 'Stop container'
+    : 'docker start \u2014 daemon-level resume only; no devcontainer.json lifecycle';
+  const actBtn = showActBtn
+    ? '<button class="ov-ctr-btn" data-cid="' + ctr.id + '" data-act="' + actFn + '" title="' + actTitle + '" onclick="containerAction(this.dataset.cid,this.dataset.act)">' + actLabel + '</button>'
+    : '';
+  // VS Code button always-on for devcontainers. Backend dispatches:
+  //   running   → attach to container (existing URI form)
+  //   stopped   → "code --new-window <projectRoot>" so VS Code's Dev
+  //               Containers extension prompts "Reopen in Container",
+  //               which is the supported full-lifecycle start path.
+  const vsClickable = ready || hasDev;
+  const vsRef       = ctr.name || ctr.id;
+  const vsAt        = ctr.workspaceFolder ? ' at ' + ctr.workspaceFolder : '';
+  const vsTitle     = ready
+    ? 'Attach VS Code (new window) to ' + vsRef + vsAt
+    : (hasDev ? 'Open in VS Code — directly opens as a dev container (full lifecycle + port forwarding). No "Reopen in Container" prompt.' : 'waiting for container to be ready');
+  const vsBtn = vsClickable
+    ? '<button type="button" class="ov-ctr-btn" data-vsid="' + ctr.id + '" onclick="openVSCodeAttach(this.dataset.vsid)" title="' + vsTitle + '">VS Code</button>'
+    : '';
   el.innerHTML =
     '<span class="ov-ctr-dot ' + stateClass + '"></span>' +
     '<span class="ov-ctr-label">' + stateLabel + '</span>' +
-    '<button class="ov-ctr-btn" data-cid="' + ctr.id + '" data-act="' + actFn + '" onclick="containerAction(this.dataset.cid,this.dataset.act)">' + actLabel + '</button>' +
+    actBtn +
     vsBtn;
 }
 
@@ -863,10 +1109,38 @@ async function containerAction(id, action) {
     const dp = selectedEntityProject || activeProject;
     renderContainerControls(dp);
   } else {
+    // Plain docker start path — only reached for non-devcontainer
+    // auto-discovered containers (rare). Devcontainers are routed through
+    // VS Code's "Reopen in Container" instead.
     const ctr = containers.find(c => c.id === id);
-    if (ctr) ctr.health = null; // unknown until first state event
-    try { await fetch('/api/container/start?id='+encodeURIComponent(id), {method:'POST'}); } catch(_) {}
+    if (ctr) ctr.health = null;
+    _pendingStarts.add(id);
     openLogStream(id);
+    renderContainerControls(selectedEntityProject || activeProject);
+    try {
+      const r = await fetch('/api/container/start?id='+encodeURIComponent(id), {method:'POST'});
+      if (!r.ok) {
+        const txt = (await r.text()).trim();
+        showToast({title: 'start failed', body: txt || ('HTTP '+r.status)});
+      }
+    } catch(e) {
+      showToast({title: 'start failed', body: e.message || String(e)});
+    } finally {
+      _pendingStarts.delete(id);
+      await fetchContainers();
+      renderContainerControls(selectedEntityProject || activeProject);
+    }
+  }
+}
+
+async function openVSCodeAttach(id) {
+  try {
+    const r = await fetch('/api/container/open-vscode?id='+encodeURIComponent(id), {method:'POST'});
+    if (r.ok) return;
+    const txt = await r.text();
+    showToast({title:'VS Code launch failed', body: txt.trim() || ('HTTP '+r.status)});
+  } catch (e) {
+    showToast({title:'VS Code launch failed', body: e.message || String(e)});
   }
 }
 
@@ -942,6 +1216,58 @@ fetchContainers().then(() => {
   renderContainerControls(displayProject);
 });
 </script>
+
+{{with .Build}}
+{{if or .BuildEpoch .Commit}}
+<span class="build-chip" id="build-chip"
+      title="commit {{if .Commit}}{{.Commit}}{{else}}(unknown){{end}}{{if .Dirty}}-dirty{{end}}{{if .VCSTime}} · committed {{.VCSTime}}{{end}}{{if .BuildEpoch}} · built {{.BuildEpoch}}{{end}}{{if .GoVersion}} · {{.GoVersion}}{{end}}"
+      data-epoch="{{.BuildEpoch}}"
+      data-commit="{{.Commit}}">
+  <span class="build-chip-commit">{{if .Commit}}{{.Commit}}{{else}}local{{end}}{{if .Dirty}}+{{end}}</span>
+  <span class="build-chip-when" id="build-chip-when">{{.BuildEpoch}}</span>
+  <span class="build-chip-reload" id="build-chip-reload" aria-hidden="true">↻</span>
+</span>
+<script>
+(function(){
+  const chip = document.getElementById('build-chip');
+  const el = document.getElementById('build-chip-when');
+  const epoch = parseInt(chip.dataset.epoch, 10);
+  if (epoch) {
+    const fmt = () => {
+      const diff = Date.now()/1000 - epoch;
+      if (diff < 60) return Math.floor(diff)+'s ago';
+      if (diff < 3600) return Math.floor(diff/60)+'m ago';
+      if (diff < 86400) return Math.floor(diff/3600)+'h ago';
+      return Math.floor(diff/86400)+'d ago';
+    };
+    el.textContent = fmt();
+    setInterval(() => { el.textContent = fmt(); }, 30000);
+  }
+  const curEpoch = chip.dataset.epoch || '';
+  const curCommit = chip.dataset.commit || '';
+  let stale = false;
+  async function checkVersion(){
+    if (stale) return;
+    try {
+      const r = await fetch('/api/version', {cache:'no-store'});
+      if (!r.ok) return;
+      const v = await r.json();
+      const epochDiff  = v.build_epoch && v.build_epoch !== curEpoch;
+      const commitDiff = v.commit      && v.commit      !== curCommit;
+      if (epochDiff || commitDiff) {
+        stale = true;
+        chip.classList.add('stale');
+        chip.title = 'New version available — click to reload';
+        chip.addEventListener('click', () => location.reload());
+      }
+    } catch(_) { /* server may be restarting; retry on next tick */ }
+  }
+  setInterval(checkVersion, 30000);
+  setTimeout(checkVersion, 5000);
+})();
+</script>
+{{end}}
+{{end}}
 </body>
 </html>
 `
@@ -966,10 +1292,12 @@ const entityListInnerHTML = `{{define "entity-list-inner"}}
          data-project="{{.Scope.Project}}"
          data-kind="{{.Kind}}"
          data-name="{{.Name}}"
-         data-scope="{{.Scope.Label}}">
+         data-scope="{{.Scope.Label}}"
+         data-tool="{{entityTool .}}">
       <span class="kind-icon {{.Kind}}">{{kindIcon .Kind}}</span>
       <span class="entity-name">{{.Name}}</span>
       {{if $status}}<span class="runtime-badge {{$status.State}}" title="{{$status.State}}{{if $status.Process}} · {{$status.Instance}}/{{$status.Process}}{{end}}"></span>{{end}}
+      {{$tool := entityTool .}}{{if $tool}}<span class="entity-tool-tag {{$tool}}" title="tool: {{$tool}}">{{toolIcon $tool}}</span>{{end}}
       <span class="entity-scope-tag {{entityLevel .}}" title="{{entityLevel .}}">{{entityLevelShort .}}</span>
     </div>
     {{end}}
@@ -999,6 +1327,7 @@ const previewHTML = `
   <div class="preview-meta">
     <span>kind: <span class="meta-kind {{$e.Kind}}">{{$e.Kind}}</span></span>
     <span>level: <span class="meta-level {{entityLevel $e}}">{{entityLevel $e}}</span></span>
+    {{with entityTool $e}}<span>tool: <span class="entity-tool-tag {{.}}">{{toolIcon .}} {{.}}</span></span>{{end}}
     <span>source: <span style="color:var(--text)">{{$e.Source}}</span></span>
   </div>
   {{if $s}}
@@ -1096,6 +1425,53 @@ const servicesHTML = `
     </tr></thead>
     <tbody>
     {{range .Bridges}}
+    {{if eq .Kind "composite"}}
+    <tr class="bridge-composite" data-composite="{{.Name}}" onclick="toggleCompositeMembers('{{.Name}}', event)">
+      <td class="col-name">
+        <span class="bridge-disclosure">▸</span>
+        <span class="proc-name">{{.Name}}</span>
+        {{if .Description}}<div class="proc-ns">{{.Description}}</div>{{end}}
+      </td>
+      <td>composite</td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td class="bridge-composite-summary" colspan="2">{{len .Members}} member{{if ne (len .Members) 1}}s{{end}}</td>
+      <td class="col-actions">
+        <div class="proc-actions">
+          <button class="proc-btn start"
+                  hx-post="/bridge/apply?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  onclick="event.stopPropagation()"
+                  title="bring composite to active state; skips UAC if Windows portproxy is already in place">apply</button>
+          <button class="proc-btn restart"
+                  hx-post="/bridge/pause?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  onclick="event.stopPropagation()"
+                  title="pause: stop WSL relay + remove Windows portproxy. Smart-skips elevation if Windows side is already inactive; otherwise UAC."
+                  hx-confirm="Pause composite {{.Name}}? Removing the Windows portproxy will request elevation if the rule is currently in place.">pause</button>
+          <button class="proc-btn stop"
+                  hx-post="/bridge/reset?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  onclick="event.stopPropagation()"
+                  hx-confirm="Reset composite {{.Name}}? This removes the netsh + firewall rules and will request elevation.">reset</button>
+        </div>
+      </td>
+    </tr>
+    {{$parentName := .Name}}
+    {{range .Members}}
+    <tr class="bridge-member" data-member-of="{{$parentName}}" hidden>
+      <td class="col-name bridge-member-name">
+        <span class="bridge-member-indent">└─</span>
+        <span class="proc-name">{{.Name}}</span>
+        {{if .DisplayName}}<div class="proc-ns">{{.DisplayName}}</div>{{end}}
+      </td>
+      <td>{{.Tier}}</td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td><code>{{.Listen}}</code></td>
+      <td><code>{{.Connect}}</code></td>
+      <td class="col-actions"></td>
+    </tr>
+    {{end}}
+    {{else}}
     <tr>
       <td class="col-name">
         <div class="proc-name">{{.Name}}</div>
@@ -1110,6 +1486,12 @@ const servicesHTML = `
           <button class="proc-btn start"
                   hx-post="/bridge/apply?name={{.Name}}"
                   hx-target="#services-inner" hx-swap="outerHTML">apply</button>
+          {{if eq .Tier "wsl"}}
+          <button class="proc-btn restart"
+                  hx-post="/bridge/pause?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  title="pause: stop the relay process; reset to fully remove">pause</button>
+          {{end}}
           <button class="proc-btn stop"
                   hx-post="/bridge/reset?name={{.Name}}"
                   hx-target="#services-inner" hx-swap="outerHTML"
@@ -1117,6 +1499,7 @@ const servicesHTML = `
         </div>
       </td>
     </tr>
+    {{end}}
     {{end}}
     </tbody>
   </table>
@@ -1201,6 +1584,10 @@ const servicesHTML = `
     {{if $iv.Online}}
     <span class="svc-running-count">{{runningCount $iv.Processes}}/{{len $iv.Processes}} running</span>
     <button class="svc-boot-btn"
+            data-toggle="show-internals"
+            onclick="toggleShowInternals()"
+            title="show internal bridge-* processes for debugging">show internals</button>
+    <button class="svc-boot-btn"
             hx-post="/compose/reload?instance={{$iv.Name}}"
             hx-target="#services-inner"
             hx-swap="outerHTML"
@@ -1219,14 +1606,17 @@ const servicesHTML = `
     </tr></thead>
     <tbody>
     {{range $iv.Processes}}
-    <tr>
+    <tr{{if isInternalProcess .}} class="proc-internal"{{end}}>
       <td class="col-name">
         <div class="proc-name">{{.Name}}</div>
         {{if and .Namespace (ne .Namespace "default")}}<div class="proc-ns">{{.Namespace}}</div>{{end}}
       </td>
       <td class="col-state">
         <span class="status-pill {{statusClass .Status}}"><span class="dot"></span>{{.Status}}</span>
-        {{if .HasHealthProbe}}<span class="health-pill {{healthClass .Health}}" title="readiness: {{.Health}}">{{.Health}}</span>{{end}}
+        {{/* Health pill is redundant when status=Running + health=Ready
+             (the common happy path). Show it only when it adds info:
+             probe configured AND (not ready OR not running). */}}
+        {{if and .HasHealthProbe (or (ne .Health "Ready") (not .IsRunning))}}<span class="health-pill {{healthClass .Health}}" title="readiness: {{.Health}}">{{.Health}}</span>{{end}}
         {{if and (not .IsRunning) (ne .ExitCode 0)}}<span class="exit-code" title="exit code">{{.ExitCode}}</span>{{end}}
       </td>
       <td class="col-pid">{{if .Pid}}{{.Pid}}{{else}}—{{end}}</td>
@@ -1407,6 +1797,8 @@ const promotePickerHTML = `
                 {{if .ProjectPath}}<div class="promote-target-path">{{.ProjectPath}}</div>{{end}}
               </div>
               <div class="promote-target-flags">
+                {{with .Tool}}<span class="entity-tool-tag {{.}}" title="tool: {{.}}">{{toolIcon .}} {{.}}</span>{{end}}
+                {{if .CrossTool}}<span class="promote-flag cross-tool" title="source and target are different tools">cross-tool</span>{{end}}
                 {{if .Exists}}<span class="promote-flag exists">replaces</span>{{end}}
                 {{if .ReadOnly}}<span class="promote-flag readonly">read-only</span>{{end}}
                 {{if and (not .Exists) (not .ReadOnly)}}<span class="promote-flag new">new</span>{{end}}
