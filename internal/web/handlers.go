@@ -1216,15 +1216,36 @@ func IsInternalProcess(p compose.ProcessState) bool {
 }
 
 func (s *Server) handleServicesPartial(w http.ResponseWriter, r *http.Request) {
+	containers := s.rebuildContainerViews(r.Context())
 	data := servicesPageData{
 		Instances:  s.buildInstanceViews(r.Context()),
 		Bridges:    s.rebuildBridgeViews(r.Context()),
-		Containers: s.rebuildContainerViews(r.Context()),
+		Containers: containers,
+		Vaults:     buildVaultCardViews(containers),
 		Docker:     s.dockerHealth(r.Context()),
 	}
 	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, data)
+}
+
+// buildVaultCardViews extracts vault-specific cards from the container
+// view list. Reusing the polled container snapshot avoids a second Docker
+// round-trip per services-partial fetch.
+func buildVaultCardViews(containers []containerView) []vaultCardView {
+	var out []vaultCardView
+	for _, c := range containers {
+		if c.Kind != "mcp-fs" {
+			continue
+		}
+		out = append(out, vaultCardView{
+			Name:        c.Name,
+			Description: c.Description,
+			State:       c.State,
+			StateClass:  c.StateClass,
+		})
+	}
+	return out
 }
 
 func (s *Server) handleProcessStart(w http.ResponseWriter, r *http.Request) {

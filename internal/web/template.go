@@ -341,6 +341,35 @@ body.show-internals tr.proc-internal{display:table-row}
 
 /* ── broken-ref indicator in preview ── */
 .broken-ref-banner{background:#2a1e12;border:1px solid #5a3a18;border-radius:4px;color:var(--orange);padding:8px 12px;margin-bottom:12px;font-size:11px}
+/* ── vaults section (mcp-fs filesystem MCPs) ── */
+.svc-instance.vaults .vault-cards{display:flex;flex-direction:column;gap:8px;padding:8px}
+.vault-card{border:1px solid var(--border);border-radius:4px;background:var(--bg2);overflow:hidden}
+.vault-card-header{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg3)}
+.vault-card-name{color:var(--white);font-weight:600;font-size:12px}
+.vault-card-desc{color:var(--text2);font-size:11px;flex:1}
+.vault-panel{padding:8px 10px}
+.vault-loading{color:var(--text3);font-style:italic;padding:6px 8px;font-size:11px}
+.vault-error{color:var(--red);background:color-mix(in srgb,var(--red) 12%,var(--bg));border:1px solid var(--red);border-radius:3px;padding:6px 8px;margin-bottom:6px;font-size:11px}
+.vault-section-label{color:var(--text3);font-size:10px;letter-spacing:.06em;text-transform:uppercase;margin:4px 0}
+.vault-allow-list{margin-bottom:8px}
+.vault-allow-row{display:flex;align-items:center;gap:8px;padding:3px 6px;border:1px solid var(--border);border-radius:3px;margin-bottom:3px;background:var(--bg)}
+.vault-allow-row code{flex:1;color:var(--text);word-break:break-all;font-size:11px}
+.vault-revoke-btn,.vault-tree-allow-btn,.vault-tree-into,.vault-tree-up{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 8px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .12s}
+.vault-revoke-btn:hover{border-color:var(--red);color:var(--red)}
+.vault-tree-allow-btn:hover{border-color:var(--accent);color:var(--accent)}
+.vault-tree-into,.vault-tree-up{text-align:left}
+.vault-tree-into{flex:1}
+.vault-tree-into:hover,.vault-tree-up:hover{border-color:var(--text2);color:var(--text)}
+.vault-browse{margin-top:6px;border-top:1px dashed var(--border);padding-top:6px}
+.vault-browse-summary{cursor:pointer;color:var(--text2);font-size:11px;padding:4px 0;list-style:none;user-select:none}
+.vault-browse-summary::before{content:"▸ ";color:var(--text3)}
+.vault-browse[open] .vault-browse-summary::before{content:"▾ "}
+.vault-browse-summary:hover{color:var(--text)}
+.vault-tree{margin-top:4px}
+.vault-tree-row{display:flex;align-items:center;gap:6px;padding:2px 0}
+.vault-tree-cwd code{color:var(--text2);font-size:11px;flex:1}
+.vault-tree-allowed{color:var(--green);font-size:10px;padding:0 6px}
+.vault-empty{color:var(--text3);font-style:italic;font-size:11px;padding:6px 8px}
 /* ── preview header colored meta ── */
 .meta-kind.mcp_server{color:var(--kind-mcp)}.meta-kind.command{color:var(--kind-command)}
 .meta-kind.agent{color:var(--kind-agent)}.meta-kind.skill{color:var(--kind-skill)}
@@ -1691,6 +1720,35 @@ const servicesHTML = `
     {{end}}
     </tbody>
   </table>
+</div>
+{{end}}
+{{if .Vaults}}
+<div class="svc-instance vaults">
+  <div class="svc-header">
+    <span class="svc-icon" title="filesystem MCP vaults">🔐</span>
+    <span class="svc-name">vaults</span>
+    <span class="svc-endpoint">filesystem MCPs (mcp-fs) — allowlist gates agent reads</span>
+  </div>
+  <div class="vault-cards">
+    {{range .Vaults}}
+    <div class="vault-card">
+      <div class="vault-card-header">
+        <span class="vault-card-name">{{.Name}}</span>
+        {{if .Description}}<span class="vault-card-desc">{{.Description}}</span>{{end}}
+        <span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span>
+      </div>
+      {{/* The panel target uses hx-preserve so the 8s view-services poll
+           doesn't flicker the loaded content. Explicit allow/disallow
+           still target this id and replace it. */}}
+      <div id="vault-{{.Name}}-panel"
+           hx-preserve
+           hx-get="/partials/vault/panel?name={{.Name}}"
+           hx-trigger="load">
+        <div class="vault-loading">loading vault…</div>
+      </div>
+    </div>
+    {{end}}
+  </div>
 </div>
 {{end}}
 {{if not .Instances}}

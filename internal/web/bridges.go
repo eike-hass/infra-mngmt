@@ -734,7 +734,18 @@ type servicesPageData struct {
 	Instances  []instanceView
 	Bridges    []bridgeView
 	Containers []containerView
+	Vaults     []vaultCardView
 	Docker     dockerHealthView
+}
+
+// vaultCardView is the metadata an mcp-fs container surfaces in the
+// dedicated vaults section. The actual allowlist + tree content is loaded
+// lazily by HTMX from /partials/vault/panel and preserved across polls.
+type vaultCardView struct {
+	Name        string
+	Description string
+	State       string // mirrored from the container's State
+	StateClass  string // CSS class for the status pill
 }
 
 // dockerHealthView drives the LED in the containers panel header. Configured

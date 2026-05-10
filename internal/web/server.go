@@ -79,6 +79,11 @@ type Server struct {
 	sessions           sync.Map       // session ID (string) → struct{}
 	entityCache        entityCacheEntry
 	buildInfo          BuildInfo // populated via SetBuildInfo; surfaced at /api/version
+
+	// vaultFactory builds a VaultClient for a given control-plane URL.
+	// Tests inject a fake; production leaves nil and gets the default
+	// (a real HTTP client).
+	vaultFactory VaultClientFactory
 }
 
 func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *docker.Client, bridges []graph.BridgeInfo, depRules []deps.Rule, containerDecls []containers.Container, trustedCIDRs []string) *Server {
@@ -164,7 +169,15 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Post("/decl-container/start", s.handleContainerStartByName) // ?name=
 		r.Post("/decl-container/stop", s.handleContainerStopByName)   // ?name=
 		r.Post("/containers/refresh", s.handleContainersRefresh)
-		r.Get("/partials/logs", s.handleProcessLogs) // ?instance=&process=
+
+		// Vault (mcp-fs) panel: lazy-loaded into the container card via
+		// HTMX. ?name= is the container declaration name; ?at= is the
+		// optional tree path (defaults to the vault's data root).
+		r.Get("/partials/vault/panel", s.handleVaultPanel)
+		r.Get("/partials/vault/tree", s.handleVaultTree)
+		r.Post("/api/vault/allow", s.handleVaultAllow)       // ?name=&path=
+		r.Post("/api/vault/disallow", s.handleVaultDisallow) // ?name=&path=
+		r.Get("/partials/logs", s.handleProcessLogs)         // ?instance=&process=
 		r.Get("/partials/llama", s.handleLlamaAll)           // standalone "llama" view body
 		r.Post("/api/refresh", s.handleRefresh)
 		r.Get("/api/containers", s.handleContainers)
