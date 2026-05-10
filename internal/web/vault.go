@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"html/template"
 	"log"
 	"net/http"
 	"path"
@@ -260,64 +259,7 @@ func (s *Server) vaultMutate(w http.ResponseWriter, r *http.Request, mutate func
 // Both `.Name` (vault container name) and `.Tree.Name` are needed in URLs
 // so the tree template can be reached as a standalone partial. URLs always
 // include `name=` so the handler can resolve which vault to talk to.
-var vaultPanelTemplate = template.Must(template.New("vault-panel").Parse(`
-<div class="vault-panel" id="vault-{{.Name}}-panel">
-  {{if .Error}}
-    <div class="vault-error">{{.Error}}</div>
-  {{end}}
-  <div class="vault-allow-list">
-    <div class="vault-section-label">{{len .Allowed}} allowed path{{if ne (len .Allowed) 1}}s{{end}}</div>
-    {{if .Allowed}}
-      {{range .Allowed}}
-        <div class="vault-allow-row">
-          <code>{{.}}</code>
-          <button class="vault-revoke-btn"
-                  hx-post="/api/vault/disallow?name={{$.Name}}&path={{.}}"
-                  hx-target="#vault-{{$.Name}}-panel"
-                  hx-swap="outerHTML">remove</button>
-        </div>
-      {{end}}
-    {{else}}
-      <div class="vault-empty">No paths allowed yet — agents can't read anything from this vault.</div>
-    {{end}}
-  </div>
-  <details class="vault-browse">
-    <summary class="vault-browse-summary">Browse + add paths</summary>
-    {{if .Tree}}
-      {{template "vault-tree" .Tree}}
-    {{end}}
-  </details>
-</div>
-{{define "vault-tree"}}
-<div class="vault-tree" id="vault-tree-{{.Name}}">
-  <div class="vault-tree-row vault-tree-cwd">
-    <code>{{.Path}}</code>
-    {{if .ParentPath}}
-      <button class="vault-tree-up"
-              hx-get="/partials/vault/tree?name={{.Name}}&at={{.ParentPath}}"
-              hx-target="#vault-tree-{{.Name}}" hx-swap="outerHTML">..</button>
-    {{end}}
-  </div>
-  {{range .Entries}}
-    <div class="vault-tree-row">
-      <button class="vault-tree-into"
-              hx-get="/partials/vault/tree?name={{$.Name}}&at={{.Full}}"
-              hx-target="#vault-tree-{{$.Name}}" hx-swap="outerHTML">{{.Name}}/</button>
-      {{if .Allowed}}
-        <span class="vault-tree-allowed">allowed</span>
-      {{else}}
-        <button class="vault-tree-allow-btn"
-                hx-post="/api/vault/allow?name={{$.Name}}&path={{.Full}}&at={{$.Path}}"
-                hx-target="#vault-{{$.Name}}-panel"
-                hx-swap="outerHTML">+ allow</button>
-      {{end}}
-    </div>
-  {{else}}
-    <div class="vault-empty">No subdirectories.</div>
-  {{end}}
-</div>
-{{end}}
-`))
+var vaultPanelTemplate = parseTemplate("vault-panel", "templates/vault_panel.html.tmpl")
 
 // renderVaultPanel writes the full panel HTML.
 func (s *Server) renderVaultPanel(w http.ResponseWriter, view vaultPanelView) {

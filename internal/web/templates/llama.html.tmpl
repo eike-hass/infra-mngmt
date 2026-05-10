@@ -1,0 +1,230 @@
+
+{{if not .Servers}}
+<div class="llama-page-empty">
+  no <code>llama_servers</code> declared in config.yaml — add at least one entry to populate this view
+</div>
+{{else}}
+<div class="llama-grid">
+{{range .Servers}}
+<div class="llama-card">
+  <div class="llama-head">
+    <span class="llama-card-name" title="process-compose instance / process — matches the row in the services view">{{.Instance}} / {{.Process}}</span>
+    <span class="llama-endpoint" title="base URL probed every 10s; /health, /props, /v1/models, /metrics, /slots">{{.Endpoint}}</span>
+    {{if .HealthErr}}
+      <span class="llama-pill bad" title="GET /health failed: {{.HealthErr}}">unreachable</span>
+    {{else if .Health.OK}}
+      <span class="llama-pill good" title="GET /health → 200 {status: ok}">healthy</span>
+    {{else}}
+      <span class="llama-pill warn" title="GET /health returned a non-200 status — server is alive but not ready">{{.Health.Status}}</span>
+    {{end}}
+    {{if .HasProps}}
+      {{if .Props.IsSleeping}}<span class="llama-pill warn" title="--sleep-idle-seconds elapsed; model unloaded from VRAM. KV-cache metrics will be 0 until next request reloads it.">sleeping</span>{{end}}
+      {{if .Router}}<span class="llama-pill mode" title="multi-model router detected via /v1/models[].status — /metrics and /slots are proxied to a child process selected by ?model=">router</span>{{end}}
+      {{if .Props.BuildInfo}}<span class="llama-build" title="llama.cpp build identifier from /props.build_info — format b<num>-<commit>; useful for spotting drift across tiers">{{.Props.BuildInfo}}</span>{{end}}
+    {{end}}
+    {{/* Drain button: visible whenever we have a working endpoint. Aborts
+         every in-flight task and pops the deferred queue until /slots is
+         empty. Cheap (KV-cache erase only, weights stay loaded), but
+         destructive — any active conversation gets cut off. */}}
+    {{if not .HealthErr}}
+    <button class="llama-drain-btn"
+            hx-post="/api/llama/drain?instance={{.Instance}}&process={{.Process}}"
+            hx-target="#view-llama"
+            hx-swap="innerHTML"
+            hx-confirm="Drain queue on {{.Instance}}/{{.Process}}? This aborts any in-flight generation and pops queued tasks. Weights stay loaded — no model reload needed."
+            title="erase active slots + drain deferred queue. Use when an OD turn timed out client-side but llama-server is still grinding through phantom generations.">drain queue</button>
+    {{end}}
+  </div>
+
+  {{if .HasProps}}
+  <div class="llama-identity">
+    {{if .Props.ModelPath}}{{if ne .Props.ModelPath "none"}}<div title="from /props.model_path — full path to the loaded GGUF on the server's filesystem"><span class="lbl">model</span> <code>{{.Props.ModelPath}}</code></div>{{end}}{{end}}
+    {{if .Props.TotalSlots}}<div title="from /props.total_slots — concurrent generation slots, set at startup via -np/--parallel and fixed for process lifetime"><span class="lbl">slots</span> {{.Props.TotalSlots}}</div>{{end}}
+    {{if .Props.NCtx}}<div title="from /props.default_generation_settings.n_ctx — per-slot context budget; total_ctx ≈ n_ctx × total_slots"><span class="lbl">n_ctx</span> {{.Props.NCtx}}</div>{{end}}
+  </div>
+  {{else if .PropsErr}}
+  <div class="llama-row-err">props: {{.PropsErr}}</div>
+  {{end}}
+
+  {{if .Router}}
+    {{if .ModelsErr}}
+    <div class="llama-row-err">models: {{.ModelsErr}}</div>
+    {{else if not .Models}}
+    <div class="llama-row-hint">no models declared in router config</div>
+    {{else}}
+    <div class="llama-models">
+      {{range .Models}}
+      <div class="llama-model llama-model-{{or .Status "unknown"}}{{if .Failed}} failed{{end}}{{if .Synthetic}} synthetic{{end}}">
+        <div class="llama-model-head">
+          <span class="llama-model-status status-{{or .Status "unknown"}}" title="{{statusHelp .Status}}">{{or .Status "unknown"}}</span>
+          <code class="llama-model-id" title="model id from /v1/models[].id — pass as ?model=&lt;urlencoded&gt; on /metrics and /slots&#10;{{.ID}}">{{.ID}}</code>
+          {{if .Synthetic}}
+            <span class="llama-pill mode" title="auto-injected by the router as a fallback when no [default] is defined in your preset INI. Has no --model arg so it can never launch — this is benign upstream behavior, not a config bug.">router default (synthetic)</span>
+          {{else if .Failed}}
+            <span class="llama-pill bad" title="upstream /v1/models reports status.failed=true with exit_code={{.ExitCode}}. NOTE: the router uses the same flag for 'preset failed to launch' AND 'LRU-evicted child didn't shut down cleanly' — the exit code is the only discriminator available in the JSON.&#10;&#10;Code {{.ExitCode}}: {{exitCodeHelp .ExitCode}}">failed (exit {{.ExitCode}})</span>
+          {{end}}
+        </div>
+        {{if and .ModelPath (or .Failed (eq .Status "loaded") (eq .Status "sleeping"))}}
+        <div class="llama-model-path" title="value of --model from /v1/models[].status.args — verify the file exists at this path on the llama-server host">
+          <span class="lbl">model file</span>
+          <code>{{.ModelPath}}</code>
+        </div>
+        {{end}}
+        {{if or (eq .Status "loaded") (eq .Status "sleeping")}}
+          {{if .Metrics.Available}}
+          {{template "llama-metrics-row" .Metrics}}
+          {{else if .MetricsErr}}
+          <div class="llama-row-err">metrics: {{.MetricsErr}}</div>
+          {{else}}
+          <div class="llama-row-hint">metrics endpoint disabled — start llama-server with <code>--metrics</code> to enable</div>
+          {{end}}
+
+          {{if .SlotsDisabled}}
+          <div class="llama-row-hint">slots endpoint disabled — start without <code>--no-slots</code> to enable</div>
+          {{else if .SlotsErr}}
+          <div class="llama-row-err">slots: {{.SlotsErr}}</div>
+          {{else if .Slots}}
+          {{template "llama-slot-grid" .Slots}}
+          {{end}}
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  {{else}}
+    {{if .Metrics.Available}}
+    {{template "llama-metrics-row" .Metrics}}
+    {{else if .MetricsErr}}
+    <div class="llama-row-err">metrics: {{.MetricsErr}}</div>
+    {{else}}
+    <div class="llama-row-hint">metrics endpoint disabled — start llama-server with <code>--metrics</code> to enable</div>
+    {{end}}
+
+    {{if .SlotsDisabled}}
+    <div class="llama-row-hint">slots endpoint disabled — start without <code>--no-slots</code> to enable</div>
+    {{else if .SlotsErr}}
+    <div class="llama-row-err">slots: {{.SlotsErr}}</div>
+    {{else if .Slots}}
+    {{template "llama-slot-grid" .Slots}}
+    {{end}}
+  {{end}}
+
+  <details class="llama-logs-section" data-llama-logs-key="{{.Instance}}|{{.Process}}" ontoggle="onLlamaLogsToggle(this)">
+    <summary title="last 150 lines from the process-compose log buffer for {{.Instance}}/{{.Process}} — refreshes with the panel every 10s. Open/closed state is persisted across panel refreshes via localStorage.">
+      <span class="lbl">logs</span>
+      <span class="llama-logs-count">{{len .Logs}}{{if .LogsErr}} · err{{end}}</span>
+    </summary>
+    {{if .LogsErr}}
+    <div class="llama-row-err">logs: {{.LogsErr}}</div>
+    {{else if .Logs}}
+    <div class="llama-logs-body">
+      {{range .Logs}}<div class="llama-log-line">{{if .Time}}<span class="llama-log-time">{{.Time}}</span>{{end}}{{.Message}}</div>{{end}}
+    </div>
+    {{else}}
+    <div class="llama-logs-empty">no log lines yet</div>
+    {{end}}
+  </details>
+</div>
+{{end}}
+</div>
+{{end}}
+
+{{define "llama-metrics-row"}}
+<div class="llama-stats">
+  <div class="llama-stat" title="token-weighted prompt-eval throughput averaged over ALL completions since process start — NOT a rolling window. Stale-when-idle: keeps showing the historical mean indefinitely. (llamacpp:prompt_tokens_seconds gauge = Σtokens / Σms)">
+    <span class="lbl">prompt</span>
+    <span class="val">{{formatTokensPerSec .PromptTokensPerSec}}</span>
+  </div>
+  <div class="llama-stat" title="token-weighted generation throughput averaged over ALL completions since process start — NOT a rolling window. Updates only when a generation finishes (slot::release). For current speed, derive via PromQL rate() on the *_total counters. (llamacpp:predicted_tokens_seconds gauge = Σtokens / Σms)">
+    <span class="lbl">predict</span>
+    <span class="val">{{formatTokensPerSec .PredictedPerSec}}</span>
+  </div>
+  <div class="llama-stat" title="active requests (llamacpp:requests_processing gauge)">
+    <span class="lbl">in flight</span>
+    <span class="val">{{printf "%.0f" .RequestsProcessing}}</span>
+  </div>
+  <div class="llama-stat" title="queued waiting for a free slot (llamacpp:requests_deferred gauge)">
+    <span class="lbl">deferred</span>
+    <span class="val {{if gt .RequestsDeferred 0.0}}warn{{end}}">{{printf "%.0f" .RequestsDeferred}}</span>
+  </div>
+  <div class="llama-stat" title="avg busy slots per llama_decode() call (llamacpp:n_busy_slots_per_decode counter — closer to total_slots = better batch packing)">
+    <span class="lbl">batch util</span>
+    <span class="val">{{printf "%.2f" .NBusySlotsPerDecode}}</span>
+  </div>
+  <div class="llama-stat" title="cumulative since process start (llamacpp:tokens_predicted_total counter — resets on restart)">
+    <span class="lbl">decoded</span>
+    <span class="val">{{formatCount .TokensPredictedTotal}}</span>
+  </div>
+</div>
+{{end}}
+
+{{define "llama-slot-grid"}}
+<div class="llama-slots">
+  {{range .}}
+  <div class="llama-slot {{if .IsProcessing}}busy{{else}}idle{{end}}">
+    <div class="llama-slot-head">
+      <span class="llama-slot-id" title="slot index from /slots[].id">slot #{{.ID}}</span>
+      {{if .IsProcessing}}
+        <span class="llama-slot-state busy" title="slot is actively decoding">busy</span>
+        <span class="llama-slot-task" title="server-assigned task id from /slots[].id_task — useful for correlating with logs">task {{.IDTask}}</span>
+      {{else}}
+        <span class="llama-slot-state idle" title="slot is free; next request will land here">idle</span>
+      {{end}}
+      {{if .Speculative}}<span class="llama-slot-tag spec" title="speculative decoding active for this slot — draft model is generating candidate tokens that the main model verifies in parallel">spec</span>{{end}}
+    </div>
+
+    {{if .IsProcessing}}
+    <div class="llama-slot-progress" title="decoded / total — total = n_decoded + n_remain. Progress within the per-task n_predict budget, NOT the slot's n_ctx.">
+      <div class="llama-slot-bar">
+        <div class="llama-slot-fill" style="width:{{slotProgress .Progress.NDecoded .Progress.NRemain}}%"></div>
+      </div>
+      <div class="llama-slot-progress-label">
+        <span>{{.Progress.NDecoded}} / {{add .Progress.NDecoded .Progress.NRemain}} tok</span>
+        <span>{{slotProgress .Progress.NDecoded .Progress.NRemain}}%</span>
+      </div>
+    </div>
+    {{end}}
+
+    <dl class="llama-slot-detail">
+      {{if .IsProcessing}}
+      <dt title="sampling temperature — higher = more diverse, 0 = greedy">temperature</dt>
+      <dd>{{printf "%.2f" .Params.Temperature}}</dd>
+
+      {{if gt .Params.TopK 0}}
+      <dt title="top_k — keep only the K most-likely candidates before sampling">top_k</dt>
+      <dd>{{.Params.TopK}}</dd>
+      {{end}}
+
+      {{if and (gt .Params.TopP 0.0) (lt .Params.TopP 1.0)}}
+      <dt title="top_p (nucleus) — keep candidates whose cumulative probability ≤ p">top_p</dt>
+      <dd>{{printf "%.2f" .Params.TopP}}</dd>
+      {{end}}
+
+      {{if gt .Params.MinP 0.0}}
+      <dt title="min_p — drop candidates whose probability < p × max_prob">min_p</dt>
+      <dd>{{printf "%.2f" .Params.MinP}}</dd>
+      {{end}}
+
+      {{if gt .Params.NPredict 0}}
+      <dt title="n_predict — max generation budget for this task (params.n_predict)">budget</dt>
+      <dd>{{.Params.NPredict}} tok{{if gt .Params.NKeep 0}} · keep {{.Params.NKeep}}{{end}}</dd>
+      {{end}}
+
+      {{if .Params.ChatFormat}}
+      <dt title="chat_format — prompt template applied by the server">format</dt>
+      <dd>{{.Params.ChatFormat}}{{if .Params.ReasoningFormat}} <span class="muted">· reasoning={{.Params.ReasoningFormat}}</span>{{end}}</dd>
+      {{end}}
+
+      {{if and .Params.SpeculativeType (ne .Params.SpeculativeType "none")}}
+      <dt title="speculative-decoding strategy">spec</dt>
+      <dd>{{.Params.SpeculativeType}}</dd>
+      {{end}}
+      {{end}}
+
+      <dt title="per-slot context budget from /slots[].n_ctx — total context across all slots ≈ n_ctx × total_slots">n_ctx</dt>
+      <dd>{{.NCtx}}</dd>
+    </dl>
+  </div>
+  {{end}}
+</div>
+{{end}}

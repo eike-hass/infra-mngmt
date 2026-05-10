@@ -1,0 +1,85 @@
+
+{{$e := .Entity}}
+{{$c := .Content}}
+{{$s := .MCPStatus}}
+{{if $s}}
+  {{if eq $s.State "unresolved"}}
+  <div class="broken-ref-banner">⚠ no matching process-compose process found — this MCP server may have no backing service running</div>
+  {{end}}
+  {{if eq $s.State "stopped"}}
+  <div class="broken-ref-banner" style="background:#2a1212;border-color:#5a1818;color:var(--red)">⚠ backing process <strong>{{$s.Instance}}/{{$s.Process}}</strong> is not running</div>
+  {{end}}
+  {{if eq $s.State "error"}}
+  <div class="broken-ref-banner" style="background:#2a1212;border-color:#5a1818;color:var(--red)">✖ backing process <strong>{{$s.Instance}}/{{$s.Process}}</strong> is in error state</div>
+  {{end}}
+{{end}}
+<div class="preview-header">
+  <div class="preview-name">{{$e.Name}}</div>
+  <div class="preview-meta">
+    <span>kind: <span class="meta-kind {{$e.Kind}}">{{$e.Kind}}</span></span>
+    <span>level: <span class="meta-level {{entityLevel $e}}">{{entityLevel $e}}</span></span>
+    {{with entityTool $e}}<span>tool: <span class="entity-tool-tag {{.}}">{{toolIcon .}} {{.}}</span></span>{{end}}
+    <span>source: <span style="color:var(--text)">{{$e.Source}}</span></span>
+  </div>
+  {{if $s}}
+  <div style="margin-top:8px">
+    <span class="mcp-status {{$s.State}}">
+      <span class="dot"></span>{{$s.State}}{{if $s.Process}} &nbsp;·&nbsp; {{$s.Instance}}/{{$s.Process}}{{end}}
+    </span>
+  </div>
+  {{end}}
+  {{if and (eq (printf "%s" $e.Kind) "mcp_server") $e.Attrs}}
+  <div class="mcp-attrs">
+    {{range $k, $v := $e.Attrs}}<span><span class="mcp-attrs-k">{{$k}}:</span> <span class="mcp-attrs-v">{{$v}}</span></span>{{end}}
+  </div>
+  {{end}}
+  <div class="preview-path">{{$e.Path}}</div>
+  <div class="preview-toolbar">
+    <button class="promote-btn"
+            hx-get="/partials/promote-picker?id={{$e.ID}}"
+            hx-target="#promote-slot"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this">promote →</button>
+  </div>
+  <div id="promote-slot" class="promote-slot"></div>
+</div>
+{{if $c}}
+<div class="preview-body" data-entity-id="{{$e.ID}}">
+  <div class="preview-actions">
+    <button class="edit-btn" onclick="startEdit(this)">edit</button>
+    <div class="edit-toolbar" style="display:none">
+      <button class="save-btn" onclick="saveEdit(this)">save</button>
+      <button class="cancel-btn" onclick="cancelEdit(this)">cancel</button>
+      <span class="save-status"></span>
+    </div>
+  </div>
+  <div class="raw-src">{{$c}}</div>
+  <div class="rendered-md"></div>
+  <div class="editor-wrap" style="display:none"></div>
+</div>
+{{else if eq (printf "%s" $e.Kind) "mcp_server"}}
+<div class="mcp-card">
+  {{$transport := index $e.Attrs "type"}}{{if not $transport}}{{$transport = "stdio"}}{{end}}
+  <div class="mcp-transport-row">
+    <span class="mcp-transport {{$transport}}">{{$transport}}</span>
+    {{if and $s (eq $s.State "running")}}<span style="font-size:10px;color:var(--text3)">↑ connected</span>{{end}}
+  </div>
+  {{if $e.Attrs}}
+  <div class="mcp-table">
+    {{range $k, $v := $e.Attrs}}{{if ne $k "type"}}
+    <div class="mcp-row">
+      <div class="mcp-row-k">{{$k}}</div>
+      <div class="mcp-row-v">{{$v}}</div>
+    </div>
+    {{end}}{{end}}
+  </div>
+  {{end}}
+  <div class="mcp-detail">
+    <div class="mcp-detail-row"><span class="mcp-detail-k">scope</span><span class="mcp-detail-v">{{if $e.Scope.Global}}global (~/.claude){{else}}project ({{$e.Scope.Project}}){{end}}</span></div>
+    <div class="mcp-detail-row"><span class="mcp-detail-k">source</span><span class="mcp-detail-v">{{$e.Source}}</span></div>
+    <div class="mcp-detail-row"><span class="mcp-detail-k">config</span><span class="mcp-detail-v" style="color:var(--text3)">{{$e.Path}}</span></div>
+  </div>
+</div>
+{{else}}
+<div class="preview-no-content">content not available for this entity type</div>
+{{end}}

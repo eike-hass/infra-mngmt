@@ -309,7 +309,7 @@ func (n *nextTokenField) UnmarshalJSON(data []byte) error {
 // SlotParams is the sampler+budget subset of /slots' nested `params{...}`.
 // We deliberately omit `generation_prompt`, `samplers`, `lora`, and similar
 // fields that either leak user prompts or aren't actionable in a status
-// panel. The remaining fields characterise the *current task* on the slot
+// panel. The remaining fields characterize the *current task* on the slot
 // — useful for verifying what's running but not for reconstructing it.
 type SlotParams struct {
 	Temperature     float64 `json:"temperature"`
@@ -382,6 +382,123 @@ func (c *Client) Slots(ctx context.Context, modelID string) ([]Slot, error) {
 // `--no-slots` flag was set. Distinct from a transport error so the UI can
 // surface the configuration state instead of a generic failure.
 var ErrSlotsDisabled = fmt.Errorf("llama: /slots disabled on server (--no-slots)")
+
+// EraseSlot aborts whatever task is currently running on the given slot and
+// clears its KV cache. Weights and other slots are unaffected — this is the
+// cheap-cancel primitive (microseconds), not a model unload. Returns nil on
+// success even if the slot was already idle (the upstream server reports
+// 200 in both cases).
+func (c *Client) EraseSlot(ctx context.Context, slotID int, modelID string) error {
+	path := "/slots/" + strconv.Itoa(slotID) + "?action=erase"
+	if modelID != "" {
+		path += "&model=" + url.QueryEscape(modelID)
+	}
+	req, err := c.newReq(ctx, http.MethodPost, path, true)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("llama POST %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("llama POST %s: HTTP %d: %s", path, resp.StatusCode, bytes.TrimSpace(body))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// DrainResult summarizes what a Drain call did. Cancellations counts the
+// number of distinct slot tasks the loop aborted (a single click can cancel
+// in-flight + pop deferred tasks one by one until quiet). Iterations is the
+// total /slots polls performed; useful for distinguishing "nothing was
+// queued" (Iterations=1, Cancellations=0) from "we hit the safety cap"
+// (Iterations==MaxIterations).
+type DrainResult struct {
+	Cancellations int
+	Iterations    int
+	Elapsed       time.Duration
+	HitSafetyCap  bool
+}
+
+// DrainOptions tunes the loop. Zero values mean defaults: at most 50
+// iterations, 100ms between polls, 10s overall budget. The defaults are
+// generous for a one-click destructive action; in practice the loop almost
+// always exits in 1-3 iterations.
+type DrainOptions struct {
+	MaxIterations int
+	PollInterval  time.Duration
+	Deadline      time.Duration
+}
+
+// Drain repeatedly erases active slots until /slots reports nothing
+// processing. Designed for clearing a backlog of deferred tasks left
+// behind by client-side timeouts (e.g. agent CLI gave up but the server
+// kept generating, with more requests piling up behind it).
+//
+// Each iteration:
+//  1. Fetch current slot state
+//  2. If no slot is processing, return — done
+//  3. Erase every processing slot
+//  4. Sleep PollInterval, repeat
+//
+// The loop is bounded by MaxIterations + Deadline so a misbehaving server
+// can't pin this goroutine.
+func (c *Client) Drain(ctx context.Context, modelID string, opts DrainOptions) (DrainResult, error) {
+	if opts.MaxIterations <= 0 {
+		opts.MaxIterations = 50
+	}
+	if opts.PollInterval <= 0 {
+		opts.PollInterval = 100 * time.Millisecond
+	}
+	if opts.Deadline <= 0 {
+		opts.Deadline = 10 * time.Second
+	}
+	deadline := time.Now().Add(opts.Deadline)
+	var res DrainResult
+	for i := 0; i < opts.MaxIterations; i++ {
+		res.Iterations++
+		if time.Now().After(deadline) {
+			res.HitSafetyCap = true
+			break
+		}
+		slots, err := c.Slots(ctx, modelID)
+		if err != nil {
+			res.Elapsed = time.Since(deadline.Add(-opts.Deadline))
+			return res, fmt.Errorf("drain iter %d: %w", i, err)
+		}
+		busy := 0
+		for _, s := range slots {
+			if !s.IsProcessing {
+				continue
+			}
+			busy++
+			if err := c.EraseSlot(ctx, s.ID, modelID); err != nil {
+				// Don't fail the whole drain on a single erase error —
+				// the slot may have just finished naturally between the
+				// /slots fetch and our erase call.
+				continue
+			}
+			res.Cancellations++
+		}
+		if busy == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			res.Elapsed = time.Since(deadline.Add(-opts.Deadline))
+			return res, ctx.Err()
+		case <-time.After(opts.PollInterval):
+		}
+	}
+	if res.Iterations >= opts.MaxIterations {
+		res.HitSafetyCap = true
+	}
+	res.Elapsed = time.Since(deadline.Add(-opts.Deadline))
+	return res, nil
+}
 
 // ── /v1/models ─────────────────────────────────────────────────────────────
 

@@ -1,0 +1,31 @@
+{{define "entity-list-inner"}}
+{{range $group := groupEntitiesByKind .Entities}}
+<div class="kind-group" data-kind="{{$group.Kind}}">
+  <div class="kind-group-header" onclick="toggleKindGroup(this)">
+    <span class="kind-icon {{$group.Kind}}">{{kindIcon $group.Kind}}</span>
+    <span class="kind-group-label">{{$group.Label}}</span>
+    <span class="kind-group-count">{{len $group.Entities}}</span>
+    <span class="kind-group-chev">▾</span>
+  </div>
+  <div class="kind-group-items">
+    {{range $group.Entities}}
+    {{$status := index $.MCPStatuses .ID}}
+    <div class="entity-card"
+         data-id="{{.ID}}"
+         data-project="{{.Scope.Project}}"
+         data-kind="{{.Kind}}"
+         data-name="{{.Name}}"
+         data-scope="{{.Scope.Label}}"
+         data-tool="{{entityTool .}}">
+      <span class="kind-icon {{.Kind}}">{{kindIcon .Kind}}</span>
+      <span class="entity-name">{{.Name}}</span>
+      {{if $status}}<span class="runtime-badge {{$status.State}}" title="{{$status.State}}{{if $status.Process}} · {{$status.Instance}}/{{$status.Process}}{{end}}"></span>{{end}}
+      {{$tool := entityTool .}}{{if $tool}}<span class="entity-tool-tag {{$tool}}" title="tool: {{$tool}}">{{toolIcon $tool}}</span>{{end}}
+      <span class="entity-scope-tag {{entityLevel .}}" title="{{entityLevel .}}">{{entityLevelShort .}}</span>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+<div class="empty-list" id="empty-list" style="{{if .Entities}}display:none{{end}}">no entities found</div>
+{{end}}

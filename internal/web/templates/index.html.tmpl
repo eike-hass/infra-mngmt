@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>infra-mngmt</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script src="{{static "vendor/htmx.min.js"}}"></script>
+<script src="{{static "vendor/fuse.min.js"}}"></script>
+<script src="{{static "vendor/marked.min.js"}}"></script>
+<link rel="stylesheet" href="{{static "css/app.css"}}">
+</head>
+<body>
+
+<div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+
+<header>
+  <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" width="28" height="20"><polygon points="8,2 14,2 17,7 14,12 8,12 5,7" fill="var(--accent)" opacity="0.95"/><polygon points="13,8 19,8 22,13 19,18 13,18 10,13" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.55"/></svg>infra-mngmt</span>
+
+  <div class="view-tabs">
+    <button class="view-tab active" id="vtab-config" onclick="showView('config')">config</button>
+    <button class="view-tab" id="vtab-llama" onclick="showView('llama')">llama</button>
+    <button class="view-tab" id="vtab-services" onclick="showView('services')">services</button>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="tab-scroll-wrap" id="tab-scroll-wrap">
+    <button class="tab-scroll-btn" onclick="document.getElementById('source-tabs-bar').scrollBy({left:-140,behavior:'smooth'})">‹</button>
+    <div class="source-tabs" id="source-tabs-bar">
+      <button class="tab active" data-project="__all__">all</button>
+      {{range .Sources}}
+      <button class="tab" data-project="{{.Key}}">
+        {{.Label}}{{range .Levels}}<span class="scope-badge {{.}}" title="{{.}}">{{levelShort .}}</span>{{end}}
+      </button>
+      {{end}}
+    </div>
+    <button class="tab-scroll-btn" onclick="document.getElementById('source-tabs-bar').scrollBy({left:140,behavior:'smooth'})">›</button>
+  </div>
+
+  <button class="topbar-btn" id="ov-rescan" onclick="doRescan(event)" title="Rescan sources — discover new projects / devcontainers">⤺</button>
+
+  <label class="search-wrap" for="search" title="Search (⌘K)">
+    <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.5"></circle>
+      <path d="M10.5 10.5l3 3"></path>
+    </svg>
+    <input id="search" type="text" placeholder="⌘K search" autocomplete="off">
+  </label>
+</header>
+
+<div class="kind-bar" id="kind-bar">
+  <button class="pill active" data-kind="all">all</button>
+  <button class="pill" data-kind="mcp_server"><span class="pill-icon">⬡</span> MCP servers</button>
+  <button class="pill" data-kind="command"><span class="pill-icon">$</span> commands</button>
+  <button class="pill" data-kind="agent"><span class="pill-icon">◉</span> agents</button>
+  <button class="pill" data-kind="skill"><span class="pill-icon">✦</span> skills</button>
+  <button class="pill" data-kind="hook"><span class="pill-icon">↪</span> hooks</button>
+  <button class="pill" data-kind="memory"><span class="pill-icon">▤</span> memory</button>
+  <button class="pill" data-kind="claude_md"><span class="pill-icon">#</span> CLAUDE.md</button>
+  <button class="topbar-btn kind-bar-refresh" id="ov-refresh" onclick="doRefresh(event)" title="Refresh entities — re-read all known sources">↻</button>
+</div>
+
+<div id="project-overview" style="display:none">
+  <div class="ov-row" id="ov-row">
+    <span class="ov-name" id="ov-name" style="display:none"></span>
+    <span class="ov-scopes" id="ov-scopes" style="display:none"></span>
+    <span class="ov-sep" id="ov-sep" style="display:none">·</span>
+    <span class="ov-counts" id="ov-counts" style="display:none"></span>
+    <span class="ov-spacer"></span>
+    <div class="ov-ctr" id="ov-ctr"></div>
+    <span class="ov-toggle" id="ov-toggle" style="display:none" onclick="toggleOverview()">▾</span>
+  </div>
+  <div class="ov-detail" id="ov-detail" style="display:none"></div>
+  <div id="ov-log-panel" style="display:none"></div>
+</div>
+
+<div id="view-config" style="display:flex;flex:1;overflow:hidden">
+  <div class="entity-list" id="entity-list">
+    {{template "entity-list-inner" .}}
+  </div>
+  <div class="preview" id="preview">
+    <p class="preview-hint">← select an entity to preview</p>
+  </div>
+</div>
+
+<div id="view-services"
+     hx-get="/partials/services"
+     hx-trigger="revealed once"
+     hx-swap="innerHTML">
+  <p style="color:var(--text3);font-style:italic;padding:20px">loading services…</p>
+</div>
+
+<div id="view-llama"
+     hx-get="/partials/llama"
+     hx-trigger="revealed, every 10s"
+     hx-swap="innerHTML">
+  <p style="color:var(--text3);font-style:italic;padding:20px">loading llama servers…</p>
+</div>
+
+<script type="module" src="{{static "js/app.js"}}"></script>
+<script type="module" src="{{static "js/preview.js"}}"></script>
+<script type="module" src="{{static "js/containers.js"}}"></script>
+
+{{with .Build}}
+{{if or .BuildEpoch .Commit}}
+<span class="build-chip" id="build-chip"
+      title="commit {{if .Commit}}{{.Commit}}{{else}}(unknown){{end}}{{if .Dirty}}-dirty{{end}}{{if .VCSTime}} · committed {{.VCSTime}}{{end}}{{if .BuildEpoch}} · built {{.BuildEpoch}}{{end}}{{if .GoVersion}} · {{.GoVersion}}{{end}}"
+      data-epoch="{{.BuildEpoch}}"
+      data-commit="{{.Commit}}">
+  <span class="build-chip-commit">{{if .Commit}}{{.Commit}}{{else}}local{{end}}{{if .Dirty}}+{{end}}</span>
+  <span class="build-chip-when" id="build-chip-when">{{.BuildEpoch}}</span>
+  <span class="build-chip-reload" id="build-chip-reload" aria-hidden="true">↻</span>
+</span>
+{{end}}
+{{end}}
+</body>
+</html>

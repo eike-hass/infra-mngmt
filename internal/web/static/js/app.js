@@ -1,0 +1,516 @@
+// ── view switching ──
+function showView(v) {
+  document.getElementById('view-config').style.display   = v === 'config'   ? 'flex' : 'none';
+  document.getElementById('view-services').style.display = v === 'services' ? 'flex' : 'none';
+  document.getElementById('view-llama').style.display    = v === 'llama'    ? 'flex' : 'none';
+  document.getElementById('kind-bar').style.display      = v === 'config'   ? 'flex' : 'none';
+  document.getElementById('tab-scroll-wrap').style.display = v === 'config' ? 'flex' : 'none';
+  document.getElementById('vtab-config').classList.toggle('active',   v === 'config');
+  document.getElementById('vtab-services').classList.toggle('active', v === 'services');
+  document.getElementById('vtab-llama').classList.toggle('active',    v === 'llama');
+  if (v === 'config') updateProjectOverview(); else document.getElementById('project-overview').style.display = 'none';
+}
+
+// ── entity filtering ──
+let activeProject = '__all__', activeKind = 'all', fuseResults = null;
+const cards = () => [...document.querySelectorAll('.entity-card')];
+let fuse;
+function rebuildFuse() {
+  const fuseData = cards().map(c => ({id:c.dataset.id,name:c.dataset.name,kind:c.dataset.kind}));
+  fuse = new Fuse(fuseData, {keys:['name','kind'],threshold:0.35});
+}
+rebuildFuse();
+// Initial load: activeProject is '__all__', so apply any persisted collapse
+// state from a previous session. (Project views always start expanded.)
+// Defined later in this script — run on next tick so the function is in scope.
+queueMicrotask(() => applyCollapsedStateForAllView());
+
+function applyFilters() {
+  const ids = fuseResults ? new Set(fuseResults.map(r=>r.item.id)) : null;
+  const list = document.getElementById('entity-list');
+  // 'flat' class hides group headers when a single-kind filter is active.
+  list.classList.toggle('flat', activeKind !== 'all');
+
+  let any = false;
+  cards().forEach(c => {
+    // Inclusive filter: a project depends on its own MCPs *and* all globals.
+    // When MCP kind is selected on a project tab, also show global-scoped MCPs
+    // (they apply to every project at runtime).
+    const projOK = activeProject === '__all__'
+                || c.dataset.project === activeProject
+                || (activeKind === 'mcp_server' && c.dataset.scope === 'global');
+    const ok = projOK
+             && (activeKind==='all'||c.dataset.kind===activeKind)
+             && (!ids||ids.has(c.dataset.id));
+    c.style.display = ok ? '' : 'none';
+    if (ok) any = true;
+  });
+  // Hide whole kind-group sections that have no visible cards (and update counts).
+  document.querySelectorAll('.kind-group').forEach(g => {
+    const visible = g.querySelectorAll('.entity-card:not([style*="display: none"])').length;
+    g.style.display = visible === 0 ? 'none' : '';
+    const cnt = g.querySelector('.kind-group-count');
+    if (cnt) cnt.textContent = visible;
+  });
+  document.getElementById('empty-list').style.display = any ? 'none' : '';
+}
+
+// ── kind-group collapse/expand persistence ──
+// Persisted only for the 'all' view (activeProject === '__all__'). Project
+// tabs always start fully expanded — collapsing while on a project is
+// ephemeral and gets reset on the next tab switch.
+const COLLAPSED_KEY = 'infra-mngmt:groups-collapsed';
+
+function readCollapsedSet() {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch (_) { return new Set(); }
+}
+
+function writeCollapsedSet(set) {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set])); } catch (_) {}
+}
+
+function applyCollapsedStateForAllView() {
+  const collapsed = readCollapsedSet();
+  document.querySelectorAll('.kind-group').forEach(g => {
+    g.classList.toggle('collapsed', collapsed.has(g.dataset.kind));
+  });
+}
+
+function expandAllKindGroups() {
+  document.querySelectorAll('.kind-group.collapsed').forEach(g => g.classList.remove('collapsed'));
+}
+
+// ── composite bridge expand/collapse ──
+// Click on a composite row toggles visibility of its member rows. State is
+// kept in localStorage so it survives the every-8s panel refresh (htmx
+// re-renders the partial; we re-apply expand state from storage on each
+// htmx:afterSwap below).
+function toggleCompositeMembers(name, ev) {
+  // Action buttons on the composite row stop propagation themselves; this
+  // guard catches clicks that reached us via bubbling from non-button areas.
+  if (ev && ev.target && ev.target.closest('.proc-actions')) return;
+  const expanded = !document.querySelector('tr.bridge-composite[data-composite="'+name+'"]')?.classList.contains('expanded');
+  setCompositeExpanded(name, expanded);
+}
+function setCompositeExpanded(name, expanded) {
+  const row = document.querySelector('tr.bridge-composite[data-composite="'+name+'"]');
+  if (!row) return;
+  row.classList.toggle('expanded', expanded);
+  document.querySelectorAll('tr.bridge-member[data-member-of="'+name+'"]').forEach(m => {
+    if (expanded) m.removeAttribute('hidden');
+    else m.setAttribute('hidden', '');
+  });
+  // Persist preference per-composite.
+  const key = 'im_composite_expanded';
+  const set = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  if (expanded) set.add(name); else set.delete(name);
+  localStorage.setItem(key, JSON.stringify([...set]));
+}
+function reapplyCompositeExpansion() {
+  const key = 'im_composite_expanded';
+  const set = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  document.querySelectorAll('tr.bridge-composite[data-composite]').forEach(row => {
+    const name = row.getAttribute('data-composite');
+    if (set.has(name)) setCompositeExpanded(name, true);
+  });
+}
+
+// ── show internals toggle ──
+// Body class gates CSS visibility of bridge-* PC processes; localStorage
+// persists. Faster than a server round-trip — toggle is instant.
+function toggleShowInternals() {
+  const want = !document.body.classList.contains('show-internals');
+  document.body.classList.toggle('show-internals', want);
+  localStorage.setItem('im_show_internals', want ? '1' : '0');
+  // Also flip any in-DOM toggle button labels so they reflect the new state.
+  document.querySelectorAll('[data-toggle="show-internals"]').forEach(b => {
+    b.textContent = want ? 'hide internals' : 'show internals';
+    b.title = want ? 'hide internal bridge-* processes (already shown in bridges panel)'
+                   : 'show internal bridge-* processes for debugging';
+  });
+}
+function applyShowInternalsFromStorage() {
+  if (localStorage.getItem('im_show_internals') === '1') {
+    document.body.classList.add('show-internals');
+    document.querySelectorAll('[data-toggle="show-internals"]').forEach(b => {
+      b.textContent = 'hide internals';
+      b.title = 'hide internal bridge-* processes (already shown in bridges panel)';
+    });
+  }
+}
+
+// ── llama logs <details> persistence ──
+// The /partials/llama view re-renders every 10s; <details open> attribute
+// resets to closed each time. Persist per-card open state in localStorage
+// keyed by "instance|process" so user-opened panels stay open across the
+// poll cycle. Same pattern as bridge-composite expansion + show-internals.
+const LLAMA_LOGS_OPEN_KEY = 'im_llama_logs_open';
+function onLlamaLogsToggle(el) {
+  const key = el.getAttribute('data-llama-logs-key');
+  if (!key) return;
+  let set;
+  try { set = new Set(JSON.parse(localStorage.getItem(LLAMA_LOGS_OPEN_KEY) || '[]')); }
+  catch (_) { set = new Set(); }
+  if (el.open) set.add(key); else set.delete(key);
+  try { localStorage.setItem(LLAMA_LOGS_OPEN_KEY, JSON.stringify([...set])); } catch (_) {}
+}
+function applyLlamaLogsOpenFromStorage() {
+  let set;
+  try { set = new Set(JSON.parse(localStorage.getItem(LLAMA_LOGS_OPEN_KEY) || '[]')); }
+  catch (_) { return; }
+  document.querySelectorAll('details.llama-logs-section[data-llama-logs-key]').forEach(d => {
+    if (set.has(d.getAttribute('data-llama-logs-key'))) d.open = true;
+  });
+}
+
+// Re-apply both states whenever htmx swaps in fresh services HTML.
+document.addEventListener('htmx:afterSwap', (e) => {
+  if (!e.target) return;
+  if (e.target.id === 'services-inner' || e.target.id === 'view-services') {
+    applyShowInternalsFromStorage();
+    reapplyCompositeExpansion();
+  }
+  if (e.target.id === 'view-llama') {
+    applyLlamaLogsOpenFromStorage();
+  }
+});
+// And on initial load.
+document.addEventListener('DOMContentLoaded', () => {
+  applyShowInternalsFromStorage();
+  reapplyCompositeExpansion();
+  applyLlamaLogsOpenFromStorage();
+});
+
+function toggleKindGroup(headerEl) {
+  const group = headerEl.parentElement;
+  group.classList.toggle('collapsed');
+  // Only persist while on the all view; per-project collapse is intentionally
+  // session-only so each project tab opens with everything visible.
+  if (activeProject === '__all__') {
+    const collapsed = readCollapsedSet();
+    const kind = group.dataset.kind;
+    if (group.classList.contains('collapsed')) collapsed.add(kind);
+    else collapsed.delete(kind);
+    writeCollapsedSet(collapsed);
+  }
+}
+
+// ── project overview ──
+const kindIcons = {mcp_server:'⬡',command:'$',agent:'◉',skill:'✦',memory:'▤',hook:'↪',claude_md:'#'};
+let ovExpanded = false;
+let selectedEntityProject = null;
+
+function updateProjectOverview() {
+  const ov = document.getElementById('project-overview');
+  const displayProject = selectedEntityProject || activeProject;
+  const isAll = displayProject === '__all__' || !displayProject;
+
+  ['ov-name','ov-scopes','ov-sep','ov-counts','ov-toggle'].forEach(id => {
+    document.getElementById(id).style.display = isAll ? 'none' : '';
+  });
+  document.getElementById('ov-row').style.cursor = isAll ? 'default' : 'pointer';
+
+  if (!isAll) {
+    const tab = [...document.querySelectorAll('.tab')].find(t => t.dataset.project === displayProject);
+    let name = displayProject.split('/').pop() || displayProject;
+    if (tab) {
+      const clone = tab.cloneNode(true);
+      clone.querySelectorAll('.scope-badge').forEach(n => n.remove());
+      name = clone.textContent.trim();
+    }
+    const counts = {};
+    document.querySelectorAll('.entity-card').forEach(c => {
+      if (c.dataset.project === displayProject) counts[c.dataset.kind] = (counts[c.dataset.kind]||0)+1;
+    });
+    document.getElementById('ov-name').textContent = name;
+    const scopesEl = document.getElementById('ov-scopes');
+    scopesEl.innerHTML = '';
+    if (tab) tab.querySelectorAll('.scope-badge').forEach(b => scopesEl.appendChild(b.cloneNode(true)));
+    const countsEl = document.getElementById('ov-counts');
+    countsEl.innerHTML = '';
+    ['mcp_server','command','agent','skill','hook','memory','claude_md'].filter(k => counts[k]).forEach(k => {
+      const s = document.createElement('span'); s.className = 'ov-count';
+      const ic = document.createElement('span'); ic.className = 'kind-icon '+k; ic.textContent = kindIcons[k]||'·';
+      s.appendChild(ic); s.appendChild(document.createTextNode(' '+counts[k]));
+      countsEl.appendChild(s);
+    });
+    document.getElementById('ov-detail').textContent = displayProject;
+    document.getElementById('ov-detail').style.display = ovExpanded ? '' : 'none';
+    document.getElementById('ov-toggle').className = 'ov-toggle' + (ovExpanded ? ' open' : '');
+  } else {
+    document.getElementById('ov-detail').style.display = 'none';
+  }
+
+  ov.style.display = 'block';
+  // Delegate container rendering to containers.js via window global.
+  if (window.refreshControls) window.refreshControls();
+}
+
+function toggleOverview() {
+  const displayProject = selectedEntityProject || activeProject;
+  if (!displayProject || displayProject === '__all__') return;
+  ovExpanded = !ovExpanded;
+  document.getElementById('ov-detail').style.display = ovExpanded ? '' : 'none';
+  document.getElementById('ov-toggle').className = 'ov-toggle' + (ovExpanded ? ' open' : '');
+}
+
+async function doRescan(e) {
+  e.stopPropagation();
+  const btn = document.getElementById('ov-rescan');
+  btn.classList.add('spinning');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/sources/rescan', {method:'POST'});
+    if (!r.ok) {
+      showRescanToast('rescan failed: HTTP ' + r.status, 'error');
+      return;
+    }
+    const body = await r.json();
+    const added = (body.added || []).length;
+    const discovered = (body.discovered || []).length;
+    if (added > 0) {
+      // Refresh the entity list so the new sources actually render. Pass a
+      // synthetic event because doRefresh() calls e.stopPropagation().
+      await doRefresh({stopPropagation:()=>{}});
+      showRescanToast('added ' + added + ' new source' + (added===1?'':'s') + ': ' + body.added.join(', '), 'ok');
+    } else {
+      // Surface what was actually scanned so the user can debug "why didn't
+      // my new project show up?". The list is the universe of sources
+      // discovery currently sees; if their new project isn't there, the
+      // problem is upstream (no .claude/, no devcontainer label, not in a
+      // scanned workspace dir, etc.).
+      showRescanToast(
+        'no new sources (scanned ' + discovered + '): ' + (body.discovered || []).join(', '),
+        'info'
+      );
+    }
+  } catch (err) {
+    showRescanToast('rescan error: ' + err, 'error');
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
+}
+
+function showRescanToast(msg, kind) {
+  let host = document.getElementById('rescan-toast-host');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'rescan-toast-host';
+    host.style.cssText = 'position:fixed;top:54px;right:14px;z-index:9999;display:flex;flex-direction:column;gap:6px;max-width:520px';
+    document.body.appendChild(host);
+  }
+  const t = document.createElement('div');
+  const palette = kind === 'ok'    ? 'background:#11201a;border:1px solid #1d4d3c;color:#7ddca7'
+                : kind === 'error' ? 'background:#2a1212;border:1px solid #5a1818;color:#e06c6c'
+                :                    'background:#16161b;border:1px solid #2a2a2a;color:#c9c9c9';
+  t.style.cssText = palette + ';padding:8px 12px;border-radius:4px;font-size:11px;font-family:ui-monospace,monospace;line-height:1.5;word-break:break-all;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .2s';
+  t.textContent = msg;
+  t.onclick = () => t.remove();
+  host.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 8000);
+}
+
+async function doRefresh(e) {
+  e.stopPropagation();
+  const btn = document.getElementById('ov-refresh');
+  btn.classList.add('spinning');
+  btn.disabled = true;
+  // Remember which entity was selected so we can re-mark it after the swap.
+  const prevSelectedId = document.querySelector('.entity-card.selected')?.dataset.id || null;
+  try {
+    await fetch('/api/refresh', {method:'POST'});
+    const html = await fetch('/partials/entity-list').then(r => r.text());
+    document.getElementById('entity-list').innerHTML = html;
+    rebuildFuse();
+    // Re-apply collapse state since the swap rebuilt the .kind-group elements.
+    if (activeProject === '__all__') applyCollapsedStateForAllView();
+    if (prevSelectedId) {
+      const card = document.querySelector('.entity-card[data-id="'+prevSelectedId.replace(/"/g,'\\"')+'"]');
+      if (card) card.classList.add('selected');
+    }
+    if (window.refreshControls) window.refreshControls();
+    applyFilters();
+    updateProjectOverview();
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
+}
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  activeProject = t.dataset.project;
+  window.activeProject = activeProject;
+  selectedEntityProject = null;
+  window.selectedEntityProject = null;
+  if (window.closeLogStream) window.closeLogStream();
+  // Switching to a project tab expands everything (project views start fresh);
+  // switching back to all re-applies the persisted collapse state.
+  if (activeProject === '__all__') applyCollapsedStateForAllView();
+  else expandAllKindGroups();
+  applyFilters();
+  updateProjectOverview();
+}));
+document.querySelectorAll('.pill').forEach(p => p.addEventListener('click', () => {
+  document.querySelectorAll('.pill').forEach(x=>x.classList.remove('active'));
+  p.classList.add('active'); activeKind = p.dataset.kind; applyFilters();
+}));
+
+const search = document.getElementById('search');
+const searchWrap = search.closest('.search-wrap');
+function setSearchHasValue() {
+  // Keep the wrap expanded while there's content even after the input blurs;
+  // the collapse animation only fires when blurring an empty input.
+  searchWrap.classList.toggle('has-value', search.value.trim() !== '');
+}
+search.addEventListener('input', () => {
+  const q = search.value.trim();
+  fuseResults = q ? fuse.search(q) : null;
+  setSearchHasValue();
+  applyFilters();
+});
+document.addEventListener('keydown', e => {
+  if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); search.focus(); search.select(); }
+  if (e.key==='Escape' && document.activeElement===search) {
+    search.value=''; fuseResults=null; setSearchHasValue(); applyFilters(); search.blur();
+  }
+});
+
+// ── entity preview ──
+document.getElementById('entity-list').addEventListener('click', e => {
+  const card = e.target.closest('.entity-card');
+  if (!card) return;
+  document.querySelectorAll('.entity-card.selected').forEach(c=>c.classList.remove('selected'));
+  card.classList.add('selected');
+  selectedEntityProject = card.dataset.project || null;
+  window.selectedEntityProject = selectedEntityProject;
+  updateProjectOverview();
+  document.getElementById('preview').innerHTML = '<div class="preview-loading"><span class="spinner"></span>loading…</div>';
+  htmx.ajax('GET', '/partials/entity?id='+encodeURIComponent(card.dataset.id), {target:'#preview',swap:'innerHTML'});
+});
+
+// ── toast notifications ─────────────────────────────────────────
+// HTMX swallows 4xx/5xx by default (no swap), so without this the user sees
+// nothing on failure. Surface server-side errors as bottom-right toasts.
+function showToast({title, body, kind='error', timeout=8000}) {
+  const stack = document.getElementById('toast-stack');
+  if (!stack) return;
+  const t = document.createElement('div');
+  t.className = 'toast' + (kind === 'info' ? ' info' : '');
+  const close = document.createElement('button');
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'dismiss');
+  close.textContent = '×';
+  close.onclick = () => removeToast(t);
+  if (title) {
+    const h = document.createElement('div');
+    h.className = 'toast-title';
+    h.textContent = title;
+    t.appendChild(h);
+  }
+  if (body) {
+    const b = document.createElement('div');
+    b.className = 'toast-body';
+    b.textContent = body;
+    t.appendChild(b);
+  }
+  t.appendChild(close);
+  stack.appendChild(t);
+  // Force reflow so the transition fires.
+  // eslint-disable-next-line no-unused-expressions
+  t.offsetWidth;
+  t.classList.add('show');
+  if (timeout > 0) setTimeout(() => removeToast(t), timeout);
+}
+function removeToast(t) {
+  if (!t || !t.parentNode) return;
+  t.classList.remove('show');
+  setTimeout(() => t.remove(), 200);
+}
+
+document.body.addEventListener('htmx:responseError', e => {
+  const xhr = e.detail.xhr;
+  const verb = (e.detail.requestConfig && e.detail.requestConfig.verb || '').toUpperCase();
+  const path = (e.detail.requestConfig && e.detail.requestConfig.path) || '';
+  const text = (xhr.responseText || xhr.statusText || 'request failed').trim();
+  // Trim absurdly long bodies; full detail is in the server journal.
+  const body = text.length > 400 ? text.slice(0, 400) + '…' : text;
+  showToast({
+    title: xhr.status + ' ' + (verb ? verb + ' ' : '') + path,
+    body: body,
+  });
+});
+document.body.addEventListener('htmx:sendError', e => {
+  showToast({
+    title: 'network error',
+    body: 'could not reach the server — is infra-mngmt still running?',
+  });
+});
+
+// ── build chip ──
+function initBuildChip() {
+  const chip = document.getElementById('build-chip');
+  if (!chip) return;
+  const el = document.getElementById('build-chip-when');
+  const epoch = parseInt(chip.dataset.epoch, 10);
+  if (epoch) {
+    const fmt = () => {
+      const diff = Date.now()/1000 - epoch;
+      if (diff < 60) return Math.floor(diff)+'s ago';
+      if (diff < 3600) return Math.floor(diff/60)+'m ago';
+      if (diff < 86400) return Math.floor(diff/3600)+'h ago';
+      return Math.floor(diff/86400)+'d ago';
+    };
+    el.textContent = fmt();
+    setInterval(() => { el.textContent = fmt(); }, 30000);
+  }
+  const curEpoch = chip.dataset.epoch || '';
+  const curCommit = chip.dataset.commit || '';
+  let stale = false;
+  async function checkVersion(){
+    if (stale) return;
+    try {
+      const r = await fetch('/api/version', {cache:'no-store'});
+      if (!r.ok) return;
+      const v = await r.json();
+      const epochDiff  = v.build_epoch && v.build_epoch !== curEpoch;
+      const commitDiff = v.commit      && v.commit      !== curCommit;
+      if (epochDiff || commitDiff) {
+        stale = true;
+        chip.classList.add('stale');
+        chip.title = 'New version available — click to reload';
+        chip.addEventListener('click', () => location.reload());
+      }
+    } catch(_) { /* server may be restarting; retry on next tick */ }
+  }
+  setInterval(checkVersion, 30000);
+  setTimeout(checkVersion, 5000);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initBuildChip);
+} else {
+  initBuildChip();
+}
+
+updateProjectOverview();
+
+// Expose globals for cross-module access (containers.js, preview.js read these).
+window.activeProject = activeProject;
+window.selectedEntityProject = selectedEntityProject;
+
+// ── window exports for onclick= attributes ──
+window.showView = showView;
+window.doRescan = doRescan;
+window.doRefresh = doRefresh;
+window.toggleKindGroup = toggleKindGroup;
+window.toggleOverview = toggleOverview;
+window.toggleCompositeMembers = toggleCompositeMembers;
+window.toggleShowInternals = toggleShowInternals;
+window.onLlamaLogsToggle = onLlamaLogsToggle;
+window.showToast = showToast;

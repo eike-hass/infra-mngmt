@@ -3,7 +3,6 @@ package web
 import (
 	"errors"
 	"fmt"
-	"html/template"
 	"net/http"
 	"sort"
 	"strings"
@@ -155,7 +154,7 @@ func (s *Server) handlePromotePicker(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tmpl := template.Must(template.New("promote-picker").Funcs(tmplFuncs).Parse(promotePickerHTML))
+	tmpl := parseTemplate("promote-picker", "templates/promote_picker.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, data)
 }
@@ -297,7 +296,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) writePromoteResult(w http.ResponseWriter, status int, r promoteResult) {
-	tmpl := template.Must(template.New("promote-result").Funcs(tmplFuncs).Parse(promoteResultHTML))
+	tmpl := parseTemplate("promote-result", "templates/promote_result.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_ = tmpl.Execute(w, r)

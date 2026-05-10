@@ -517,3 +517,11 @@ make tidy                 # go mod tidy
 The devcontainer firewall allowlists the Go module proxy (`proxy.golang.org`, `sum.golang.org`, `dl.google.com`) — no `GOPROXY=direct` workaround needed.
 
 After a code change, redeploy via the `infra-mngmt-deploy` process-compose entry (one-click from the services panel, or `curl -X POST "http://172.17.0.1:7842/process/start?instance=wsl&process=infra-mngmt-deploy"` from the devcontainer). The originating session dies mid-deploy and recovers in ~1 s with the new binary; verify the new `build_epoch` to confirm. Manual fallback: `cp dist/infra-mngmt ~/.local/bin/ && systemctl --user restart infra-mngmt`.
+
+### Project docs
+
+- [CLAUDE.md](CLAUDE.md) — project structure, tech stack, key design decisions
+- [docs/frontend-architecture.md](docs/frontend-architecture.md) — **binding** for any change under [internal/web/](internal/web/) (Go templates, CSS, JS modules, HTMX vs. SSE vs. fetch decision tree, asset vendoring policy, checklist for adding UI)
+- [TESTING.md](TESTING.md) — test layout, mock patterns
+- [SECURITY.md](SECURITY.md) — threat model and hardening
+- [docs/proposals/](docs/proposals/) — design proposals for in-flight work

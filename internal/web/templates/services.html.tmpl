@@ -1,0 +1,327 @@
+
+<div class="svc-grid"
+     id="services-inner"
+     hx-get="/partials/services"
+     hx-trigger="every 8s"
+     hx-swap="outerHTML">
+{{if .Bridges}}
+<div class="svc-instance bridges">
+  <div class="svc-header">
+    <span class="svc-icon" title="network bridges">⇆</span>
+    <span class="svc-name">network bridges</span>
+    <span class="svc-endpoint">portproxy + firewall (persistent state)</span>
+    <span class="svc-running-count">{{activeBridgeCount .Bridges}}/{{len .Bridges}} active</span>
+    <button class="svc-boot-btn"
+            hx-post="/bridges/apply"
+            hx-target="#services-inner"
+            hx-swap="outerHTML"
+            title="re-apply every Windows-tier bridge in one UAC prompt">▶ apply all</button>
+    <button class="svc-boot-btn"
+            hx-post="/bridges/refresh"
+            hx-target="#services-inner"
+            hx-swap="outerHTML"
+            title="reload bridges.yaml from disk and re-snapshot state">⟳ refresh</button>
+  </div>
+  <table class="process-table">
+    <thead><tr>
+      <th class="col-name">bridge</th><th>tier</th><th class="col-state">state</th><th>listen</th><th>connect</th><th class="col-actions"></th>
+    </tr></thead>
+    <tbody>
+    {{range .Bridges}}
+    {{if eq .Kind "composite"}}
+    <tr class="bridge-composite" data-composite="{{.Name}}" onclick="toggleCompositeMembers('{{.Name}}', event)">
+      <td class="col-name">
+        <span class="bridge-disclosure">▸</span>
+        <span class="proc-name">{{.Name}}</span>
+        {{if .Description}}<div class="proc-ns">{{.Description}}</div>{{end}}
+      </td>
+      <td>composite</td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td class="bridge-composite-summary" colspan="2">{{len .Members}} member{{if ne (len .Members) 1}}s{{end}}</td>
+      <td class="col-actions">
+        <div class="proc-actions">
+          <button class="proc-btn start"
+                  hx-post="/bridge/apply?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  onclick="event.stopPropagation()"
+                  title="bring composite to active state; skips UAC if Windows portproxy is already in place">apply</button>
+          <button class="proc-btn restart"
+                  hx-post="/bridge/pause?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  onclick="event.stopPropagation()"
+                  title="pause: stop WSL relay + remove Windows portproxy. Smart-skips elevation if Windows side is already inactive; otherwise UAC."
+                  hx-confirm="Pause composite {{.Name}}? Removing the Windows portproxy will request elevation if the rule is currently in place.">pause</button>
+          <button class="proc-btn stop"
+                  hx-post="/bridge/reset?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  onclick="event.stopPropagation()"
+                  hx-confirm="Reset composite {{.Name}}? This removes the netsh + firewall rules and will request elevation.">reset</button>
+        </div>
+      </td>
+    </tr>
+    {{$parentName := .Name}}
+    {{range .Members}}
+    <tr class="bridge-member" data-member-of="{{$parentName}}" hidden>
+      <td class="col-name bridge-member-name">
+        <span class="bridge-member-indent">└─</span>
+        <span class="proc-name">{{.Name}}</span>
+        {{if .DisplayName}}<div class="proc-ns">{{.DisplayName}}</div>{{end}}
+      </td>
+      <td>{{.Tier}}</td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td><code>{{.Listen}}</code></td>
+      <td><code>{{.Connect}}</code></td>
+      <td class="col-actions"></td>
+    </tr>
+    {{end}}
+    {{else}}
+    <tr>
+      <td class="col-name">
+        <div class="proc-name">{{.Name}}</div>
+        {{if .DisplayName}}<div class="proc-ns">{{.DisplayName}}</div>{{end}}
+      </td>
+      <td>{{.Tier}}</td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td><code>{{.Listen}}</code></td>
+      <td><code>{{.Connect}}</code></td>
+      <td class="col-actions">
+        <div class="proc-actions">
+          <button class="proc-btn start"
+                  hx-post="/bridge/apply?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">apply</button>
+          {{if eq .Tier "wsl"}}
+          <button class="proc-btn restart"
+                  hx-post="/bridge/pause?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  title="pause: stop the relay process; reset to fully remove">pause</button>
+          {{end}}
+          <button class="proc-btn stop"
+                  hx-post="/bridge/reset?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  hx-confirm="Remove bridge {{.Name}}?">reset</button>
+        </div>
+      </td>
+    </tr>
+    {{end}}
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+{{if .Containers}}
+<div class="svc-instance containers">
+  <div class="svc-header">
+    <span class="svc-icon" title="docker containers">⬢</span>
+    {{if .Docker.Configured}}
+    <span class="online-dot {{if .Docker.Online}}online{{else}}offline{{end}}"
+          title="docker daemon {{if .Docker.Online}}reachable{{else}}unreachable{{if .Docker.Error}} — {{.Docker.Error}}{{end}}{{end}}"></span>
+    {{end}}
+    <span class="svc-name">containers</span>
+    <span class="svc-endpoint">{{if .Docker.Endpoint}}docker: {{.Docker.Endpoint}}{{else}}docker: matched by name{{end}}</span>
+    <span class="svc-running-count">{{runningContainerCount .Containers}}/{{len .Containers}} running</span>
+    <button class="svc-boot-btn"
+            hx-post="/containers/refresh"
+            hx-target="#services-inner"
+            hx-swap="outerHTML"
+            title="reload containers.yaml from disk and re-snapshot state">⟳ refresh</button>
+  </div>
+  <table class="process-table">
+    <thead><tr>
+      <th class="col-name">container</th><th class="col-state">state</th><th>status</th><th>cpu</th><th>mem</th><th>id</th><th class="col-actions"></th>
+    </tr></thead>
+    <tbody>
+    {{range .Containers}}
+    <tr>
+      <td class="col-name">
+        <div class="proc-name">{{.Name}}</div>
+        {{if .Description}}<div class="proc-ns">{{.Description}}</div>{{end}}
+      </td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td>{{if .Status}}<code>{{.Status}}</code>{{else}}—{{end}}</td>
+      <td>
+        {{if .HasStats}}
+        <div class="usage-bar">
+          <div class="usage-bar-track"><div class="usage-bar-fill {{cpuBarClass .CPU}}" style="width:{{cpuBarWidth .CPU}}%"></div></div>
+          <span class="usage-val">{{printf "%.1f" .CPU}}%</span>
+        </div>
+        {{else}}—{{end}}
+      </td>
+      <td>
+        {{if .HasStats}}
+        <div class="usage-bar">
+          <div class="usage-bar-track"><div class="usage-bar-fill mem" style="width:{{memBarWidth .Mem}}%"></div></div>
+          <span class="usage-val">{{formatMem .Mem}}</span>
+        </div>
+        {{else}}—{{end}}
+      </td>
+      <td>{{if .ID}}<code>{{.ID}}</code>{{else}}—{{end}}</td>
+      <td class="col-actions">
+        <div class="proc-actions">
+          {{if eq .StateClass "running"}}
+          <button class="proc-btn stop"
+                  hx-post="/decl-container/stop?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">stop</button>
+          {{else if .ID}}
+          <button class="proc-btn start"
+                  hx-post="/decl-container/start?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">start</button>
+          {{end}}
+        </div>
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+{{if .Vaults}}
+{{/* The vaults section is hx-preserve'd so the 8s services poll never
+     re-renders the vault chrome (cards, headers, panel mounts). Live
+     status pills are kept fresh via the OOB swap block at the end of
+     this partial — htmx finds each #vault-pill-X by id and patches just
+     the pill, leaving the surrounding card untouched.
+     Mount id is distinct from the panel response's id
+     (vault-{{.Name}}-panel) so allow/disallow swaps don't accidentally
+     wipe the wrapper; user actions target this mount with innerHTML so
+     the wrapper itself is never replaced. */}}
+<div class="svc-instance vaults" id="vaults-section" hx-preserve>
+  <div class="svc-header">
+    <span class="svc-icon" title="filesystem MCP vaults">🔐</span>
+    <span class="svc-name">vaults</span>
+    <span class="svc-endpoint">filesystem MCPs (mcp-fs) — allowlist gates agent reads</span>
+  </div>
+  <div class="vault-cards">
+    {{range .Vaults}}
+    <div class="vault-card">
+      <div class="vault-card-header">
+        <span class="vault-card-name">{{.Name}}</span>
+        {{if .Description}}<span class="vault-card-desc">{{.Description}}</span>{{end}}
+        <span class="status-pill {{.StateClass}}" id="vault-pill-{{.Name}}"><span class="dot"></span>{{.State}}</span>
+      </div>
+      <div id="vault-{{.Name}}-mount"
+           hx-get="/partials/vault/panel?name={{.Name}}"
+           hx-trigger="load">
+        <div class="vault-loading">loading vault…</div>
+      </div>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{/* OOB live-pill updates: fresh pill markup keyed by id; htmx applies
+     each as a discrete outerHTML swap on the existing pill inside the
+     preserved section. */}}
+{{range .Vaults}}
+<span class="status-pill {{.StateClass}}" id="vault-pill-{{.Name}}" hx-swap-oob="true"><span class="dot"></span>{{.State}}</span>
+{{end}}
+{{end}}
+{{if not .Instances}}
+  <p style="color:var(--text3);font-style:italic">no process-compose instances configured — add them to config.yaml</p>
+{{else}}
+{{range $iv := .Instances}}
+<div class="svc-instance">
+  <div class="svc-header">
+    <span class="svc-icon" title="process-compose instance">⚙</span>
+    <span class="online-dot {{if $iv.Online}}online{{else}}offline{{end}}"></span>
+    <span class="svc-name">{{$iv.Name}}</span>
+    <span class="svc-endpoint">{{$iv.Endpoint}}</span>
+    {{if $iv.Online}}
+    <span class="svc-running-count">{{runningCount $iv.Processes}}/{{len $iv.Processes}} running</span>
+    <button class="svc-boot-btn"
+            data-toggle="show-internals"
+            onclick="toggleShowInternals()"
+            title="show internal bridge-* processes for debugging">show internals</button>
+    <button class="svc-boot-btn"
+            hx-post="/compose/reload?instance={{$iv.Name}}"
+            hx-target="#services-inner"
+            hx-swap="outerHTML"
+            title="re-read compose YAML and reconcile (drops removed entries on recent process-compose versions)">⟳ refresh</button>
+    {{else if $iv.CanBoot}}
+    <button class="svc-boot-btn"
+            hx-post="/compose/start?instance={{$iv.Name}}"
+            hx-target="#services-inner"
+            hx-swap="outerHTML">▶ start process-compose</button>
+    {{end}}
+  </div>
+  {{if $iv.Online}}
+  <table class="process-table">
+    <thead><tr>
+      <th class="col-name">process</th><th class="col-state">status</th><th class="col-pid">pid</th><th>restarts</th><th>cpu</th><th>mem</th><th>age</th><th class="col-actions"></th>
+    </tr></thead>
+    <tbody>
+    {{range $iv.Processes}}
+    <tr{{if isInternalProcess .}} class="proc-internal"{{end}}>
+      <td class="col-name">
+        <div class="proc-name">{{.Name}}</div>
+        {{if and .Namespace (ne .Namespace "default")}}<div class="proc-ns">{{.Namespace}}</div>{{end}}
+      </td>
+      <td class="col-state">
+        <span class="status-pill {{statusClass .Status}}"><span class="dot"></span>{{.Status}}</span>
+        {{/* Health pill is redundant when status=Running + health=Ready
+             (the common happy path). Show it only when it adds info:
+             probe configured AND (not ready OR not running). */}}
+        {{if and .HasHealthProbe (or (ne .Health "Ready") (not .IsRunning))}}<span class="health-pill {{healthClass .Health}}" title="readiness: {{.Health}}">{{.Health}}</span>{{end}}
+        {{if and (not .IsRunning) (ne .ExitCode 0)}}<span class="exit-code" title="exit code">{{.ExitCode}}</span>{{end}}
+      </td>
+      <td class="col-pid">{{if .Pid}}{{.Pid}}{{else}}—{{end}}</td>
+      <td>{{.Restarts}}</td>
+      <td>
+        <div class="usage-bar">
+          <div class="usage-bar-track"><div class="usage-bar-fill {{cpuBarClass .CPU}}" style="width:{{cpuBarWidth .CPU}}%"></div></div>
+          <span class="usage-val">{{printf "%.1f" .CPU}}%</span>
+        </div>
+      </td>
+      <td>
+        <div class="usage-bar">
+          <div class="usage-bar-track"><div class="usage-bar-fill mem" style="width:{{memBarWidth .Mem}}%"></div></div>
+          <span class="usage-val">{{formatMem .Mem}}</span>
+        </div>
+      </td>
+      <td>{{if .SystemTime}}{{.SystemTime}}{{else}}—{{end}}</td>
+      <td class="col-actions">
+        <div class="proc-actions">
+          {{if canStop .Status}}
+          <button class="proc-btn stop"
+                  hx-post="/process/stop?instance={{$iv.Name}}&process={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML"
+                  title="halt the process and stop the restart loop">stop</button>
+          {{end}}
+          {{if canStart .Status}}
+          <button class="proc-btn start"
+                  hx-post="/process/start?instance={{$iv.Name}}&process={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">start</button>
+          {{end}}
+          {{if .IsRunning}}
+          <button class="proc-btn restart"
+                  hx-post="/process/restart?instance={{$iv.Name}}&process={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">restart</button>
+          {{end}}
+          <button class="proc-btn logs"
+                  hx-get="/partials/logs?instance={{$iv.Name}}&process={{.Name}}"
+                  hx-target="#logs-{{$iv.Name}}-{{.Name}}"
+                  hx-swap="innerHTML">logs</button>
+        </div>
+        <div id="logs-{{$iv.Name}}-{{.Name}}"></div>
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <div class="svc-offline">
+    <span class="svc-offline-icon">⬡</span>
+    <div class="svc-offline-title">process-compose unreachable</div>
+    <div class="svc-offline-endpoint">{{$iv.Endpoint}}</div>
+    {{if $iv.CanBoot}}
+    <button class="svc-boot-btn"
+            hx-post="/compose/start?instance={{$iv.Name}}"
+            hx-target="#services-inner"
+            hx-swap="outerHTML">▶ start process-compose</button>
+    {{else}}
+    <div class="svc-offline-hint">no binary configured — add <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">binary</code> to config.json to enable bootstrap</div>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+</div>

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHealthOK(t *testing.T) {
@@ -294,5 +295,122 @@ func TestProbesSendBearerToken(t *testing.T) {
 	_, _ = c.Props(context.Background())
 	if seen != "Bearer key123" {
 		t.Errorf("/props auth = %q, want Bearer key123", seen)
+	}
+}
+
+func TestEraseSlotPostsCorrectPath(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Method + " " + r.URL.Path + "?" + r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := New(srv.URL, "").EraseSlot(context.Background(), 0, ""); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got != "POST /slots/0?action=erase" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestEraseSlotIncludesModelParam(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.RawQuery
+	}))
+	defer srv.Close()
+
+	_ = New(srv.URL, "").EraseSlot(context.Background(), 2, "unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q6_K_XL")
+	if !strings.Contains(got, "action=erase") || !strings.Contains(got, "model=unsloth%2FQwen3.6-35B-A3B-GGUF") {
+		t.Errorf("query = %q (missing action or model)", got)
+	}
+}
+
+func TestEraseSlotSurfaces5xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("kv cache fault"))
+	}))
+	defer srv.Close()
+
+	err := New(srv.URL, "").EraseSlot(context.Background(), 0, "")
+	if err == nil || !strings.Contains(err.Error(), "kv cache fault") {
+		t.Errorf("expected error containing upstream body, got: %v", err)
+	}
+}
+
+func TestDrainEmptyQueueReturnsZero(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slots" {
+			_, _ = w.Write([]byte(`[{"id":0,"id_task":0,"is_processing":false,"n_ctx":0,"speculative":false,"params":{},"next_token":[]}]`))
+			return
+		}
+		t.Errorf("unexpected request to %s", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	res, err := New(srv.URL, "").Drain(context.Background(), "", DrainOptions{})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if res.Cancellations != 0 || res.Iterations != 1 {
+		t.Errorf("got %+v, want 0 cancels in 1 iter", res)
+	}
+}
+
+func TestDrainCancelsThenReturns(t *testing.T) {
+	// Simulate a queue: first /slots call shows busy, then EraseSlot
+	// hit, then second /slots call shows idle.
+	state := 0
+	var erases int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/slots":
+			state++
+			if state == 1 {
+				_, _ = w.Write([]byte(`[{"id":0,"id_task":7148,"is_processing":true,"n_ctx":0,"speculative":false,"params":{},"next_token":[]}]`))
+			} else {
+				_, _ = w.Write([]byte(`[{"id":0,"id_task":7149,"is_processing":false,"n_ctx":0,"speculative":false,"params":{},"next_token":[]}]`))
+			}
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/slots/"):
+			erases++
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	res, err := New(srv.URL, "").Drain(context.Background(), "",
+		DrainOptions{PollInterval: 1 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if res.Cancellations != 1 || erases != 1 {
+		t.Errorf("got cancels=%d erases=%d, want 1/1", res.Cancellations, erases)
+	}
+	if res.Iterations < 2 {
+		t.Errorf("expected at least 2 iters, got %d", res.Iterations)
+	}
+}
+
+func TestDrainHonorsContextCancel(t *testing.T) {
+	// /slots always reports busy — drain would loop forever without ctx cancel.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slots" {
+			_, _ = w.Write([]byte(`[{"id":0,"id_task":1,"is_processing":true,"n_ctx":0,"speculative":false,"params":{},"next_token":[]}]`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := New(srv.URL, "").Drain(ctx, "",
+		DrainOptions{PollInterval: 5 * time.Millisecond, Deadline: time.Hour})
+	if err == nil {
+		t.Errorf("expected ctx error, got nil")
 	}
 }

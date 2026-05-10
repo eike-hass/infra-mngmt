@@ -355,6 +355,189 @@ func TestE2E_ContainerStartWithoutDockerReturns503(t *testing.T) {
 	}
 }
 
+// ─── shell + asset reachability ─────────────────────────────────────────────
+//
+// These tests guard the M1 (vendoring + embed.FS) and M3 (JS-as-module)
+// migrations described in docs/frontend-architecture.md §16. Today they
+// pass vacuously for same-origin asset URLs because the only same-origin
+// asset is /favicon.svg; once vendored CDN deps land they start protecting
+// every <link>/<script src> tag the index page emits.
+
+// TestE2E_FaviconReachable pins the only same-origin static asset the page
+// references today. After M1 the asset-link crawler subsumes this, but the
+// dedicated test stays as a stable contract for any deploy smoke check.
+func TestE2E_FaviconReachable(t *testing.T) {
+	env := newE2E(t, "")
+	resp := env.get("/favicon.svg")
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("/favicon.svg status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "image/svg") {
+		t.Errorf("Content-Type = %q, want image/svg+xml", ct)
+	}
+}
+
+// TestE2E_IndexShellHasJSSelectors asserts every id/data-* the inline JS
+// reaches for is present in the rendered shell. This is the contract the
+// M3 step (move inline JS into static/js/app.js) relies on — Go cannot
+// parse the JS, so the test guarantees the DOM hooks the JS expects exist.
+func TestE2E_IndexShellHasJSSelectors(t *testing.T) {
+	env := newE2E(t, "")
+	resp := env.get("/")
+	if resp.StatusCode != 200 {
+		t.Fatalf("/ status = %d", resp.StatusCode)
+	}
+	body := readBody(t, resp)
+	for _, want := range []string{
+		// Containers reached for by id in the inline JS.
+		`id="entity-list"`,
+		`id="preview"`,
+		`id="search"`,
+		`id="kind-bar"`,
+		`id="source-tabs-bar"`,
+		`id="empty-list"`,
+		`id="project-overview"`,
+		// View-tab buttons used by showView().
+		`id="vtab-config"`,
+		`id="vtab-llama"`,
+		`id="vtab-services"`,
+		// Pills the JS toggles by data-kind.
+		`data-kind="all"`,
+		`data-kind="mcp_server"`,
+		`data-kind="command"`,
+		`data-kind="agent"`,
+		`data-kind="skill"`,
+		`data-kind="hook"`,
+		`data-kind="memory"`,
+		`data-kind="claude_md"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered index missing JS selector %q", want)
+		}
+	}
+}
+
+// TestE2E_LoginPageHasFormFields verifies the login template renders the
+// fields the auth flow needs. TestE2E_LoginPageAccessibleWithoutAuth only
+// checked status + Content-Type; this fills in the form contract.
+func TestE2E_LoginPageHasFormFields(t *testing.T) {
+	env := newE2E(t, "secret")
+	resp := env.get("/login?next=/services")
+	body := readBody(t, resp)
+	for _, want := range []string{
+		`method="POST"`,
+		`action="/login"`,
+		`name="token"`,
+		`type="password"`,
+		`name="next"`,
+		`value="/services"`,
+		`type="submit"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("login page missing %q", want)
+		}
+	}
+}
+
+// TestE2E_SameOriginAssetsResolve crawls every <link href="/..."> and
+// <script src="/..."> URL in the rendered index page and asserts each one
+// returns 200. Today this is largely vacuous (the page references CDN URLs
+// for htmx/fuse/marked/codemirror, which have a scheme and are skipped, plus
+// /favicon.svg which is dedicated-tested above). After M1 lands the same
+// test starts protecting the full vendored asset pipeline — every missing
+// embed.FS entry surfaces here.
+//
+// Deliberately scheme-aware: external URLs (http://, https://) are recorded
+// in the test log for visibility but not fetched, so the test does not flake
+// on offline CI runners.
+func TestE2E_SameOriginAssetsResolve(t *testing.T) {
+	env := newE2E(t, "")
+	resp := env.get("/")
+	body := readBody(t, resp)
+
+	urls := extractAssetURLs(body)
+	if len(urls) == 0 {
+		t.Fatal("no <link>/<script> asset URLs found — extraction regex likely broken")
+	}
+
+	sameOrigin := 0
+	external := 0
+	for _, u := range urls {
+		switch {
+		case strings.HasPrefix(u, "http://"), strings.HasPrefix(u, "https://"):
+			t.Logf("external asset (skipped): %s", u)
+			external++
+		case strings.HasPrefix(u, "/"):
+			r := env.get(u)
+			r.Body.Close()
+			if r.StatusCode != 200 {
+				t.Errorf("asset %s returned %d, want 200", u, r.StatusCode)
+			}
+			sameOrigin++
+		default:
+			t.Errorf("unexpected asset URL form: %q", u)
+		}
+	}
+	t.Logf("checked %d same-origin assets, skipped %d external", sameOrigin, external)
+}
+
+// extractAssetURLs returns every URL referenced by a <link href="..."> or
+// <script src="..."> tag in the given HTML. Pragmatic regex extraction is
+// adequate here — the full HTML parser would add a dependency for one test.
+func extractAssetURLs(html string) []string {
+	var out []string
+	for _, attr := range []string{"href", "src"} {
+		needle := attr + `="`
+		i := 0
+		for {
+			start := strings.Index(html[i:], needle)
+			if start < 0 {
+				break
+			}
+			start += i + len(needle)
+			end := strings.Index(html[start:], `"`)
+			if end < 0 {
+				break
+			}
+			u := html[start : start+end]
+			i = start + end + 1
+			// Skip data: URIs, anchors, and inline SVG attributes that
+			// happen to use href= (e.g. SVG xlink:href). Asset reachability
+			// only cares about loadable URLs.
+			if strings.HasPrefix(u, "data:") || strings.HasPrefix(u, "#") {
+				continue
+			}
+			// We only care about <link href> and <script src> — the regex-y
+			// approach catches anchor href= too, but those aren't asset
+			// links. Filter by scheme/path shape: external (with scheme)
+			// or absolute path, anything else is page navigation.
+			if strings.HasPrefix(u, "/") || strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+				out = append(out, u)
+			}
+		}
+	}
+	return out
+}
+
+// TestE2E_IndexHasNoLeftoverCDN_AfterM1 guards against CDN URLs sneaking
+// back in for the three libraries M1 vendored (htmx, fuse, marked).
+//
+// esm.sh is intentionally NOT in the banned list yet — CodeMirror is loaded
+// from esm.sh as a module graph and vendoring it requires a bundle step
+// that's deferred to M5 (see docs/frontend-architecture.md §16). Add
+// "esm.sh" here once M5 lands.
+func TestE2E_IndexHasNoLeftoverCDN_AfterM1(t *testing.T) {
+	env := newE2E(t, "")
+	resp := env.get("/")
+	body := readBody(t, resp)
+	for _, banned := range []string{"unpkg.com", "cdn.jsdelivr.net"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("rendered index references CDN %q after M1", banned)
+		}
+	}
+}
+
 // ─── multi-step session flow ────────────────────────────────────────────────
 
 // Walks the same path a real user follows: redirect-to-login → login →

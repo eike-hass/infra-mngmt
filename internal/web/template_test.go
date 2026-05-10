@@ -2,7 +2,6 @@ package web
 
 import (
 	"bytes"
-	"html/template"
 	"strings"
 	"testing"
 
@@ -26,7 +25,7 @@ func TestServicesTemplateRendersOfflineCard(t *testing.T) {
 		},
 	}
 
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, servicesPageData{Instances: views}); err != nil {
 		t.Fatalf("template.Execute error: %v", err)
@@ -66,7 +65,7 @@ func TestServicesTemplateRendersAPIBadges(t *testing.T) {
 			{Name: "worker", Namespace: "default", Status: "Error", IsRunning: false, ExitCode: 137, SystemTime: "2s"},
 		},
 	}}
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, servicesPageData{Instances: views}); err != nil {
 		t.Fatalf("template.Execute error: %v", err)
@@ -114,7 +113,7 @@ func TestServicesTemplateRendersBridges(t *testing.T) {
 			},
 		},
 	}
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		t.Fatalf("template.Execute error: %v", err)
@@ -151,7 +150,7 @@ func TestServicesTemplateCardIconsAndPidColumn(t *testing.T) {
 			Processes: []compose.ProcessState{{Name: "p1", Status: "Running", IsRunning: true, Pid: 91760}},
 		}},
 	}
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		t.Fatalf("template.Execute: %v", err)
@@ -188,7 +187,7 @@ func TestServicesTemplateNameColumnConstrained(t *testing.T) {
 			Processes: []compose.ProcessState{{Name: "p1", Status: "Running", IsRunning: true, Pid: 1}},
 		}},
 	}
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		t.Fatalf("template.Execute: %v", err)
@@ -235,7 +234,7 @@ func TestServicesTemplateActionColumnRightAligned(t *testing.T) {
 			Processes: []compose.ProcessState{{Name: "p1", Status: "Running", IsRunning: true, Pid: 1}},
 		}},
 	}
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		t.Fatalf("template.Execute: %v", err)
@@ -259,7 +258,7 @@ func TestServicesTemplateOmitsBridgeSectionWhenEmpty(t *testing.T) {
 	data := servicesPageData{
 		Instances: []instanceView{{Name: "wsl", Endpoint: "x", Online: true}},
 	}
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		t.Fatalf("template.Execute: %v", err)
@@ -295,7 +294,7 @@ func TestServicesTemplateRendersDockerHealthLED(t *testing.T) {
 				Containers: []containerView{{Name: "alpha", State: "running", StateClass: "running"}},
 				Docker:     tc.health,
 			}
-			tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+			tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 			var buf bytes.Buffer
 			if err := tmpl.Execute(&buf, data); err != nil {
 				t.Fatalf("template.Execute: %v", err)
@@ -320,7 +319,7 @@ func TestServicesTemplateRendersContainerRunningCount(t *testing.T) {
 		},
 		Docker: dockerHealthView{Configured: true, Online: true, Endpoint: "unix:///var/run/docker.sock"},
 	}
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		t.Fatalf("template.Execute: %v", err)
@@ -336,7 +335,7 @@ func TestServicesTemplateOmitsDockerLEDWhenUnconfigured(t *testing.T) {
 		Containers: []containerView{{Name: "alpha", State: "running", StateClass: "running"}},
 		Docker:     dockerHealthView{}, // not configured
 	}
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		t.Fatalf("template.Execute: %v", err)

@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
-	"html/template"
 	"log"
 	"net"
 	"net/http"
@@ -128,6 +127,10 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 	s.mux.Post("/login", s.handleLoginPost)
 	s.mux.Post("/logout", s.handleLogout)
 	s.mux.Get("/favicon.svg", handleFavicon)
+	// /static/* serves vendored JS, CSS, and other embedded assets.
+	// No auth required — assets are public-equivalent (vendored libraries,
+	// non-sensitive page-scoped scripts/styles).
+	s.mux.Mount("/static", staticHandler())
 	// /api/version is public so deploy scripts and external smoke tests can
 	// confirm a restart picked up the new binary without holding a session
 	// cookie. The exposed fields (epoch, short SHA, dirty bit, go version)
@@ -179,7 +182,9 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Post("/api/vault/disallow", s.handleVaultDisallow) // ?name=&path=
 		r.Get("/partials/logs", s.handleProcessLogs)         // ?instance=&process=
 		r.Get("/partials/llama", s.handleLlamaAll)           // standalone "llama" view body
+		r.Post("/api/llama/drain", s.handleLlamaDrain)       // ?instance=&process=  destructive: cancel all in-flight + queued tasks
 		r.Post("/api/refresh", s.handleRefresh)
+		r.Get("/partials/container-controls", s.handleContainerControls)
 		r.Get("/api/containers", s.handleContainers)
 		r.Post("/api/container/start", s.handleContainerStart)
 		r.Post("/api/container/stop", s.handleContainerStop)
@@ -366,7 +371,7 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	tmpl := template.Must(template.New("login").Parse(loginHTML))
+	tmpl := parseTemplate("login", "templates/login.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, map[string]string{"Next": r.URL.Query().Get("next"), "Error": ""})
 }
@@ -378,7 +383,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	}
 	submitted := r.FormValue("token")
 	if subtle.ConstantTimeCompare([]byte(submitted), []byte(s.token)) != 1 {
-		tmpl := template.Must(template.New("login").Parse(loginHTML))
+		tmpl := parseTemplate("login", "templates/login.html.tmpl")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = tmpl.Execute(w, map[string]string{"Next": r.FormValue("next"), "Error": "invalid token"})

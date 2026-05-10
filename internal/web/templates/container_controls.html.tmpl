@@ -1,0 +1,14 @@
+{{- if .HasContainer -}}
+<span class="ov-ctr-dot {{.StateClass}}"></span><span class="ov-ctr-label">{{.StateLabel}}</span>{{if .ShowActionBtn}}
+<button class="ov-ctr-btn"
+        hx-post="/api/container/{{.ActionFn}}?id={{.ID}}&project={{.Project}}"
+        hx-target="#ov-ctr"
+        hx-swap="innerHTML"
+        hx-disabled-elt="this"
+        {{- if eq .ActionFn "start"}} hx-on:click="window.openLogStream('{{.ID}}')"{{end}}
+        title="{{.ActionTitle}}">{{.ActionLabel}}</button>{{end}}{{if .VSCodeShow}}
+<button class="ov-ctr-btn"
+        data-vsid="{{.ID}}"
+        onclick="window.openVSCodeAttach(this.dataset.vsid)"
+        title="{{.VSCodeTitle}}">VS Code</button>{{end}}
+{{- end -}}

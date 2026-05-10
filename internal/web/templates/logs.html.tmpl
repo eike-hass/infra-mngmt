@@ -1,0 +1,10 @@
+
+<div class="logs-panel">
+  {{if .Err}}<div class="no-logs">error: {{.Err}}</div>
+  {{else if not .Lines}}<div class="no-logs">no logs</div>
+  {{else}}
+  {{range .Lines}}
+  <div class="log-line">{{if .Time}}<span class="log-time">{{.Time}}</span>{{end}}{{.Message}}</div>
+  {{end}}
+  {{end}}
+</div>

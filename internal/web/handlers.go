@@ -358,6 +358,7 @@ var tmplFuncs = template.FuncMap{
 		return ""
 	},
 	"groupEntitiesByKind": groupEntitiesByKind,
+	"static":              staticAssetURL,
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -413,8 +414,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	statuses := s.resolveMCPStatuses(r.Context(), all)
-	tmpl := template.Must(template.New("index").Funcs(tmplFuncs).Parse(entityListInnerHTML))
-	tmpl = template.Must(tmpl.Parse(indexHTML))
+	tmpl := parseTemplate("index", "templates/index.html.tmpl", "templates/entity_list.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses, Build: s.buildInfo})
 }
@@ -428,7 +428,7 @@ func (s *Server) handleEntityListPartial(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	statuses := s.resolveMCPStatuses(r.Context(), all)
-	tmpl := template.Must(template.New("partial").Funcs(tmplFuncs).Parse(entityListInnerHTML))
+	tmpl := parseTemplate("partial", "templates/entity_list.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.ExecuteTemplate(w, "entity-list-inner", pageData{Entities: all, MCPStatuses: statuses})
 }
@@ -461,7 +461,7 @@ func (s *Server) handleEntityPreview(w http.ResponseWriter, r *http.Request) {
 				statuses := s.resolveMCPStatuses(r.Context(), all2)
 				mcpStatus = statuses[e.ID]
 			}
-			tmpl := template.Must(template.New("preview").Funcs(tmplFuncs).Parse(previewHTML))
+			tmpl := parseTemplate("preview", "templates/preview.html.tmpl")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_ = tmpl.Execute(w, map[string]any{
 				"Entity":    e,
@@ -633,6 +633,135 @@ func (s *Server) handleContainers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
+// containerControlsView is the data model for the container_controls.html.tmpl
+// partial. It describes the resolved container state and button configuration
+// for a single project's container panel.
+type containerControlsView struct {
+	HasContainer  bool   // false → empty render (no controls)
+	ID            string // container short ID (first 12 chars)
+	Project       string // project root, URL-encoded in button hrefs
+	StateClass    string // CSS class: "running" | "starting" | "exited" | …
+	StateLabel    string // user-facing state text
+	ShowActionBtn bool   // true unless devcontainer-and-stopped
+	ActionLabel   string // "■ stop" or "▶ start"
+	ActionFn      string // "stop" or "start"
+	ActionTitle   string // tooltip
+	VSCodeShow    bool   // whether to show the VS Code button
+	VSCodeTitle   string // tooltip
+}
+
+// buildContainerControlsView constructs a containerControlsView from a slice
+// of managed containers filtered to a specific project. It mirrors the
+// priority logic that the JS renderContainerControls() used to implement:
+// prefer running container, then any container by position.
+func buildContainerControlsView(project string, ctrs []docker.ManagedContainer) containerControlsView {
+	// Filter to this project's containers.
+	var matches []docker.ManagedContainer
+	for _, c := range ctrs {
+		if c.ProjectRoot == project {
+			matches = append(matches, c)
+		}
+	}
+	if len(matches) == 0 {
+		return containerControlsView{}
+	}
+	// Pick running first, else first match.
+	ctr := matches[0]
+	for _, c := range matches {
+		if c.State == "running" {
+			ctr = c
+			break
+		}
+	}
+
+	id := ctr.ID
+	if len(id) > 12 {
+		id = id[:12]
+	}
+
+	running := ctr.State == "running"
+	stateClass := ctr.State
+	if stateClass == "" {
+		stateClass = "exited"
+	}
+	stateLabel := ctr.State
+	if stateLabel == "" {
+		stateLabel = "exited"
+	}
+
+	hasDev := ctr.ProjectRoot != ""
+	showActBtn := running || !hasDev
+	actLabel := "▶ start"
+	actFn := "start"
+	actTitle := "docker start — daemon-level resume only; no devcontainer.json lifecycle"
+	if running {
+		actLabel = "■ stop"
+		actFn = "stop"
+		actTitle = "Stop container"
+	}
+
+	// VS Code button: show for devcontainers (hasDev) or running containers.
+	vsCodeShow := running || hasDev
+	vsRef := ctr.Name
+	if vsRef == "" {
+		vsRef = id
+	}
+	vsAt := ""
+	if ctr.WorkspaceFolder != "" {
+		vsAt = " at " + ctr.WorkspaceFolder
+	}
+	vsTitle := "Attach VS Code (new window) to " + vsRef + vsAt
+	if !running && hasDev {
+		vsTitle = "Open in VS Code — directly opens as a dev container (full lifecycle + port forwarding). No \"Reopen in Container\" prompt."
+	} else if !running {
+		vsTitle = "waiting for container to be ready"
+	}
+
+	return containerControlsView{
+		HasContainer:  true,
+		ID:            id,
+		Project:       project,
+		StateClass:    stateClass,
+		StateLabel:    stateLabel,
+		ShowActionBtn: showActBtn,
+		ActionLabel:   actLabel,
+		ActionFn:      actFn,
+		ActionTitle:   actTitle,
+		VSCodeShow:    vsCodeShow,
+		VSCodeTitle:   vsTitle,
+	}
+}
+
+// renderContainerControlsPartial renders the container_controls.html.tmpl
+// partial for the given project. It writes the result to w with Content-Type
+// text/html. On template error it logs and returns 500.
+func (s *Server) renderContainerControlsPartial(w http.ResponseWriter, r *http.Request, project string) {
+	var view containerControlsView
+	if s.docker != nil && project != "" {
+		ctrs, err := s.docker.ListManaged(r.Context())
+		if err == nil {
+			view = buildContainerControlsView(project, ctrs)
+		}
+	}
+	tmpl := parseTemplate("container_controls", "templates/container_controls.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.Execute(w, view); err != nil {
+		log.Printf("container_controls template error: %v", err)
+	}
+}
+
+// handleContainerControls serves GET /partials/container-controls?project=<root>.
+// Returns the HTML fragment for the container action buttons for the named project.
+// Returns 200 + empty body when docker is unavailable or project is empty.
+func (s *Server) handleContainerControls(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	if project == "" || s.docker == nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		return
+	}
+	s.renderContainerControlsPartial(w, r, project)
+}
+
 func (s *Server) handleContainerStart(w http.ResponseWriter, r *http.Request) {
 	if s.docker == nil {
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
@@ -647,7 +776,21 @@ func (s *Server) handleContainerStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	// Resolve the project for the controls partial. Prefer the explicit
+	// ?project= param (set by HTMX hx-post); fall back to looking up the
+	// container's own ProjectRoot from a fresh list.
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		if ctrs, err := s.docker.ListManaged(r.Context()); err == nil {
+			for _, c := range ctrs {
+				if c.ID == id || (len(c.ID) >= 12 && c.ID[:12] == id) {
+					project = c.ProjectRoot
+					break
+				}
+			}
+		}
+	}
+	s.renderContainerControlsPartial(w, r, project)
 }
 
 func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
@@ -664,7 +807,18 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		if ctrs, err := s.docker.ListManaged(r.Context()); err == nil {
+			for _, c := range ctrs {
+				if c.ID == id || (len(c.ID) >= 12 && c.ID[:12] == id) {
+					project = c.ProjectRoot
+					break
+				}
+			}
+		}
+	}
+	s.renderContainerControlsPartial(w, r, project)
 }
 
 // buildAttachedContainerURI returns the canonical attach URI consumed by
@@ -1224,7 +1378,7 @@ func (s *Server) handleServicesPartial(w http.ResponseWriter, r *http.Request) {
 		Vaults:     buildVaultCardViews(containers),
 		Docker:     s.dockerHealth(r.Context()),
 	}
-	tmpl := template.Must(template.New("svc").Funcs(tmplFuncs).Parse(servicesHTML))
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, data)
 }
@@ -1364,7 +1518,7 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 	if !matched {
 		data.Err = "instance " + instName + " not configured"
 	}
-	tmpl := template.Must(template.New("logs").Funcs(tmplFuncs).Parse(logsHTML))
+	tmpl := parseTemplate("logs", "templates/logs.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, data)
 }

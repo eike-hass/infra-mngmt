@@ -1,0 +1,57 @@
+
+<div class="promote-modal" id="promote-modal"
+     onclick="if(event.target===this){document.getElementById('promote-close-btn').click();}">
+  <div class="promote-modal-card promote-result-card {{if .OK}}ok{{else if .Conflict}}warn{{else}}error{{end}}"
+       role="dialog" aria-label="Promote result">
+    <header class="promote-modal-head">
+      <div class="promote-modal-titles">
+        <div class="promote-modal-title">
+          {{if .OK}}<span class="promote-result-icon">✓</span> done{{end}}
+          {{if .Conflict}}<span class="promote-result-icon">⚠</span> already exists{{end}}
+          {{if .ReadOnly}}<span class="promote-result-icon">✖</span> read-only target{{end}}
+          {{if and (not .OK) (not .Conflict) (not .ReadOnly)}}<span class="promote-result-icon">✖</span> error{{end}}
+        </div>
+        <div class="promote-modal-sub">{{.Message}}</div>
+      </div>
+      <button id="promote-close-btn" class="promote-close"
+              hx-get="/partials/promote-clear"
+              hx-target="#promote-slot"
+              hx-swap="innerHTML"
+              aria-label="close">×</button>
+    </header>
+    <div class="promote-modal-body promote-result-body">
+      {{if .Conflict}}
+      <p class="promote-result-prompt">overwrite the existing entity at the target?</p>
+      <div class="promote-result-actions">
+        <button class="promote-confirm"
+                hx-post="/api/promote?from={{.From}}&to={{.To}}&overwrite=true&name={{.NewName}}{{if .Mirror}}&mirror=true{{end}}"
+                hx-target="#promote-slot"
+                hx-swap="innerHTML">overwrite</button>
+        <button class="promote-cancel"
+                hx-get="/partials/promote-clear"
+                hx-target="#promote-slot"
+                hx-swap="innerHTML">cancel</button>
+      </div>
+      {{else}}
+      <div class="promote-result-actions">
+        <button class="promote-cancel"
+                hx-get="/partials/promote-clear"
+                hx-target="#promote-slot"
+                hx-swap="innerHTML">close</button>
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const onKey = (e) => {
+    if(e.key === 'Escape'){
+      e.preventDefault();
+      document.removeEventListener('keydown', onKey);
+      document.getElementById('promote-close-btn')?.click();
+    }
+  };
+  document.addEventListener('keydown', onKey);
+})();
+</script>

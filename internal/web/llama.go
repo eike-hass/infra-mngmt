@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"sort"
@@ -101,6 +100,65 @@ type llamaServerView struct {
 
 type llamaPageData struct {
 	Servers []llamaServerView
+}
+
+// handleLlamaDrain destructively clears the slot queue on a configured
+// llama-server: aborts whatever's in flight and pops any deferred tasks
+// until /slots reports nothing processing. Used to recover from runaway
+// generations left over by client-side timeouts (the agent gives up but
+// the server keeps decoding, with subsequent requests piling up behind).
+//
+// Returns the standard llama partial so HTMX swaps the freshly-drained
+// state into the panel.
+func (s *Server) handleLlamaDrain(w http.ResponseWriter, r *http.Request) {
+	instance := r.URL.Query().Get("instance")
+	process := r.URL.Query().Get("process")
+	if !validProcessName(instance) || !validProcessName(process) {
+		http.Error(w, "invalid instance or process name", http.StatusBadRequest)
+		return
+	}
+	// Whitelist: only drain endpoints declared in config.yaml's
+	// llama_servers. Prevents arbitrary-URL drain via crafted query.
+	var entry *LlamaEntry
+	for i := range s.llamaServers {
+		if s.llamaServers[i].Instance == instance && s.llamaServers[i].Process == process {
+			entry = &s.llamaServers[i]
+			break
+		}
+	}
+	if entry == nil {
+		http.Error(w, "no such llama_server in config", http.StatusNotFound)
+		return
+	}
+	c := s.llamaClients[llamaKey(instance, process)]
+	if c == nil {
+		http.Error(w, "no client for entry", http.StatusInternalServerError)
+		return
+	}
+	// Identify the currently-loaded model (router-mode servers route /slots
+	// per model). For single-model servers this is empty; the client's
+	// EraseSlot/Slots tolerate that.
+	modelID := ""
+	if models, err := c.Models(r.Context()); err == nil {
+		for _, m := range models {
+			if m.Status.Value == "loaded" {
+				modelID = m.ID
+				break
+			}
+		}
+	}
+	res, err := c.Drain(r.Context(), modelID, llama.DrainOptions{})
+	if err != nil {
+		log.Printf("llama: drain %s/%s: %v", instance, process, err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	log.Printf(
+		"llama: drained %s/%s — canceled=%d iters=%d elapsed=%dms hitCap=%v",
+		instance, process, res.Cancellations, res.Iterations,
+		res.Elapsed.Milliseconds(), res.HitSafetyCap,
+	)
+	s.handleLlamaAll(w, r)
 }
 
 // handleLlamaAll renders the standalone "llama" view body — one card per
@@ -346,7 +404,7 @@ func modelStatusRank(status string) int {
 }
 
 func (s *Server) renderLlamaPage(w http.ResponseWriter, data llamaPageData) {
-	tmpl := template.Must(template.New("llama").Funcs(tmplFuncs).Parse(llamaPageHTML))
+	tmpl := parseTemplate("llama", "templates/llama.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("llama page render: %v", err)

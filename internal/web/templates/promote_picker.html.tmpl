@@ -1,0 +1,97 @@
+
+{{$e := .Entity}}
+<div class="promote-modal" id="promote-modal"
+     onclick="if(event.target===this){document.getElementById('promote-close-btn').click();}">
+  <div class="promote-modal-card" role="dialog" aria-label="Promote entity">
+    <header class="promote-modal-head">
+      <div class="promote-modal-titles">
+        <div class="promote-modal-title">copy <span class="promote-kind">{{$e.Kind}}</span> <strong>{{$e.Name}}</strong></div>
+        <div class="promote-modal-sub">from <span>{{$e.Source}}</span></div>
+      </div>
+      <button id="promote-close-btn" class="promote-close"
+              hx-get="/partials/promote-clear"
+              hx-target="#promote-slot"
+              hx-swap="innerHTML"
+              aria-label="close">×</button>
+    </header>
+
+    <div class="promote-modal-body">
+      <label class="promote-rename">
+        <span class="promote-rename-label">name at target</span>
+        <input id="promote-rename-input" type="text" name="name"
+               value="{{.SuggestedName}}"
+               class="promote-rename-input" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="promote-mirror-row">
+        <label class="promote-mirror">
+          <input id="promote-mirror-input" type="checkbox" name="mirror" value="true">
+          <span>mirror copy</span>
+          <span class="promote-mirror-info" tabindex="0"
+                aria-label="What is mirror copy?"
+                data-tooltip="Without mirror, copying overwrites overlapping files but leaves anything else at the target untouched. With mirror, the target entity is wiped first so it ends up as an exact reflection of the source — useful when a skill's source no longer contains a script or template that the target still has. Single-file kinds (command, agent, memory, claude_md, mcp_server, hook) are already fully replaced on copy, so the flag is a no-op for them.">i</span>
+        </label>
+        <div class="promote-mirror-hint">
+          replace the target with an exact copy of the source — files at the target that aren't in the source get deleted.
+          only meaningful for skills.
+        </div>
+      </div>
+
+      {{if not .AnyTargets}}
+      <div class="promote-empty">no other sources are configured — promote needs at least one second source as a target</div>
+      {{else}}
+      {{range .Groups}}
+      {{if .Targets}}
+      <section class="promote-group">
+        <h3 class="promote-group-title">
+          <span>{{.Title}}</span>
+          <span class="promote-group-count">{{len .Targets}}</span>
+        </h3>
+        <ul class="promote-targets">
+          {{range .Targets}}
+          <li>
+            <button class="promote-target {{if .ReadOnly}}readonly{{end}} {{if .Exists}}exists{{end}}"
+                    {{if .ReadOnly}}disabled aria-disabled="true" title="this source is read-only"{{else}}
+                    hx-post="/api/promote?from={{$e.ID}}&to={{.SourceID}}"
+                    hx-include="#promote-rename-input, #promote-mirror-input"
+                    hx-target="#promote-slot"
+                    hx-swap="innerHTML"{{end}}>
+              <div class="promote-target-main">
+                <div class="promote-target-label">{{.Label}}</div>
+                {{if .ProjectPath}}<div class="promote-target-path">{{.ProjectPath}}</div>{{end}}
+              </div>
+              <div class="promote-target-flags">
+                {{with .Tool}}<span class="entity-tool-tag {{.}}" title="tool: {{.}}">{{toolIcon .}} {{.}}</span>{{end}}
+                {{if .CrossTool}}<span class="promote-flag cross-tool" title="source and target are different tools">cross-tool</span>{{end}}
+                {{if .Exists}}<span class="promote-flag exists">replaces</span>{{end}}
+                {{if .ReadOnly}}<span class="promote-flag readonly">read-only</span>{{end}}
+                {{if and (not .Exists) (not .ReadOnly)}}<span class="promote-flag new">new</span>{{end}}
+              </div>
+            </button>
+          </li>
+          {{end}}
+        </ul>
+      </section>
+      {{end}}
+      {{end}}
+      {{end}}
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const close = () => document.getElementById('promote-close-btn')?.click();
+  const onKey = (e) => {
+    if(e.key === 'Escape'){
+      e.preventDefault();
+      document.removeEventListener('keydown', onKey);
+      close();
+    }
+  };
+  document.addEventListener('keydown', onKey);
+  // Auto-focus the rename input so power users can edit immediately.
+  setTimeout(()=>{
+    const i = document.getElementById('promote-rename-input');
+    if(i){ i.focus(); i.select(); }
+  }, 0);
+})();
+</script>

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/entity"
 	"github.com/eike-hass/infra-mngmt/internal/source"
 )
@@ -1087,3 +1088,188 @@ func TestSourcesRescanDoesNotInvalidateWhenNoAddition(t *testing.T) {
 		t.Errorf("rescan with no new sources should not invalidate cache: a.calls went %d → %d", cnt1, cnt2)
 	}
 }
+
+// ─── /partials/logs ─────────────────────────────────────────────────────────
+
+// The logs handler had zero coverage prior to the frontend refactor work
+// (see docs/frontend-architecture.md §16). Without these the M4 step that
+// moves logsHTML into templates/*.html.tmpl would silently regress.
+
+func TestHandleProcessLogsRejectsBadInstanceName(t *testing.T) {
+	srv := newServerWithSource(newMockSource("host:/x", entity.GlobalScope()))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/logs?instance=../etc&process=foo", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestHandleProcessLogsRejectsBadProcessName(t *testing.T) {
+	srv := newServerWithSource(newMockSource("host:/x", entity.GlobalScope()))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/logs?instance=wsl&process=foo;rm", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+// With no compose instance configured, the handler still renders the partial
+// successfully — populating the .Err field with "instance ... not configured".
+// This is the path HTMX hits when the user opens a log panel for a non-existent
+// instance. Renders the html shell with the error inline.
+func TestHandleProcessLogsRendersErrorWhenInstanceUnknown(t *testing.T) {
+	srv := newServerWithSource(newMockSource("host:/x", entity.GlobalScope()))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/logs?instance=wsl&process=infra-mngmt", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "wsl") {
+		t.Errorf("rendered partial missing instance name:\n%s", body)
+	}
+	if !strings.Contains(body, "not configured") {
+		t.Errorf("expected 'not configured' error inline:\n%s", body)
+	}
+}
+
+// ─── /api/container/events-stream ───────────────────────────────────────────
+
+// SSE is the highest-risk live-update mechanism in the codebase and had zero
+// tests before the refactor work. The full streaming path needs a docker-client
+// interface to mock; until that lands, lock down the two precondition branches.
+
+func TestHandleContainerEventsStreamReturns503WithoutDocker(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil) // dc = nil
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/container/events-stream?id=abc", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rr.Code)
+	}
+}
+
+// Even with docker missing, the missing-id branch is unreachable today
+// because the docker check runs first. This test pins the current ordering
+// so the M7 refactor (HTMX-ifying the container panel) does not silently
+// reverse it — a 400 surfaced before 503 would change client behavior.
+func TestHandleContainerEventsStreamPrioritizesDockerCheck(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/container/events-stream", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("missing-docker should win over missing-id; status = %d", rr.Code)
+	}
+}
+
+// ─── /partials/container-controls (M7) ─────────────────────────────────────
+
+// TestHandleContainerControls_NoDocker verifies that the controls partial
+// returns 200 + empty body when docker is not configured. The client should
+// receive an empty #ov-ctr swap (panel goes blank, not broken).
+func TestHandleContainerControls_NoDocker(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil) // dc = nil
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/container-controls?project=/home/user/repo", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if strings.TrimSpace(rr.Body.String()) != "" {
+		t.Errorf("expected empty body when docker=nil, got %q", rr.Body.String())
+	}
+}
+
+// TestHandleContainerControls_MissingProject verifies that omitting ?project=
+// returns 200 + empty body regardless of docker availability.
+func TestHandleContainerControls_MissingProject(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/container-controls", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if strings.TrimSpace(rr.Body.String()) != "" {
+		t.Errorf("expected empty body when project is empty, got %q", rr.Body.String())
+	}
+}
+
+// TestHandleContainerStart_NoDocker_Returns503 confirms the no-docker check
+// is preserved after M7 (start now renders a partial on success instead of 204).
+func TestHandleContainerStart_NoDocker_Returns503(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/start?id=abc&project=/repo", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rr.Code)
+	}
+}
+
+// TestHandleContainerStop_NoDocker_Returns503 confirms the same for stop.
+func TestHandleContainerStop_NoDocker_Returns503(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/stop?id=abc&project=/repo", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rr.Code)
+	}
+}
+
+// TestBuildContainerControlsView_NoMatch verifies that an empty result is
+// returned when no containers match the requested project.
+func TestBuildContainerControlsView_NoMatch(t *testing.T) {
+	view := buildContainerControlsView("/other/project", nil)
+	if view.HasContainer {
+		t.Errorf("expected HasContainer=false for empty list")
+	}
+}
+
+// TestBuildContainerControlsView_RunningPreferred verifies that a running
+// container is preferred over an exited one when multiple containers match.
+func TestBuildContainerControlsView_RunningPreferred(t *testing.T) {
+	ctrs := []docker.ManagedContainer{
+		{ID: "aaa111aaa111", ProjectRoot: "/repo", State: "exited"},
+		{ID: "bbb222bbb222", ProjectRoot: "/repo", State: "running"},
+	}
+	view := buildContainerControlsView("/repo", ctrs)
+	if !view.HasContainer {
+		t.Fatal("expected HasContainer=true")
+	}
+	if view.ID != "bbb222bbb222" {
+		t.Errorf("ID = %q, want running container bbb222bbb222", view.ID)
+	}
+	if view.ActionFn != "stop" {
+		t.Errorf("ActionFn = %q, want stop for running container", view.ActionFn)
+	}
+}
+
+// TestBuildContainerControlsView_StoppedDevcontainer verifies that a stopped
+// devcontainer (has projectRoot) shows VS Code button but hides the action button.
+func TestBuildContainerControlsView_StoppedDevcontainer(t *testing.T) {
+	ctrs := []docker.ManagedContainer{
+		{ID: "ccc333ccc333", ProjectRoot: "/repo", State: "exited", Name: "my-container"},
+	}
+	view := buildContainerControlsView("/repo", ctrs)
+	if !view.HasContainer {
+		t.Fatal("expected HasContainer=true")
+	}
+	// hasDev=true and not running → ShowActionBtn=false
+	if view.ShowActionBtn {
+		t.Errorf("ShowActionBtn should be false for stopped devcontainer")
+	}
+	// VS Code button should still show
+	if !view.VSCodeShow {
+		t.Errorf("VSCodeShow should be true for devcontainer (stopped)")
+	}
+}
+
+// NOTE: TestHandleContainerStart_ReturnsControlsHTMLOnSuccess and
+// TestHandleContainerStop_ReturnsControlsHTMLOnSuccess require a docker client
+// mock interface to inject into *Server. The docker.Client is a concrete type
+// with no interface seam today. Until a DockerClient interface is extracted,
+// the success-path partial-render behavior can only be verified via integration
+// tests. Tracked as a follow-up for the docker package refactor.
+
+// TODO(docker-mock): add TestHandleContainerStart_ReturnsControlsHTMLOnSuccess
+// TODO(docker-mock): add TestHandleContainerStop_ReturnsControlsHTMLOnSuccess

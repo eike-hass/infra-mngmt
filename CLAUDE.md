@@ -38,8 +38,8 @@ Process management is delegated to [process-compose](https://github.com/F1bonacc
 | Backend | Go | Goroutines for concurrent source watching; single static binary |
 | Docker API | `github.com/docker/docker/client` (official SDK) | Strong types, API version negotiation, `stdcopy.StdCopy` for log demux, native support for events/exec/cp |
 | HTTP server | `net/http` + [chi](https://github.com/go-chi/chi) | Lightweight, idiomatic |
-| Frontend | Go templates + HTMX | No JS build pipeline; server-side rendering |
-| Search | fuse.js (CDN) | ⌘K across entities without a build step |
+| Frontend | Go templates + HTMX | No JS build pipeline; server-side rendering. **See [docs/frontend-architecture.md](docs/frontend-architecture.md) — binding for any change under [internal/web/](internal/web/).** |
+| Search | fuse.js (vendored, `internal/web/static/vendor/`) | ⌘K across entities without a build step |
 | Config | `gopkg.in/yaml.v3` | YAML config at `~/.config/infra-mngmt/config.yaml` (loader still falls back to legacy `config.json` with a deprecation log) |
 
 ## Project structure
@@ -59,13 +59,19 @@ internal/
   deps/                  # dependencies.yaml: rules, scope-pattern matching
   graph/
     refs.go              # Resolver: deps + legacy substring fallback; bridge/process/container state rollup
-  web/
+  web/                   # HTTP server + frontend assets — see docs/frontend-architecture.md
     server.go            # HTTP router, middleware, auth
-    handlers.go          # Entity + process routes; container stats fan-out
+    handlers.go          # Entity + process routes; container stats fan-out; FuncMap
     bridges.go           # bridge views + apply/reset/refresh handlers
     containers.go        # declared-container views + handlers
     status.go            # MCP runtime status resolver (uses graph package)
-    template.go          # Inline Go HTML templates (index, preview, services, logs)
+    static.go            # embed.FS mount for /static/*; static FuncMap helper
+    templates.go         # embed.FS + parseTemplate helper for templates/*.html.tmpl
+    templates/           # one .html.tmpl per page/partial (no Go-string templates)
+    static/
+      css/app.css        # shared design tokens + component CSS
+      js/                # ES modules: app.js (shared), preview.js, containers.js
+      vendor/            # htmx, fuse, marked + LICENSES.md (CodeMirror still esm.sh)
 config/
   config.go              # App config: YAML primary, JSON fallback for legacy installs
   wsl.go                 # `wsl-windows` sentinel → Windows host IP via /proc/net/route
@@ -148,7 +154,7 @@ process-compose YAML files are **infrastructure config**, not Claude Code config
 
 4. **Devcontainer auto-discovery** — primary discovery uses the standard `devcontainer.local_folder` label set by VS Code/devcontainer CLI. `claude.managed=true` is the explicit opt-in fallback for non-devcontainer containers. Never use container naming conventions.
 
-5. **Web-first, Tauri later** — keep the UI purely server-rendered + HTMX. Tauri is an upgrade path, not a constraint.
+5. **Web-first, Tauri later** — keep the UI purely server-rendered + HTMX. Tauri is an upgrade path, not a constraint. The frontend architecture, interaction model, and per-step checklist for adding UI live in [docs/frontend-architecture.md](docs/frontend-architecture.md) — read it before touching anything under [internal/web/](internal/web/).
 
 6. **Docker SDK pinning** — `github.com/docker/docker v27.5.1+incompatible` with explicit `github.com/docker/go-connections v0.5.0` (newer versions remove `sockets.DialPipe` which v27 still references) and `github.com/pkg/errors v0.9.1+` (earlier versions lack `errors.As`/`Is`). The SDK pulls in OpenTelemetry as a transitive dep; the firewall now allows the Go infra domains so this is fine, but resist upgrading to v28+ until those breaking changes settle.
 
@@ -165,6 +171,9 @@ process-compose YAML files are **infrastructure config**, not Claude Code config
 
 ## References
 
+- [docs/frontend-architecture.md](docs/frontend-architecture.md) — frontend stack, file layout, interaction model, JS/CSS/template conventions, when to introduce a JS island. Binding for changes under [internal/web/](internal/web/).
+- [TESTING.md](TESTING.md) — test layout, mock patterns, coverage baseline
+- [docs/proposals/](docs/proposals/) — design proposals for in-flight work
 - [CCM](https://github.com/dustinlacewell/claude-config-manager) — UX and scope model reference (TypeScript, MIT)
 - [process-compose](https://github.com/F1bonacc1/process-compose) — runtime supervisor
 - [trailofbits/claude-code-devcontainer](https://github.com/trailofbits/claude-code-devcontainer) — Docker label patterns and volume sync
