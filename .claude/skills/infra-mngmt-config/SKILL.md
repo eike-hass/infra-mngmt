@@ -78,6 +78,9 @@ The Windows process-compose itself runs unelevated. For ports the service binds 
 
 ```yaml
 bridges:
+  # tier=windows: netsh portproxy + firewall rule. Persistent state on the
+  # Windows host. Listens on the WSL adapter so WSL/devcontainer can reach
+  # a Windows-bound 127.0.0.1 service.
   - name: producer-pal
     tier: windows
     type: portproxy+firewall
@@ -86,17 +89,36 @@ bridges:
     firewall:
       remote: 172.18.0.0/16
       display_name: "Producer Pal MCP"
+
+  # tier=wsl: socat relay running as a process-compose entry on the WSL host.
+  # Re-originates connections from the WSL host's eth0 IP so they pass the
+  # Windows portproxy's firewall remote filter. Required because Hyper-V's
+  # firewall drops forwarded packets sourced from docker0 (172.17/16) on
+  # their way to the Windows-side bridge — sourcing from WSL eth0 (in the
+  # `firewall.remote` CIDR) does pass.
+  - name: producer-pal-relay
+    tier: wsl
+    type: socat
+    listen: { addr: 172.17.0.1, port: 3350 }
+    connect: { addr: "${windows-host-ip}", port: 3350, family: auto }
 ```
 
 Field rules:
 - `name` — globally unique; consumers reference it as `bridge:<name>` in `dependencies.yaml`.
 - `tier` — `wsl` (socat) or `windows` (portproxy+firewall). `container:*` reserved for future use.
-- `${wsl-host-ip}` is resolved at apply time on the relevant tier (Windows: via `Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*)'`).
+- `${wsl-host-ip}` (Windows-tier listen): resolved at apply time via `Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*)'` and baked into the netsh rule.
+- `${windows-host-ip}` (WSL-tier connect): rendered as an inline bash backtick subshell (` `` /usr/sbin/ip route | awk '/^default/ {print $3}' `` `) embedded in the socat command. Bash re-evaluates it every time the bridge process is (re)launched — covers `wsl --shutdown` IP renumbering, PC restarts, and `bridges apply`-triggered reloads. Backticks are invisible to process-compose's envsubst preprocessor so they pass through untouched.
 - `connect.family` — `auto` probes the listening side at apply time and picks `v4tov4` or `v4tov6`. Override to `v4` / `v6` only when you need a specific path.
 - `firewall.remote` — CIDR allowed to reach the listener (typically the WSL2 NAT range, `172.18.0.0/16` on stock setups).
-- The applier restarts `iphlpsvc` after each batch to flush the kernel listener cache (matches the bash-script reliability fix).
+- The applier restarts `iphlpsvc` after each Windows-tier batch to flush the kernel listener cache.
 
-CLI: `infra-mngmt bridges {list,status,apply,reset}`. Apply/reset for Windows bridges trigger one UAC prompt for the whole batch.
+How `tier: wsl` bridges materialize:
+- `infra-mngmt bridges apply` rewrites `~/.config/infra-mngmt/process-compose.bridges.yaml` (the path is configurable via `bridges_compose_file:` in `config.yaml`).
+- The user's main `process-compose.yaml` references it via `extends: process-compose.bridges.yaml` — see README §4 for the one-line setup.
+- Each `wsl/socat` bridge becomes a `bridge-<name>` process with `availability.restart: always`, `namespace: bridges`, and an `nc -z` readiness probe targeting the listen address.
+- Apply also triggers a `POST /project/configuration` reload on the WSL PC instance. Reset additionally calls `/process/stop` on the dropped `bridge-*` processes (PC's reload doesn't reliably reconcile deletions on all versions).
+
+CLI: `infra-mngmt bridges {list,status,apply,reset}`. Apply/reset for Windows bridges trigger one UAC prompt for the whole batch; WSL bridges flow entirely through the process-compose fragment + REST API.
 
 ## Dependencies schema (`~/.config/infra-mngmt/dependencies.yaml`)
 

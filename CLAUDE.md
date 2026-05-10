@@ -53,7 +53,8 @@ internal/
   entity/                # Entity model: Kind, Scope, Entity (with Attrs map)
   docker/                # Docker client: managed-container discovery, sidecar IO, ContainerStats
   compose/               # process-compose REST client (incl. bootstrap)
-  bridge/                # bridges.yaml: types, load, state, apply (PowerShell + WSL socat)
+  bridge/                # bridges.yaml: types, load, state, apply (PowerShell for windows tier;
+                         # composegen.go renders a process-compose fragment for wsl/socat tier)
   containers/            # containers.yaml: declared-container declarations + load
   deps/                  # dependencies.yaml: rules, scope-pattern matching
   graph/
@@ -132,6 +133,8 @@ extra_paths: []
 `wsl-windows` in an endpoint is a sentinel resolved at startup to the Windows host IP from `/proc/net/route` (the WSL guest's default-route gateway — see `config/wsl.go`). Necessary for WSL2 NAT mode where the gateway IP changes on each restart. The older resolv.conf-based path is no longer used because Win11 + Hyper-V firewall makes the resolv.conf nameserver a local DNS proxy bound to WSL's loopback, not routable.
 
 `bridges.yaml`, `dependencies.yaml`, `containers.yaml` live alongside `config.yaml` and are auto-discovered (or pointed at via `bridges_file`/`dependencies_file`/`containers_file` in the main config).
+
+For `tier: wsl, type: socat` bridges, infra-mngmt also generates `process-compose.bridges.yaml` (path configurable via `bridges_compose_file`) — a fragment the user's main `process-compose.yaml` includes via `extends:`. Generated entries live under namespace `bridges`. The Windows-host IP gets resolved by an inline backtick subshell (`` `ip route | awk '/^default/{print $3}'` ``) embedded in each socat command, evaluated by bash at every process (re)start — not via env_cmds, since PC's reload endpoint doesn't re-evaluate them on all versions. See README §4 and `.claude/skills/infra-mngmt-config/SKILL.md` for the schema and runtime model.
 
 process-compose YAML files are **infrastructure config**, not Claude Code config — they do not belong in `.claude/` directories. Use `~/.config/infra-mngmt/` or any path the `compose_file` field points to.
 
