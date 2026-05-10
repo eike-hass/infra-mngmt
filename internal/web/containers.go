@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/eike-hass/infra-mngmt/internal/containers"
+	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/graph"
 )
 
@@ -26,6 +27,11 @@ type containerView struct {
 	HasStats    bool   // true when a CPU/Mem snapshot was sampled for this row
 	CPU         float64
 	Mem         int64
+
+	// Kind discriminator from containers.yaml. When "mcp-fs" the template
+	// renders an HTMX-loaded vault panel (allowlist editor + tree browser)
+	// inside the container card. Empty for ordinary containers.
+	Kind string
 }
 
 // snapshotContainers queries Docker for the state of every declared container
@@ -84,6 +90,11 @@ func (s *Server) rebuildContainerViews(ctx context.Context) []containerView {
 			StateClass:  containerStateCSS(ci.State),
 			Status:      ci.Status,
 			ID:          shortID(ci.ID),
+		}
+		// Look up the kind discriminator from the declaration so the
+		// template can branch on mcp-fs etc.
+		if d := s.findContainerDecl(ci.Name); d != nil {
+			v.Kind = d.Kind
 		}
 		views[i] = v
 		if ci.State == graph.ContainerRunning && ci.ID != "" && s.docker != nil {
@@ -144,19 +155,28 @@ func containerStateCSS(s graph.ContainerState) string {
 // handleContainerStartByName looks up the named container and starts it.
 // Distinct from the /api/container/start used by the entity-side container
 // management UI (which takes a Docker ID).
+//
+// Branches on the declaration's lifecycle mode:
+//   - compose_file set    → `docker compose -f <file> up -d`
+//   - image set           → `docker run` with docker_args (not yet implemented;
+//     falls through to find-and-start for now)
+//   - external-only       → find the existing container by name, start it
 func (s *Server) handleContainerStartByName(w http.ResponseWriter, r *http.Request) {
-	s.containerActionByName(w, r, func(id string) error {
-		return s.docker.StartContainer(r.Context(), id)
-	})
+	s.containerLifecycleByName(w, r, lifecycleStart)
 }
 
 func (s *Server) handleContainerStopByName(w http.ResponseWriter, r *http.Request) {
-	s.containerActionByName(w, r, func(id string) error {
-		return s.docker.StopContainer(r.Context(), id)
-	})
+	s.containerLifecycleByName(w, r, lifecycleStop)
 }
 
-func (s *Server) containerActionByName(w http.ResponseWriter, r *http.Request, fn func(string) error) {
+type lifecycleAction int
+
+const (
+	lifecycleStart lifecycleAction = iota
+	lifecycleStop
+)
+
+func (s *Server) containerLifecycleByName(w http.ResponseWriter, r *http.Request, action lifecycleAction) {
 	name := r.URL.Query().Get("name")
 	if !validProcessName(name) {
 		http.Error(w, "invalid container name", http.StatusBadRequest)
@@ -166,6 +186,54 @@ func (s *Server) containerActionByName(w http.ResponseWriter, r *http.Request, f
 		http.Error(w, "Docker client unavailable", http.StatusServiceUnavailable)
 		return
 	}
+
+	// Find the declaration, if any. External-only mode (no declaration
+	// owning the lifecycle) falls back to find-and-start the existing
+	// container by name. That keeps the historic behavior for entries
+	// without compose_file/image.
+	decl := s.findContainerDecl(name)
+
+	switch {
+	case decl != nil && decl.ComposeFile != "":
+		s.composeAction(w, r, *decl, action)
+		return
+	case decl != nil && decl.Image != "":
+		// Inline `docker run` mode is declared but the runner isn't wired
+		// in yet. Surface an explicit 501 rather than silently falling
+		// back to find-and-start (which would do nothing useful).
+		http.Error(w, "inline image lifecycle not yet implemented; use compose_file or external-only mode", http.StatusNotImplemented)
+		return
+	default:
+		s.externalContainerAction(w, r, name, action)
+	}
+}
+
+// composeAction runs `docker compose up -d` or `down` for a declared stack.
+// The container's Name is used as the compose project so the project name
+// is stable regardless of where the YAML lives on disk.
+func (s *Server) composeAction(w http.ResponseWriter, r *http.Request, decl containers.Container, action lifecycleAction) {
+	cmp := docker.Compose{File: decl.ComposeFile, Project: decl.Name}
+	verb := "up"
+	op := cmp.Up
+	if action == lifecycleStop {
+		verb = "down"
+		op = cmp.Down
+	}
+	out, err := op(r.Context())
+	if err != nil {
+		log.Printf("container: compose %s on %s failed: %v", verb, decl.Name, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("container: compose %s on %s OK (%d bytes output)", verb, decl.Name, len(out))
+	s.handleServicesPartial(w, r)
+}
+
+// externalContainerAction is the legacy path: look up an existing container
+// by name and start/stop it via the Docker SDK. Used for declarations with
+// neither compose_file nor image (the original "just observe + start/stop"
+// pattern).
+func (s *Server) externalContainerAction(w http.ResponseWriter, r *http.Request, name string, action lifecycleAction) {
 	mc, found, err := s.docker.FindByName(r.Context(), name)
 	if err != nil {
 		log.Printf("container: lookup %s: %v", name, err)
@@ -177,12 +245,44 @@ func (s *Server) containerActionByName(w http.ResponseWriter, r *http.Request, f
 		return
 	}
 	log.Printf("container: action on %s (id=%s)", name, mc.ID[:min(12, len(mc.ID))])
-	if err := fn(mc.ID); err != nil {
-		log.Printf("container: action on %s failed: %v", name, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	var actErr error
+	switch action {
+	case lifecycleStart:
+		actErr = s.docker.StartContainer(r.Context(), mc.ID)
+	case lifecycleStop:
+		actErr = s.docker.StopContainer(r.Context(), mc.ID)
+	}
+	if actErr != nil {
+		log.Printf("container: action on %s failed: %v", name, actErr)
+		http.Error(w, actErr.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.handleServicesPartial(w, r)
+}
+
+// findContainerDecl returns the matching declaration (case-insensitive), or
+// nil if no entry matches. Mirrors the container loader's name-matching
+// rules.
+func (s *Server) findContainerDecl(name string) *containers.Container {
+	want := lowerASCII(name)
+	for i := range s.containerDecls {
+		if lowerASCII(s.containerDecls[i].Name) == want {
+			return &s.containerDecls[i]
+		}
+	}
+	return nil
+}
+
+func lowerASCII(s string) string {
+	b := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 32
+		}
+		b[i] = c
+	}
+	return string(b)
 }
 
 // handleContainersRefresh re-reads containers.yaml from disk so YAML edits
