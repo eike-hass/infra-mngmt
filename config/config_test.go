@@ -45,6 +45,10 @@ func TestLoadSaveRoundtrip(t *testing.T) {
 			{Name: "wsl", Endpoint: "http://localhost:9998", Binary: "/usr/bin/pc", ComposeFile: "/etc/pc.yaml", Token: "abc"},
 			{Name: "windows", Endpoint: "http://wsl-windows:9999", TokenFile: "/etc/pc.token"},
 		},
+		LlamaServers: []LlamaServer{
+			{Instance: "windows", Process: "llama-server", Endpoint: "http://wsl-windows:8080"},
+			{Instance: "wsl", Process: "llama-q4", Endpoint: "http://localhost:8081", APIKeyFile: "/etc/im/llama.key"},
+		},
 		BridgesFile:      "/etc/im/bridges.yaml",
 		DependenciesFile: "/etc/im/dependencies.yaml",
 		ExtraPaths:       []string{"/home/u/projA"},
@@ -76,6 +80,15 @@ func TestLoadSaveRoundtrip(t *testing.T) {
 	}
 	if len(out.ExtraPaths) != 1 || out.ExtraPaths[0] != "/home/u/projA" {
 		t.Errorf("ExtraPaths not preserved: %+v", out.ExtraPaths)
+	}
+	if len(out.LlamaServers) != 2 {
+		t.Fatalf("expected 2 LlamaServers, got %d", len(out.LlamaServers))
+	}
+	if out.LlamaServers[0].Endpoint != "http://wsl-windows:8080" {
+		t.Errorf("LlamaServer[0].Endpoint = %q", out.LlamaServers[0].Endpoint)
+	}
+	if out.LlamaServers[1].APIKeyFile != "/etc/im/llama.key" {
+		t.Errorf("LlamaServer[1].APIKeyFile = %q", out.LlamaServers[1].APIKeyFile)
 	}
 }
 

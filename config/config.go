@@ -20,10 +20,26 @@ type ProcessCompose struct {
 	TokenFile   string `yaml:"token_file,omitempty"` // path to file containing the token; same file is passed to process-compose via --token-file
 }
 
+// LlamaServer declares an llama.cpp `llama-server` HTTP endpoint that the UI
+// can probe for live stats (`/health`, `/props`, `/metrics`, `/slots`). The
+// pair (Instance, Process) is matched against process-compose process rows so
+// the "llama" button only renders next to processes we can actually probe.
+//
+// `wsl-windows` in Endpoint is resolved at runtime to the Windows host IP via
+// the same path as ProcessCompose endpoints (see ResolveEndpoint / wsl.go).
+type LlamaServer struct {
+	Instance   string `yaml:"instance"`          // process-compose instance name
+	Process    string `yaml:"process"`           // process-compose process name
+	Endpoint   string `yaml:"endpoint"`          // base URL, e.g. "http://wsl-windows:8080"
+	APIKey     string `yaml:"api_key,omitempty"` // bearer token; takes precedence over APIKeyFile
+	APIKeyFile string `yaml:"api_key_file,omitempty"`
+}
+
 type Config struct {
 	Bind             string           `yaml:"bind"`
 	TokenFile        string           `yaml:"token_file"`
 	ProcessCompose   []ProcessCompose `yaml:"process_compose"`
+	LlamaServers     []LlamaServer    `yaml:"llama_servers,omitempty"`
 	BridgesFile      string           `yaml:"bridges_file,omitempty"`
 	DependenciesFile string           `yaml:"dependencies_file,omitempty"`
 	ContainersFile   string           `yaml:"containers_file,omitempty"`

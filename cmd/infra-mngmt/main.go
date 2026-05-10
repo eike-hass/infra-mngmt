@@ -745,6 +745,7 @@ func runServer(args []string) {
 	srv.SetBridgesFile(bridgesPath)
 	srv.SetBridgesComposeFile(cfg.BridgesComposeFile)
 	srv.SetContainersFile(containersPath)
+	srv.SetLlamaServers(loadLlamaEntries(cfg.LlamaServers))
 	srv.SetBuildInfo(collectBuildInfo())
 	if buildEpoch != "" {
 		log.Printf("infra-mngmt build_epoch=%s", buildEpoch)
@@ -755,6 +756,35 @@ func runServer(args []string) {
 	if err := http.ListenAndServe(cfg.Bind, srv); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// loadLlamaEntries flattens config.LlamaServer into web.LlamaEntry, resolving
+// the wsl-windows endpoint sentinel and reading APIKeyFile lazily. Same shape
+// as the ProcessCompose loop above — kept separate so a malformed key file
+// fails loudly per-entry instead of dropping the whole list.
+func loadLlamaEntries(in []config.LlamaServer) []web.LlamaEntry {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]web.LlamaEntry, 0, len(in))
+	for _, ls := range in {
+		key := ls.APIKey
+		if key == "" && ls.APIKeyFile != "" {
+			b, err := os.ReadFile(ls.APIKeyFile)
+			if err != nil {
+				log.Printf("warning: llama_servers %q/%q: read api_key_file %q: %v — probes will be unauthenticated", ls.Instance, ls.Process, ls.APIKeyFile, err)
+			} else {
+				key = strings.TrimSpace(string(b))
+			}
+		}
+		out = append(out, web.LlamaEntry{
+			Instance: ls.Instance,
+			Process:  ls.Process,
+			Endpoint: config.ResolveEndpoint(ls.Endpoint),
+			APIKey:   key,
+		})
+	}
+	return out
 }
 
 func isLoopback(addr string) bool {
