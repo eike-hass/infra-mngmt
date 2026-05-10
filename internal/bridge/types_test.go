@@ -127,3 +127,93 @@ func TestFileValidateDefaultsFamily(t *testing.T) {
 		t.Errorf("expected default family 'auto', got %q", f.Bridges[0].Connect.Family)
 	}
 }
+
+func TestValidateCompositeAcceptsBareDescription(t *testing.T) {
+	parent := Bridge{
+		Name:        "llama-cpp",
+		Kind:        KindComposite,
+		Description: "llama.cpp end-to-end",
+	}
+	if err := parent.Validate(); err != nil {
+		t.Errorf("composite with only description should validate; got %v", err)
+	}
+}
+
+func TestValidateCompositeRejectsForwardingFields(t *testing.T) {
+	cases := []struct {
+		name string
+		mod  func(*Bridge)
+	}{
+		{"with tier", func(b *Bridge) { b.Tier = TierWindows }},
+		{"with type", func(b *Bridge) { b.Type = TypePortproxy }},
+		{"with listen", func(b *Bridge) { b.Listen = Endpoint{Addr: "127.0.0.1", Port: 80} }},
+		{"with connect", func(b *Bridge) { b.Connect = Endpoint{Addr: "127.0.0.1", Port: 80} }},
+		{"with firewall", func(b *Bridge) { b.Firewall = Firewall{DisplayName: "x", Remote: "10.0.0.0/8"} }},
+		{"with composite_of", func(b *Bridge) { b.CompositeOf = "other" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			parent := Bridge{Name: "llama-cpp", Kind: KindComposite}
+			tc.mod(&parent)
+			if err := parent.Validate(); err == nil {
+				t.Errorf("composite %s: expected validation error, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestValidateUnknownKind(t *testing.T) {
+	b := validBridge()
+	b.Kind = "weird"
+	if err := b.Validate(); err == nil {
+		t.Error("expected error for unknown kind")
+	}
+}
+
+func TestFileValidateCompositeOfResolvesParent(t *testing.T) {
+	parent := Bridge{Name: "llama-cpp", Kind: KindComposite, Description: "llama group"}
+	child := validBridge()
+	child.Name = "llama-cpp-windows"
+	child.CompositeOf = "llama-cpp"
+	f := File{Bridges: []Bridge{parent, child}}
+	if err := f.Validate(); err != nil {
+		t.Errorf("expected valid composite group, got %v", err)
+	}
+}
+
+func TestFileValidateCompositeOfRequiresExistingParent(t *testing.T) {
+	child := validBridge()
+	child.Name = "orphan"
+	child.CompositeOf = "ghost"
+	f := File{Bridges: []Bridge{child}}
+	if err := f.Validate(); err == nil {
+		t.Error("expected error when composite_of points at a non-existent parent")
+	}
+}
+
+func TestFileValidateCompositeOfRejectsNonComposite(t *testing.T) {
+	// Pointing at a regular bridge (not kind=composite) is also wrong.
+	other := validBridge()
+	other.Name = "real-bridge"
+	child := validBridge()
+	child.Name = "child"
+	child.CompositeOf = "real-bridge"
+	f := File{Bridges: []Bridge{other, child}}
+	if err := f.Validate(); err == nil {
+		t.Error("expected error when composite_of points at a non-composite entry")
+	}
+}
+
+func TestFileValidateAllowsCompositeBeforeOrAfterMembers(t *testing.T) {
+	parent := Bridge{Name: "llama-cpp", Kind: KindComposite}
+	child := validBridge()
+	child.Name = "child"
+	child.CompositeOf = "llama-cpp"
+
+	// Order: members first, then parent. File-level validate should resolve
+	// regardless of order.
+	f := File{Bridges: []Bridge{child, parent}}
+	if err := f.Validate(); err != nil {
+		t.Errorf("validate should accept member-before-parent ordering; got %v", err)
+	}
+}

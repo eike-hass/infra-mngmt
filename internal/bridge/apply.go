@@ -71,6 +71,11 @@ $wslIp = (Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*)' -AddressFamily IPv
 if (-not $wslIp) { throw "could not resolve WSL adapter IP — is WSL running?" }
 `
 
+// wslVMCreatorID is the well-known Hyper-V VM creator ID for WSL. Used to
+// scope Hyper-V firewall rules so they apply to traffic on the WSL vSwitch
+// only, not other VM creators (e.g., Hyper-V Manager VMs, Windows Sandbox).
+const wslVMCreatorID = "{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}"
+
 func writePortproxyApply(b *strings.Builder, br *Bridge) {
 	listen := psListenAddr(br)
 	connect := br.Connect.Addr
@@ -94,6 +99,17 @@ func writePortproxyApply(b *strings.Builder, br *Bridge) {
 	fmt.Fprintf(b, "Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue | Out-Null\n", rule)
 	fmt.Fprintf(b, "New-NetFirewallRule -DisplayName '%s' -Direction Inbound -Protocol TCP -LocalPort %d -LocalAddress %s -RemoteAddress '%s' -Action Allow | Out-Null\n",
 		rule, br.Listen.Port, listen, br.Firewall.Remote)
+
+	// Hyper-V firewall is a separate enforcement layer applied at the WSL
+	// vSwitch. Recent Windows updates flipped its WSL profile to default-
+	// Block — without an explicit allow rule scoped to the VM creator ID,
+	// inbound packets from WSL are silently dropped before reaching the
+	// Windows-side listener. The cmdlets are gated with
+	// -ErrorAction SilentlyContinue so older Windows builds without the
+	// Hyper-V firewall module degrade gracefully.
+	fmt.Fprintf(b, "Remove-NetFirewallHyperVRule -DisplayName '%s [Hyper-V]' -ErrorAction SilentlyContinue | Out-Null\n", rule)
+	fmt.Fprintf(b, "New-NetFirewallHyperVRule -DisplayName '%s [Hyper-V]' -Direction Inbound -Action Allow -Protocol TCP -LocalPorts %d -VMCreatorId '%s' -ErrorAction SilentlyContinue | Out-Null\n",
+		rule, br.Listen.Port, wslVMCreatorID)
 }
 
 func writePortproxyRemove(b *strings.Builder, br *Bridge) {
@@ -104,6 +120,7 @@ func writePortproxyRemove(b *strings.Builder, br *Bridge) {
 	fmt.Fprintf(b, "netsh interface portproxy delete v4tov4 listenaddress=%s listenport=%d 2>$null | Out-Null\n", listen, br.Listen.Port)
 	fmt.Fprintf(b, "netsh interface portproxy delete v4tov6 listenaddress=%s listenport=%d 2>$null | Out-Null\n", listen, br.Listen.Port)
 	fmt.Fprintf(b, "Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue | Out-Null\n", rule)
+	fmt.Fprintf(b, "Remove-NetFirewallHyperVRule -DisplayName '%s [Hyper-V]' -ErrorAction SilentlyContinue | Out-Null\n", rule)
 }
 
 // psListenAddr returns the PowerShell expression for the listen address — a

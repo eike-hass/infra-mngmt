@@ -12,9 +12,11 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/eike-hass/infra-mngmt/config"
 	"github.com/eike-hass/infra-mngmt/internal/bridge"
+	"github.com/eike-hass/infra-mngmt/internal/compose"
 	"github.com/eike-hass/infra-mngmt/internal/containers"
 	"github.com/eike-hass/infra-mngmt/internal/deps"
 	"github.com/eike-hass/infra-mngmt/internal/docker"
@@ -43,8 +45,9 @@ addr kinds:
 bridges subcommands:
   list                       list bridges declared in bridges.yaml
   status                     show observed state of each bridge
-  apply [name...]            (re)apply bridges (UAC prompt; all if no names)
-  reset [name...]            remove bridges (UAC prompt; all if no names)
+  apply [name...]            (re)apply bridges (UAC prompt only when needed)
+  pause [name...]            pause WSL relays without removing netsh state (no UAC)
+  reset [name...]            remove bridges incl. netsh + firewall (UAC prompt)
 `
 
 func main() {
@@ -100,7 +103,7 @@ func runAddr(args []string) {
 
 func runBridges(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: infra-mngmt bridges <list|status|apply|reset> [args...]")
+		fmt.Fprintln(os.Stderr, "usage: infra-mngmt bridges <list|status|apply|pause|reset> [args...]")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet("bridges", flag.ExitOnError)
@@ -135,9 +138,11 @@ func runBridges(args []string) {
 	case "status":
 		runBridgesStatus(file)
 	case "apply":
-		runBridgesApply(file, rest)
+		runBridgesApply(file, cfg, rest)
+	case "pause":
+		runBridgesPause(file, cfg, rest)
 	case "reset":
-		runBridgesReset(file, rest)
+		runBridgesReset(file, cfg, rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown bridges subcommand %q\n", args[0])
 		os.Exit(2)
@@ -173,7 +178,7 @@ func runBridgesStatus(f *bridge.File) {
 	fmt.Print(bridge.FormatStatusTable(f.Bridges, states))
 }
 
-func runBridgesApply(f *bridge.File, names []string) {
+func runBridgesApply(f *bridge.File, cfg *config.Config, names []string) {
 	selected := bridge.Filter(f.Bridges, names)
 	if len(selected) == 0 {
 		if len(names) > 0 {
@@ -185,37 +190,184 @@ func runBridgesApply(f *bridge.File, names []string) {
 	}
 
 	// Split by tier — Windows bridges go through one elevated PS call;
-	// WSL bridges currently print a hint (we don't manage long-running socat
-	// processes from the bridge applier — use a process-compose entry).
+	// WSL bridges flow through the process-compose fragment file (rewritten
+	// from scratch each apply, then PC is told to reload + each selected
+	// bridge-* process explicitly started).
 	var winBridges []bridge.Bridge
-	var wslBridges []bridge.Bridge
+	var wslSelected []bridge.Bridge
 	for _, b := range selected {
 		switch b.Tier {
 		case bridge.TierWindows:
 			winBridges = append(winBridges, b)
 		case bridge.TierWSL:
-			wslBridges = append(wslBridges, b)
+			wslSelected = append(wslSelected, b)
 		}
 	}
 
 	if len(winBridges) > 0 {
-		script := bridge.PowerShellApply(winBridges)
-		fmt.Printf("Applying %d Windows bridge(s) (UAC prompt may appear)...\n", len(winBridges))
-		if err := bridge.RunPowerShellElevated(script); err != nil {
-			fmt.Fprintf(os.Stderr, "apply: %v\n", err)
-			os.Exit(1)
+		needing := windowsBridgesNeedingApply(winBridges)
+		switch {
+		case len(needing) > 0:
+			fmt.Printf("Applying %d Windows bridge(s) (UAC prompt may appear): %s\n", len(needing), strings.Join(bridgeNamesSlice(needing), ", "))
+			script := bridge.PowerShellApply(needing)
+			if err := bridge.RunPowerShellElevated(script); err != nil {
+				fmt.Fprintf(os.Stderr, "apply: %v\n", err)
+				os.Exit(1)
+			}
+		default:
+			fmt.Printf("All %d Windows bridge(s) already active — skipping elevation: %s\n", len(winBridges), strings.Join(bridgeNamesSlice(winBridges), ", "))
 		}
 	}
-	for _, b := range wslBridges {
-		fmt.Printf("WSL bridge %q: long-running socat relays should run as a process-compose entry, not via apply.\n", b.Name)
-		fmt.Printf("  suggested command: %s\n", bridge.SocatCommand(&b, ""))
+
+	// The fragment is declarative — always render from the FULL bridges.yaml,
+	// not just the selected subset. A targeted apply still reconciles the
+	// fragment so it matches the file. This mirrors the Windows path, which
+	// uses the same all-or-subset toggle but writes idempotent netsh rules.
+	if len(wslSelected) > 0 || cfg.BridgesComposeFile != "" {
+		applyWSLFragment(f.Bridges, cfg)
+	}
+	// PC's /project/configuration reload adds new process definitions but
+	// doesn't restart processes already in a terminal state (Completed/
+	// Stopped) — without an explicit start, an apply after a previous stop
+	// would leave the relay declared but not running. /process/start is
+	// idempotent on already-Running entries.
+	if len(wslSelected) > 0 {
+		startWSLBridgeProcesses(wslSelected, cfg)
 	}
 
 	// Reverify and print updated status.
 	runBridgesStatus(f)
 }
 
-func runBridgesReset(f *bridge.File, names []string) {
+// startWSLBridgeProcesses ensures each `bridge-<name>` PC process is running.
+// Called from the apply path so previously-stopped relays come back online
+// without a separate `infra-mngmt bridges` invocation.
+func startWSLBridgeProcesses(bridges []bridge.Bridge, cfg *config.Config) {
+	pc, ok := findWSLProcessCompose(cfg)
+	if !ok {
+		return
+	}
+	tok := pc.Token
+	if tok == "" && pc.TokenFile != "" {
+		if data, err := os.ReadFile(pc.TokenFile); err == nil {
+			tok = strings.TrimSpace(string(data))
+		}
+	}
+	client := compose.New(pc.Name, config.ResolveEndpoint(pc.Endpoint), tok)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, b := range bridges {
+		name := bridge.BridgeProcessName(&b)
+		if err := client.Start(ctx, name); err != nil {
+			fmt.Fprintf(os.Stderr, "start %s on %s: %v (continuing — may already be running)\n", name, pc.Name, err)
+		}
+	}
+}
+
+// windowsBridgesNeedingApply mirrors the web layer's smart-apply filter:
+// returns only bridges whose observed netsh state isn't already StateActive.
+// On state-probe failure (e.g., PowerShell unreachable in a devcontainer),
+// returns the full input so behavior degrades gracefully to the pre-smart
+// baseline.
+func windowsBridgesNeedingApply(bridges []bridge.Bridge) []bridge.Bridge {
+	if len(bridges) == 0 {
+		return nil
+	}
+	out, err := bridge.PortproxyShow()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: state probe failed (%v) — applying all %d Windows-tier bridge(s)\n", err, len(bridges))
+		return bridges
+	}
+	entries := bridge.ParsePortproxyShow(out)
+	wslHostIP := windowsAdapterIP()
+	var needs []bridge.Bridge
+	for _, b := range bridges {
+		if b.Status(entries, wslHostIP) != bridge.StateActive {
+			needs = append(needs, b)
+		}
+	}
+	return needs
+}
+
+func bridgeNamesSlice(bs []bridge.Bridge) []string {
+	out := make([]string, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, b.Name)
+	}
+	return out
+}
+
+// runBridgesPause takes selected bridges offline: stops the WSL relay
+// process(es) and removes the Windows portproxy + firewall rule(s). The
+// Windows side requires UAC; pause smart-skips when nothing's there to
+// remove (state == Missing). Mirrors the web layer's /bridge/pause route.
+func runBridgesPause(f *bridge.File, cfg *config.Config, names []string) {
+	selected := bridge.Filter(f.Bridges, names)
+	if len(selected) == 0 {
+		if len(names) > 0 {
+			fmt.Fprintf(os.Stderr, "no matching bridges for: %s\n", strings.Join(names, ", "))
+			os.Exit(1)
+		}
+		fmt.Println("(no bridges configured)")
+		return
+	}
+
+	var wslSelected []bridge.Bridge
+	var winSelected []bridge.Bridge
+	for _, b := range selected {
+		switch b.Tier {
+		case bridge.TierWSL:
+			wslSelected = append(wslSelected, b)
+		case bridge.TierWindows:
+			winSelected = append(winSelected, b)
+		}
+	}
+	if len(winSelected) > 0 {
+		needing := windowsBridgesNeedingRemoval(winSelected)
+		switch {
+		case len(needing) > 0:
+			fmt.Printf("Pausing %d Windows bridge(s) (UAC prompt may appear): %s\n", len(needing), strings.Join(bridgeNamesSlice(needing), ", "))
+			script := bridge.PowerShellRemove(needing)
+			if err := bridge.RunPowerShellElevated(script); err != nil {
+				fmt.Fprintf(os.Stderr, "pause: %v\n", err)
+				os.Exit(1)
+			}
+		default:
+			fmt.Printf("All %d Windows bridge(s) already inactive — skipping elevation: %s\n", len(winSelected), strings.Join(bridgeNamesSlice(winSelected), ", "))
+		}
+	}
+	if len(wslSelected) > 0 {
+		fmt.Printf("Pausing %d WSL bridge process(es): %s\n", len(wslSelected), strings.Join(bridgeNamesSlice(wslSelected), ", "))
+		stopWSLBridgeProcesses(wslSelected, cfg)
+	}
+	runBridgesStatus(f)
+}
+
+// windowsBridgesNeedingRemoval mirrors the web layer's smart-skip filter
+// for the removal direction: returns bridges that are currently Active or
+// Drifted (i.e., have netsh state to remove). Bridges already Missing get
+// skipped so we don't ask for UAC just to confirm an absence.
+func windowsBridgesNeedingRemoval(bridges []bridge.Bridge) []bridge.Bridge {
+	if len(bridges) == 0 {
+		return nil
+	}
+	out, err := bridge.PortproxyShow()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: removal-needed probe failed (%v) — applying all %d Windows-tier removal(s)\n", err, len(bridges))
+		return bridges
+	}
+	entries := bridge.ParsePortproxyShow(out)
+	wslHostIP := windowsAdapterIP()
+	var needs []bridge.Bridge
+	for _, b := range bridges {
+		if b.Status(entries, wslHostIP) != bridge.StateMissing {
+			needs = append(needs, b)
+		}
+	}
+	return needs
+}
+
+func runBridgesReset(f *bridge.File, cfg *config.Config, names []string) {
 	selected := bridge.Filter(f.Bridges, names)
 	if len(selected) == 0 {
 		fmt.Println("(no bridges to reset)")
@@ -235,7 +387,141 @@ func runBridgesReset(f *bridge.File, names []string) {
 			os.Exit(1)
 		}
 	}
+
+	// Recompute the WSL fragment from f.Bridges minus the reset selection.
+	// Always re-render (even if no WSL bridges were touched) so the file on
+	// disk stays consistent with bridges.yaml.
+	if cfg.BridgesComposeFile != "" {
+		// Stop the to-be-removed WSL bridge processes explicitly first.
+		// PC's /project/configuration reload doesn't reliably reconcile
+		// deletions on all versions — without an explicit stop, the dropped
+		// socat keeps running until the next PC restart.
+		var wslSelected []bridge.Bridge
+		for _, b := range selected {
+			if b.Tier == bridge.TierWSL {
+				wslSelected = append(wslSelected, b)
+			}
+		}
+		if len(wslSelected) > 0 {
+			stopWSLBridgeProcesses(wslSelected, cfg)
+		}
+
+		dropped := nameSet(selected)
+		var remaining []bridge.Bridge
+		for _, b := range f.Bridges {
+			if !dropped[b.Name] {
+				remaining = append(remaining, b)
+			}
+		}
+		applyWSLFragment(remaining, cfg)
+	}
+
 	runBridgesStatus(f)
+}
+
+// stopWSLBridgeProcesses asks the WSL process-compose instance to stop each
+// `bridge-<name>` process whose Bridge entry is in the selection. Best-
+// effort: failure to stop one process is logged but doesn't abort the rest,
+// since the fragment rewrite + reload that follows is the authoritative
+// reconciliation step.
+func stopWSLBridgeProcesses(bridges []bridge.Bridge, cfg *config.Config) {
+	pc, ok := findWSLProcessCompose(cfg)
+	if !ok {
+		return
+	}
+	tok := pc.Token
+	if tok == "" && pc.TokenFile != "" {
+		if data, err := os.ReadFile(pc.TokenFile); err == nil {
+			tok = strings.TrimSpace(string(data))
+		}
+	}
+	client := compose.New(pc.Name, config.ResolveEndpoint(pc.Endpoint), tok)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, b := range bridges {
+		name := bridge.BridgeProcessName(&b)
+		if err := client.Stop(ctx, name); err != nil {
+			fmt.Fprintf(os.Stderr, "stop %s on %s: %v (continuing)\n", name, pc.Name, err)
+		}
+	}
+}
+
+func nameSet(bridges []bridge.Bridge) map[string]bool {
+	out := make(map[string]bool, len(bridges))
+	for _, b := range bridges {
+		out[b.Name] = true
+	}
+	return out
+}
+
+// applyWSLFragment renders the wsl/socat bridges into a process-compose
+// fragment file, then asks the WSL process-compose instance to reload.
+//
+// Failure modes are surfaced as warnings, not errors: the fragment is
+// authoritative state on disk, so even if PC isn't reachable right now the
+// next time it starts (or the user reloads manually) it'll pick up the
+// changes via the user's main process-compose.yaml `extends:` reference.
+func applyWSLFragment(allBridges []bridge.Bridge, cfg *config.Config) {
+	if cfg.BridgesComposeFile == "" {
+		return
+	}
+	count, err := bridge.WriteFragment(allBridges, cfg.BridgesComposeFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "write compose fragment: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Wrote %d wsl bridge(s) to %s\n", count, cfg.BridgesComposeFile)
+
+	// Find the WSL process-compose instance to reload — the one whose
+	// compose_file lives in the same directory as the fragment, since that's
+	// where the user's `extends:` resolves relative paths.
+	pc, ok := findWSLProcessCompose(cfg)
+	if !ok {
+		fmt.Printf("note: no process_compose entry found whose compose_file is colocated with %s — skip reload\n", cfg.BridgesComposeFile)
+		fmt.Println("      the fragment is on disk; it will take effect when process-compose next reads its config")
+		return
+	}
+	if err := reloadProcessCompose(pc); err != nil {
+		fmt.Fprintf(os.Stderr, "reload %s: %v — fragment is on disk and will be picked up on next process-compose start\n", pc.Name, err)
+		return
+	}
+	fmt.Printf("Reloaded process-compose instance %q\n", pc.Name)
+}
+
+// findWSLProcessCompose returns the PC instance whose compose_file shares a
+// directory with the bridges fragment file. That's the one whose user-owned
+// process-compose.yaml is expected to `extends:` the fragment — reloading it
+// makes the new socat entries take effect immediately.
+//
+// Returns false if no instance is configured or none match — callers should
+// fall back to "fragment-only" mode (write file, skip reload).
+func findWSLProcessCompose(cfg *config.Config) (config.ProcessCompose, bool) {
+	if cfg.BridgesComposeFile == "" {
+		return config.ProcessCompose{}, false
+	}
+	wantDir := filepath.Dir(cfg.BridgesComposeFile)
+	for _, pc := range cfg.ProcessCompose {
+		if pc.ComposeFile == "" {
+			continue
+		}
+		if filepath.Dir(pc.ComposeFile) == wantDir {
+			return pc, true
+		}
+	}
+	return config.ProcessCompose{}, false
+}
+
+func reloadProcessCompose(pc config.ProcessCompose) error {
+	tok := pc.Token
+	if tok == "" && pc.TokenFile != "" {
+		if data, err := os.ReadFile(pc.TokenFile); err == nil {
+			tok = strings.TrimSpace(string(data))
+		}
+	}
+	client := compose.New(pc.Name, config.ResolveEndpoint(pc.Endpoint), tok)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return client.Reload(ctx)
 }
 
 // collectBuildInfo gathers the binary's identity from the Go toolchain's
@@ -405,7 +691,7 @@ func runServer(args []string) {
 		log.Fatalf("load config: %v", err)
 	}
 
-	sources, dc := discoverSources(cfg)
+	sources, dc := discoverSources(cfg, nil)
 	if len(sources) == 0 {
 		fmt.Fprintln(os.Stderr, "warning: no .claude/ directories found")
 	}
@@ -449,7 +735,15 @@ func runServer(args []string) {
 
 	bridgesInfo, depRules, bridgesPath, containerDecls, containersPath := loadResolverInputs(*configPath, cfg)
 	srv := web.New(sources, compose, token, dc, bridgesInfo, depRules, containerDecls, cfg.TrustedNetworks)
+	// Wire /api/sources/rescan: re-run discovery against the loaded config,
+	// reusing the existing docker client. Returns just the slice — the server
+	// merges it with the current source list by ID.
+	srv.SetRediscover(func() []source.Source {
+		fresh, _ := discoverSources(cfg, dc)
+		return fresh
+	})
 	srv.SetBridgesFile(bridgesPath)
+	srv.SetBridgesComposeFile(cfg.BridgesComposeFile)
 	srv.SetContainersFile(containersPath)
 	srv.SetBuildInfo(collectBuildInfo())
 	if buildEpoch != "" {
@@ -473,7 +767,18 @@ func isLoopback(addr string) bool {
 		strings.HasPrefix(host, "127.")
 }
 
-func discoverSources(cfg *config.Config) ([]source.Source, *docker.Client) {
+// configDirNames lists the per-tool config directories that infra-mngmt
+// scans for. Each entry is treated as `<root>/<name>` for project-scope
+// discovery and `~/<name>` for global scope. Add a new tool by appending
+// here (and to docker.configMountDirs for in-container mount detection).
+var configDirNames = []string{".claude", ".opencode"}
+
+// discoverSources scans the host filesystem and Docker for known config
+// directories and returns one Source per discovery. existingDC is reused
+// when non-nil so a /api/sources/rescan can re-run discovery without
+// leaking a new docker.Client per call. Pass nil at startup to get a
+// freshly initialized client.
+func discoverSources(cfg *config.Config, existingDC *docker.Client) ([]source.Source, *docker.Client) {
 	var sources []source.Source
 	seen := map[string]bool{}
 
@@ -489,11 +794,17 @@ func discoverSources(cfg *config.Config) ([]source.Source, *docker.Client) {
 		log.Printf("source [hostfs] %s (%s)", claudeDir, scope.Label())
 	}
 
+	addAllConfigDirs := func(root string, scope entity.Scope) {
+		for _, name := range configDirNames {
+			addHostFS(filepath.Join(root, name), scope)
+		}
+	}
+
 	home, _ := os.UserHomeDir()
-	addHostFS(filepath.Join(home, ".claude"), entity.GlobalScope())
+	addAllConfigDirs(home, entity.GlobalScope())
 
 	if cwd, err := os.Getwd(); err == nil {
-		addHostFS(filepath.Join(cwd, ".claude"), entity.ProjectScope(cwd))
+		addAllConfigDirs(cwd, entity.ProjectScope(cwd))
 	}
 
 	for _, p := range cfg.ExtraPaths {
@@ -502,11 +813,11 @@ func discoverSources(cfg *config.Config) ([]source.Source, *docker.Client) {
 			log.Printf("warning: invalid extra_path %q: %v", p, err)
 			continue
 		}
-		addHostFS(filepath.Join(abs, ".claude"), entity.ProjectScope(abs))
+		addAllConfigDirs(abs, entity.ProjectScope(abs))
 	}
 
 	var dc *docker.Client
-	dockerSources, projectRoots, dockerClient, err := discoverDockerSources()
+	dockerSources, projectRoots, dockerClient, err := discoverDockerSources(existingDC)
 	if err != nil {
 		log.Printf("docker: skipped (%v)", err)
 	} else {
@@ -521,7 +832,7 @@ func discoverSources(cfg *config.Config) ([]source.Source, *docker.Client) {
 		// host filesystem — covers bind-mount setups and projects that had their
 		// devcontainer recreated with a fresh volume.
 		for _, root := range projectRoots {
-			addHostFS(filepath.Join(root, ".claude"), entity.ProjectScope(root))
+			addAllConfigDirs(root, entity.ProjectScope(root))
 		}
 		// Scan the workspace directories (parents of known project roots) so
 		// that projects not currently open in a devcontainer are also visible.
@@ -535,7 +846,7 @@ func discoverSources(cfg *config.Config) ([]source.Source, *docker.Client) {
 					continue
 				}
 				root := filepath.Join(wsDir, entry.Name())
-				addHostFS(filepath.Join(root, ".claude"), entity.ProjectScope(root))
+				addAllConfigDirs(root, entity.ProjectScope(root))
 			}
 		}
 	}
@@ -543,16 +854,23 @@ func discoverSources(cfg *config.Config) ([]source.Source, *docker.Client) {
 	return sources, dc
 }
 
-func discoverDockerSources() ([]source.Source, []string, *docker.Client, error) {
-	dc, err := docker.New()
-	if err != nil {
-		return nil, nil, nil, err
+func discoverDockerSources(existingDC *docker.Client) ([]source.Source, []string, *docker.Client, error) {
+	dc := existingDC
+	if dc == nil {
+		newDC, err := docker.New()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		dc = newDC
 	}
 
 	ctx := context.Background()
 	containers, err := dc.ListManaged(ctx)
 	if err != nil {
-		_ = dc.Close()
+		// Only close the client we created ourselves — never the caller's.
+		if existingDC == nil {
+			_ = dc.Close()
+		}
 		return nil, nil, nil, fmt.Errorf("list managed containers: %w", err)
 	}
 

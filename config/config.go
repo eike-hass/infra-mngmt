@@ -27,6 +27,12 @@ type Config struct {
 	BridgesFile      string           `yaml:"bridges_file,omitempty"`
 	DependenciesFile string           `yaml:"dependencies_file,omitempty"`
 	ContainersFile   string           `yaml:"containers_file,omitempty"`
+	// BridgesComposeFile is the path to the generated process-compose fragment
+	// that owns long-running socat relays for tier=wsl bridges. The user's
+	// main process-compose.yaml references it via `extends:` so the fragment
+	// gets merged at PC startup. infra-mngmt rewrites this file on every
+	// `bridges apply` and tells the WSL process-compose to reload.
+	BridgesComposeFile string `yaml:"bridges_compose_file,omitempty"`
 	// TrustedNetworks lists CIDRs whose connections bypass the bearer-token
 	// auth check. Use this to skip the login flow for local access (loopback,
 	// Docker bridge, WSL adapter) while still requiring auth for everything
@@ -47,8 +53,9 @@ func DefaultPath() string {
 func Default() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
-		Bind:      "127.0.0.1:7842",
-		TokenFile: filepath.Join(home, ".config", "infra-mngmt", "token"),
+		Bind:               "127.0.0.1:7842",
+		TokenFile:          filepath.Join(home, ".config", "infra-mngmt", "token"),
+		BridgesComposeFile: filepath.Join(home, ".config", "infra-mngmt", "process-compose.bridges.yaml"),
 	}
 }
 

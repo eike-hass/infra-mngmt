@@ -60,14 +60,30 @@ type Firewall struct {
 	DisplayName string `yaml:"display_name"` // friendly name; also used for cleanup
 }
 
-// Bridge is one persistent network forwarding rule.
+// Kind identifies whether an entry is an actual forwarding rule or a virtual
+// "composite" parent that groups other entries. Empty/missing defaults to
+// KindBridge for backwards compatibility with bridges.yaml files written
+// before composites existed.
+type Kind string
+
+const (
+	KindBridge    Kind = "bridge"    // a real forwarding rule (default)
+	KindComposite Kind = "composite" // a virtual parent that groups bridges
+)
+
+// Bridge is one persistent network forwarding rule, OR a composite parent
+// that groups multiple rules under one logical name. Composites have
+// kind=composite + Description; their members link back via CompositeOf.
 type Bridge struct {
-	Name     string   `yaml:"name"`
-	Tier     Tier     `yaml:"tier"`
-	Type     Type     `yaml:"type"`
-	Listen   Endpoint `yaml:"listen"`
-	Connect  Endpoint `yaml:"connect"`
-	Firewall Firewall `yaml:"firewall,omitempty"`
+	Name        string   `yaml:"name"`
+	Kind        Kind     `yaml:"kind,omitempty"`         // "bridge" (default) | "composite"
+	Description string   `yaml:"description,omitempty"`  // free-text; used in UI subtitle
+	CompositeOf string   `yaml:"composite_of,omitempty"` // name of the composite parent, if any
+	Tier        Tier     `yaml:"tier"`
+	Type        Type     `yaml:"type"`
+	Listen      Endpoint `yaml:"listen"`
+	Connect     Endpoint `yaml:"connect"`
+	Firewall    Firewall `yaml:"firewall,omitempty"`
 }
 
 // File is the on-disk shape of bridges.yaml.
@@ -78,27 +94,92 @@ type File struct {
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
 // Validate checks the file-level invariants (unique names, supported tier+type
-// combos, valid endpoints/firewall).
+// combos, valid endpoints/firewall, composite-parent references resolve).
 func (f *File) Validate() error {
 	seen := make(map[string]struct{}, len(f.Bridges))
+	composites := make(map[string]struct{})
+	// First pass: catch duplicate names and remember composite parents so
+	// member references can be resolved in the second pass regardless of
+	// order in the YAML.
 	for i := range f.Bridges {
 		b := &f.Bridges[i]
-		if err := b.Validate(); err != nil {
-			return fmt.Errorf("bridges[%d] (%q): %w", i, b.Name, err)
+		if !nameRe.MatchString(b.Name) {
+			return fmt.Errorf("bridges[%d]: name %q must match %s", i, b.Name, nameRe.String())
 		}
 		if _, dup := seen[b.Name]; dup {
 			return fmt.Errorf("bridges[%d]: duplicate name %q", i, b.Name)
 		}
 		seen[b.Name] = struct{}{}
+		if b.Kind == KindComposite {
+			composites[b.Name] = struct{}{}
+		}
+	}
+	// Second pass: per-entry validation (with composite-aware rules).
+	for i := range f.Bridges {
+		b := &f.Bridges[i]
+		if err := b.validate(composites); err != nil {
+			return fmt.Errorf("bridges[%d] (%q): %w", i, b.Name, err)
+		}
 	}
 	return nil
 }
 
-// Validate checks one bridge entry.
+// Validate is the per-entry public form. Use File.Validate for file-level
+// checks (it resolves composite cross-references).
 func (b *Bridge) Validate() error {
+	return b.validate(nil)
+}
+
+// validate is the inner form used by File.Validate. composites is the set of
+// names whose entries have Kind=KindComposite. Pass nil to skip cross-
+// reference resolution (single-entry validation).
+func (b *Bridge) validate(composites map[string]struct{}) error {
 	if !nameRe.MatchString(b.Name) {
 		return fmt.Errorf("name %q must match %s", b.Name, nameRe.String())
 	}
+
+	// Default Kind so consumers can rely on it being non-empty.
+	if b.Kind == "" {
+		b.Kind = KindBridge
+	}
+	switch b.Kind {
+	case KindComposite:
+		// Composites are virtual parents — they have no own forwarding state.
+		// Reject any of the per-mechanism fields to fail loud on misconfig
+		// instead of silently ignoring them.
+		if b.Tier != "" {
+			return fmt.Errorf("kind=composite must not set tier (members carry tier); got %q", b.Tier)
+		}
+		if b.Type != "" {
+			return fmt.Errorf("kind=composite must not set type; got %q", b.Type)
+		}
+		if b.Listen.Addr != "" || b.Listen.Port != 0 {
+			return errors.New("kind=composite must not set listen — members carry endpoints")
+		}
+		if b.Connect.Addr != "" || b.Connect.Port != 0 {
+			return errors.New("kind=composite must not set connect — members carry endpoints")
+		}
+		if b.Firewall.DisplayName != "" || b.Firewall.Remote != "" {
+			return errors.New("kind=composite must not set firewall — members carry firewall rules")
+		}
+		if b.CompositeOf != "" {
+			return errors.New("kind=composite must not be a member of another composite (no nesting)")
+		}
+		return nil
+	case KindBridge:
+		// Fall through to the existing tier/type/endpoint checks below.
+	default:
+		return fmt.Errorf("kind %q: must be %q or %q", b.Kind, KindBridge, KindComposite)
+	}
+
+	// composite_of must reference an existing composite parent. Skip when
+	// composites is nil (single-entry call).
+	if b.CompositeOf != "" && composites != nil {
+		if _, ok := composites[b.CompositeOf]; !ok {
+			return fmt.Errorf("composite_of %q: no composite entry with that name", b.CompositeOf)
+		}
+	}
+
 	switch b.Tier {
 	case TierWindows:
 		if b.Type != TypePortproxy {

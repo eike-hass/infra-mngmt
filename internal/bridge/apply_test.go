@@ -41,6 +41,14 @@ func TestPowerShellApplyAddsPortproxyAndFirewall(t *testing.T) {
 		"-LocalPort 3350",
 		"-LocalAddress $wslIp",
 		"-RemoteAddress '172.18.0.0/16'",
+		// Hyper-V firewall companion rule (recent Win updates default the
+		// WSL profile to Block; without this, traffic from WSL → Windows
+		// is silently dropped at the vSwitch even with portproxy + WF in
+		// place).
+		"Remove-NetFirewallHyperVRule -DisplayName 'Producer Pal MCP [Hyper-V]'",
+		"New-NetFirewallHyperVRule -DisplayName 'Producer Pal MCP [Hyper-V]'",
+		"-LocalPorts 3350",
+		"-VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'",
 		// iphlpsvc restart at the end (mirrors the bash script)
 		"Restart-Service iphlpsvc",
 	}
@@ -96,6 +104,9 @@ func TestPowerShellRemoveSkipsAdd(t *testing.T) {
 	}
 	if !strings.Contains(got, "Remove-NetFirewallRule -DisplayName 'Producer Pal MCP'") {
 		t.Errorf("remove script missing firewall removal:\n%s", got)
+	}
+	if !strings.Contains(got, "Remove-NetFirewallHyperVRule -DisplayName 'Producer Pal MCP [Hyper-V]'") {
+		t.Errorf("remove script missing Hyper-V firewall companion removal:\n%s", got)
 	}
 	if !strings.Contains(got, "Restart-Service iphlpsvc") {
 		t.Errorf("remove script should still restart iphlpsvc")

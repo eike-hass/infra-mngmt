@@ -11,16 +11,30 @@ import (
 
 // bootstrapArgs builds the CLI args passed to process-compose at start.
 // Pulled out as a pure function so it can be tested without exec.
-func bootstrapArgs(composeFile, port, tokenFile string) []string {
+//
+// extraFiles is a list of additional `-f` paths to merge in after the primary
+// compose file. process-compose merges in order: later files override earlier
+// ones for scalar fields and merge for `environment`/`depends_on`. Used to
+// stitch in the generated socat-bridges fragment without requiring `extends:`
+// (which is unreliable across PC versions).
+func bootstrapArgs(composeFile, port, tokenFile string, extraFiles []string) []string {
 	args := []string{
 		"-f", composeFile,
+	}
+	for _, ef := range extraFiles {
+		if ef == "" {
+			continue
+		}
+		args = append(args, "-f", ef)
+	}
+	args = append(args,
 		"--tui=false", // never hijack the terminal
 		// Keep the supervisor alive even when every process is in a terminal
 		// state (or the YAML's processes map is empty). Without this, calling
 		// stop on the last running process exits the whole supervisor as a
 		// side-effect, taking the REST API with it.
 		"--keep-project",
-	}
+	)
 	if port != "" {
 		args = append(args, "--port", port)
 	}
@@ -37,8 +51,12 @@ type Bootstrapper struct {
 	Name        string
 	Binary      string // path to process-compose binary
 	ComposeFile string // path to the process-compose.yaml
-	Endpoint    string // expected REST endpoint after start
-	TokenFile   string // path to file containing the API token; passed via --token-file when set
+	// ExtraFiles are additional compose files merged into ComposeFile via the
+	// `-f file1 -f file2` form. Used for the generated bridges fragment so
+	// the user's main YAML stays unmodified.
+	ExtraFiles []string
+	Endpoint   string // expected REST endpoint after start
+	TokenFile  string // path to file containing the API token; passed via --token-file when set
 }
 
 // Start launches process-compose in the background and waits up to 5 seconds
@@ -67,6 +85,7 @@ func (b *Bootstrapper) Start(ctx context.Context) error {
 	// understand /c/Users/... or /mnt/c/Users/.... wslpath translates them.
 	composePath := b.ComposeFile
 	tokenPath := b.TokenFile
+	extraPaths := append([]string(nil), b.ExtraFiles...)
 	if isWindowsBinary(b.Binary) {
 		if wp, err := wslpathToWindows(b.ComposeFile); err == nil {
 			composePath = wp
@@ -76,39 +95,33 @@ func (b *Bootstrapper) Start(ctx context.Context) error {
 				tokenPath = wp
 			}
 		}
+		for i, ep := range extraPaths {
+			if wp, err := wslpathToWindows(ep); err == nil {
+				extraPaths[i] = wp
+			}
+		}
 	}
+	// Drop extras that don't exist on disk — process-compose errors out on
+	// missing -f targets, which would block bootstrap of the unrelated
+	// primary compose file.
+	extraPaths = filterExisting(extraPaths)
 
-	args := bootstrapArgs(composePath, portFromEndpoint(b.Endpoint), tokenPath)
+	args := bootstrapArgs(composePath, portFromEndpoint(b.Endpoint), tokenPath, extraPaths)
 
-	var cmd *exec.Cmd
-	if isWindowsBinary(b.Binary) {
-		// When launching a Windows .exe from WSL, the child inherits the
-		// caller's process group and dies when the HTTP request handler
-		// returns. Wrap with PowerShell's Start-Process to fully detach,
-		// matching what autostart.ps1 does for Task-Scheduler-launched runs.
-		winBinary, err := wslpathToWindows(b.Binary)
-		if err != nil {
-			return fmt.Errorf("translate binary path: %w", err)
-		}
-		quoted := make([]string, 0, len(args))
-		for _, a := range args {
-			quoted = append(quoted, "'"+strings.ReplaceAll(a, "'", "''")+"'")
-		}
-		ps := fmt.Sprintf("Start-Process -FilePath '%s' -ArgumentList %s -WindowStyle Hidden",
-			strings.ReplaceAll(winBinary, "'", "''"), strings.Join(quoted, ","))
-		psPath, err := resolvePowerShell()
-		if err != nil {
-			return err
-		}
-		cmd = exec.CommandContext(ctx, psPath, "-NoProfile", "-Command", ps)
-	} else {
-		cmd = exec.CommandContext(ctx, b.Binary, args...)
+	cmd, err := buildSpawnCmd(ctx, b.Binary, args)
+	if err != nil {
+		return err
 	}
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start process-compose: %w", err)
 	}
+	// Once the child is launched we don't care about the cmd handle — the
+	// process is already in its own session and will outlive this goroutine.
+	// Reap the zombie in the background so it doesn't sit in the Z state if
+	// it exits before the next bootstrap call.
+	go func() { _ = cmd.Wait() }()
 
 	// Wait for the REST endpoint to become ready.
 	client := New(b.Name, b.Endpoint, token)
@@ -120,6 +133,42 @@ func (b *Bootstrapper) Start(ctx context.Context) error {
 		time.Sleep(200 * time.Millisecond)
 	}
 	return fmt.Errorf("process-compose started but endpoint %s not ready after 5s", b.Endpoint)
+}
+
+// buildSpawnCmd returns an *exec.Cmd configured to launch process-compose in
+// a way that survives this HTTP request's lifecycle.
+//
+// The Windows path wraps the binary in PowerShell's `Start-Process -WindowStyle
+// Hidden`, which detaches the child fully from our caller. We can keep the
+// outer PowerShell tied to ctx — its only job is to fire-and-return.
+//
+// The Linux path is the trap: `exec.CommandContext(ctx, …)` ties the spawned
+// child's lifetime to ctx via Cmd.Cancel, so when the HTTP handler returns
+// (and ctx is canceled) Go's runtime SIGKILLs process-compose. Use plain
+// `exec.Command` (no ctx) and `Setsid: true` to put the child in a fresh
+// session — the supervisor outlives our request and is independent of our
+// process group's signals.
+func buildSpawnCmd(ctx context.Context, binary string, args []string) (*exec.Cmd, error) {
+	if isWindowsBinary(binary) {
+		winBinary, err := wslpathToWindows(binary)
+		if err != nil {
+			return nil, fmt.Errorf("translate binary path: %w", err)
+		}
+		quoted := make([]string, 0, len(args))
+		for _, a := range args {
+			quoted = append(quoted, "'"+strings.ReplaceAll(a, "'", "''")+"'")
+		}
+		ps := fmt.Sprintf("Start-Process -FilePath '%s' -ArgumentList %s -WindowStyle Hidden",
+			strings.ReplaceAll(winBinary, "'", "''"), strings.Join(quoted, ","))
+		psPath, err := resolvePowerShell()
+		if err != nil {
+			return nil, err
+		}
+		return exec.CommandContext(ctx, psPath, "-NoProfile", "-Command", ps), nil
+	}
+	cmd := exec.Command(binary, args...)
+	detachLinuxCmd(cmd)
+	return cmd, nil
 }
 
 // isWindowsBinary tells whether the binary path points at a Windows
@@ -157,6 +206,22 @@ func wslpathToWindows(p string) (string, error) {
 		return p, err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// filterExisting returns the subset of paths that exist on disk. Used to
+// drop optional `-f` extras that haven't been materialized yet (e.g. the
+// bridges fragment before the first `bridges apply`).
+func filterExisting(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := paths[:0]
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // portFromEndpoint extracts the port number from a URL like "http://localhost:9998".
