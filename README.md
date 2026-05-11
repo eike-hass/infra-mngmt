@@ -150,7 +150,7 @@ process_compose:
 trusted_networks:
   - 127.0.0.0/8
   - ::1/128
-  - 172.17.0.0/16        # Docker bridge so the devcontainer can reach the UI without logging in
+  - 172.17.0.0/16 # Docker bridge so the devcontainer can reach the UI without logging in
 extra_paths:
   - /home/youruser/projects/project-a
   - /home/youruser/projects/project-b
@@ -162,22 +162,22 @@ Each `process_compose` entry can carry the API token for its instance one of two
 
 ### Field reference
 
-| Field | Default | Description |
-|---|---|---|
-| `bind` | `127.0.0.1:7842` | Listen address. Set to `0.0.0.0:7842` for LAN access. |
-| `token_file` | `~/.config/infra-mngmt/token` | Path to the infra-mngmt bearer token. Set to `""` to disable auth. |
-| `trusted_networks` | `[]` | CIDRs whose source IPs bypass the bearer-token login. Typical: loopback + the Docker bridge. |
-| `process_compose[].name` | required | Display name shown in the services tab; also the tier identifier in `dependencies.yaml`. |
-| `process_compose[].endpoint` | required | Base URL of the process-compose management API. Supports the `wsl-windows` hostname (see below). |
-| `process_compose[].binary` | optional | Path to the process-compose binary. When set, a **▶ start** button appears in the UI if the endpoint is unreachable. |
-| `process_compose[].compose_file` | optional | Path to the process-compose YAML passed to `binary` on bootstrap. |
-| `process_compose[].token` | optional | API token (literal) for this process-compose instance, sent as `X-PC-Token-Key`. Takes precedence over `token_file` when both are set. |
-| `process_compose[].token_file` | optional | Path to a file containing the API token. Read at startup; same path can be passed to process-compose's own `--token-file`. Preferred over `token` for keeping secrets out of config. |
-| `bridges_file` | `bridges.yaml` alongside config | Path to bridges.yaml. |
-| `bridges_compose_file` | `process-compose.bridges.yaml` alongside config | Path to the generated process-compose fragment that runs `tier: wsl, type: socat` relays. The user's main process-compose.yaml is expected to reference it via `extends:` — see §4. |
-| `dependencies_file` | `dependencies.yaml` alongside config | Path to dependencies.yaml. |
-| `containers_file` | `containers.yaml` alongside config | Path to containers.yaml. |
-| `extra_paths` | `[]` | Additional project root directories to scan for `.claude/` beyond `~` and `$CWD`. |
+| Field                            | Default                                         | Description                                                                                                                                                                          |
+| -------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bind`                           | `127.0.0.1:7842`                                | Listen address. Set to `0.0.0.0:7842` for LAN access.                                                                                                                                |
+| `token_file`                     | `~/.config/infra-mngmt/token`                   | Path to the infra-mngmt bearer token. Set to `""` to disable auth.                                                                                                                   |
+| `trusted_networks`               | `[]`                                            | CIDRs whose source IPs bypass the bearer-token login. Typical: loopback + the Docker bridge.                                                                                         |
+| `process_compose[].name`         | required                                        | Display name shown in the services tab; also the tier identifier in `dependencies.yaml`.                                                                                             |
+| `process_compose[].endpoint`     | required                                        | Base URL of the process-compose management API. Supports the `wsl-windows` hostname (see below).                                                                                     |
+| `process_compose[].binary`       | optional                                        | Path to the process-compose binary. When set, a **▶ start** button appears in the UI if the endpoint is unreachable.                                                                 |
+| `process_compose[].compose_file` | optional                                        | Path to the process-compose YAML passed to `binary` on bootstrap.                                                                                                                    |
+| `process_compose[].token`        | optional                                        | API token (literal) for this process-compose instance, sent as `X-PC-Token-Key`. Takes precedence over `token_file` when both are set.                                               |
+| `process_compose[].token_file`   | optional                                        | Path to a file containing the API token. Read at startup; same path can be passed to process-compose's own `--token-file`. Preferred over `token` for keeping secrets out of config. |
+| `bridges_file`                   | `bridges.yaml` alongside config                 | Path to bridges.yaml.                                                                                                                                                                |
+| `bridges_compose_file`           | `process-compose.bridges.yaml` alongside config | Path to the generated process-compose fragment that runs `tier: wsl, type: socat` relays. The user's main process-compose.yaml is expected to reference it via `extends:` — see §4.  |
+| `dependencies_file`              | `dependencies.yaml` alongside config            | Path to dependencies.yaml.                                                                                                                                                           |
+| `containers_file`                | `containers.yaml` alongside config              | Path to containers.yaml.                                                                                                                                                             |
+| `extra_paths`                    | `[]`                                            | Additional project root directories to scan for `.claude/` beyond `~` and `$CWD`.                                                                                                    |
 
 ### WSL2 NAT networking — the `wsl-windows` hostname
 
@@ -202,8 +202,8 @@ Process-compose YAMLs are **infrastructure config** — they manage services lik
 Hosts WSL-native services and one-shot operational entries (e.g. a self-deploy entry that copies a freshly-built `dist/infra-mngmt` and restarts the systemd unit). Reaching Windows-side services from inside WSL is handled by the **bridges layer** (§ Bridges below), not by socat in this YAML — declarative bridges replace the older `socat + awk /etc/resolv.conf` pattern.
 
 ```yaml
-extends: process-compose.bridges.yaml   # generated by infra-mngmt — do not edit
-processes: {}     # empty is fine; the supervisor stays up via --keep-project
+extends: process-compose.bridges.yaml # generated by infra-mngmt — do not edit
+processes: {} # empty is fine; the supervisor stays up via --keep-project
 ```
 
 The `extends:` line pulls in `~/.config/infra-mngmt/process-compose.bridges.yaml`, a fragment that `infra-mngmt bridges apply` rewrites for every `tier: wsl, type: socat` entry in `bridges.yaml`. The fragment merges into your `processes:` map at PC startup; entries you define here win on name collisions, so the user-owned YAML stays the source of truth for everything except the generated bridge processes. Don't hand-edit the fragment.
@@ -280,6 +280,7 @@ If no rule matches an MCP entity, the resolver falls back to the legacy substrin
 No labels are required for standard VS Code devcontainers. infra-mngmt discovers them via the `devcontainer.local_folder` label that VS Code and the devcontainer CLI set automatically on every container they create.
 
 From that label it finds the project root, then inspects the container's mounts:
+
 - **Named volume** at `*/.claude` → read via throwaway sidecar container
 - **Bind mount** from a host path at `*/.claude` → read directly from the WSL2 filesystem
 
@@ -355,9 +356,11 @@ systemctl --user enable --now process-compose
 ```
 
 > **WSL2 gotcha:** if `systemctl --user` returns `Failed to connect to bus`, add this to `~/.bashrc`:
+>
 > ```bash
 > export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
 > ```
+>
 > This happens when WSL2 is started headlessly (e.g. by Task Scheduler) and the bus address isn't propagated to child shells, even though the user systemd instance is running.
 
 ---
@@ -405,6 +408,7 @@ Three Windows-specific points worth knowing:
 - On Windows 11 with the **Hyper-V firewall** (you'll see the adapter name `vEthernet (WSL (Hyper-V firewall))`), regular `New-NetFirewallRule` rules don't apply to WSL traffic. You need `New-NetFirewallHyperVRule`. See [SECURITY.md](SECURITY.md#process-compose-hardening) for the exact command.
 
 > If you skipped systemd, replace the WSL2 `systemctl` line with explicit background commands:
+>
 > ```
 > "process-compose up -f ~/.config/infra-mngmt/process-compose.yaml --port 9998 --address 127.0.0.1 --tui=false & infra-mngmt &"
 > ```

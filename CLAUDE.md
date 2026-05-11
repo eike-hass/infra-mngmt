@@ -25,6 +25,7 @@ type EntitySource interface {
 ```
 
 Three implementations:
+
 - `HostFSSource` — direct filesystem read/write
 - `DockerVolumeSource` — throwaway sidecar container for read/write; no Watch
 - `ContainerAgentSource` — HTTP to optional in-container agent; full Watch support (future)
@@ -33,14 +34,14 @@ Process management is delegated to [process-compose](https://github.com/F1bonacc
 
 ## Tech stack
 
-| Layer | Choice | Reason |
-|---|---|---|
-| Backend | Go | Goroutines for concurrent source watching; single static binary |
-| Docker API | `github.com/docker/docker/client` (official SDK) | Strong types, API version negotiation, `stdcopy.StdCopy` for log demux, native support for events/exec/cp |
-| HTTP server | `net/http` + [chi](https://github.com/go-chi/chi) | Lightweight, idiomatic |
-| Frontend | Go templates + HTMX | No JS build pipeline; server-side rendering. **See [docs/frontend-architecture.md](docs/frontend-architecture.md) — binding for any change under [internal/web/](internal/web/).** |
-| Search | fuse.js (vendored, `internal/web/static/vendor/`) | ⌘K across entities without a build step |
-| Config | `gopkg.in/yaml.v3` | YAML config at `~/.config/infra-mngmt/config.yaml` (loader still falls back to legacy `config.json` with a deprecation log) |
+| Layer       | Choice                                            | Reason                                                                                                                                                                             |
+| ----------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend     | Go                                                | Goroutines for concurrent source watching; single static binary                                                                                                                    |
+| Docker API  | `github.com/docker/docker/client` (official SDK)  | Strong types, API version negotiation, `stdcopy.StdCopy` for log demux, native support for events/exec/cp                                                                          |
+| HTTP server | `net/http` + [chi](https://github.com/go-chi/chi) | Lightweight, idiomatic                                                                                                                                                             |
+| Frontend    | Go templates + HTMX                               | No JS build pipeline; server-side rendering. **See [docs/frontend-architecture.md](docs/frontend-architecture.md) — binding for any change under [internal/web/](internal/web/).** |
+| Search      | fuse.js (vendored, `internal/web/static/vendor/`) | ⌘K across entities without a build step                                                                                                                                            |
+| Config      | `gopkg.in/yaml.v3`                                | YAML config at `~/.config/infra-mngmt/config.yaml` (loader still falls back to legacy `config.json` with a deprecation log)                                                        |
 
 ## Project structure
 
@@ -148,7 +149,7 @@ process-compose YAML files are **infrastructure config**, not Claude Code config
 
 1. **EntitySource is the only seam** — route handlers never touch the filesystem or Docker directly; they call sources. This keeps adding new source types cheap.
 
-2. **process-compose bootstrap** — the app must be able to *start* process-compose, not just query it. Check endpoint reachability on startup; surface start button in UI if unreachable.
+2. **process-compose bootstrap** — the app must be able to _start_ process-compose, not just query it. Check endpoint reachability on startup; surface start button in UI if unreachable.
 
 3. **Scope mirrors Claude Code** — global (`~/.claude/`) and per-project (`.claude/` in repo root) scopes only. Don't invent new ones.
 
