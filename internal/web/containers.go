@@ -208,9 +208,19 @@ func (s *Server) containerLifecycleByName(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// composeAction runs `docker compose up -d` or `down` for a declared stack.
-// The container's Name is used as the compose project so the project name
-// is stable regardless of where the YAML lives on disk.
+// composeAction runs `docker compose up -d` or `down` for a declared stack,
+// then verifies via the SDK that the container reached the requested state.
+// If `docker compose` was a no-op (which happens when the running container
+// was started externally with a different compose project name — labels
+// don't match our `-p decl.Name` filter), the SDK fallback ensures the
+// stop/start actually happens.
+//
+// This dual-path is the simplest fix for a real-world workflow: the user
+// runs `docker compose up` from a shell with the compose file mounted at a
+// different path than what's in containers.yaml, then expects the panel
+// button to control the resulting container. Compose's project/label
+// filtering rules don't help us in that case, so we fall through to the
+// label-agnostic SDK call.
 func (s *Server) composeAction(w http.ResponseWriter, r *http.Request, decl containers.Container, action lifecycleAction) {
 	cmp := docker.Compose{File: decl.ComposeFile, Project: decl.Name}
 	verb := "up"
@@ -219,13 +229,44 @@ func (s *Server) composeAction(w http.ResponseWriter, r *http.Request, decl cont
 		verb = "down"
 		op = cmp.Down
 	}
-	out, err := op(r.Context())
+	// Compose pass is best-effort: it cleans up networks/anon volumes when
+	// the project matches; when it doesn't match, it silently exits 0 with
+	// "no resources to remove" / "no service to start" — those aren't errors,
+	// they just mean the labels don't line up and the SDK fallback below
+	// will do the actual work.
+	if out, err := op(r.Context()); err != nil {
+		log.Printf("container: compose %s on %s soft-failed (will try SDK fallback): %v / %s", verb, decl.Name, err, strings.TrimSpace(string(out)))
+	} else {
+		log.Printf("container: compose %s on %s OK (%d bytes output)", verb, decl.Name, len(out))
+	}
+
+	// Verify the requested state via the SDK and correct if needed.
+	mc, found, err := s.docker.FindByName(r.Context(), decl.Name)
 	if err != nil {
-		log.Printf("container: compose %s on %s failed: %v", verb, decl.Name, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("container: compose %s on %s OK (%d bytes output)", verb, decl.Name, len(out))
+	if found {
+		switch action {
+		case lifecycleStop:
+			if mc.State == "running" {
+				if err := s.docker.StopContainer(r.Context(), mc.ID); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				log.Printf("container: SDK stop on %s (id=%s) reconciled state after compose no-op", decl.Name, mc.ID[:min(12, len(mc.ID))])
+			}
+		case lifecycleStart:
+			if mc.State != "running" {
+				if err := s.docker.StartContainer(r.Context(), mc.ID); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				log.Printf("container: SDK start on %s (id=%s) reconciled state after compose no-op", decl.Name, mc.ID[:min(12, len(mc.ID))])
+			}
+		}
+	}
+
 	s.handleServicesPartial(w, r)
 }
 
