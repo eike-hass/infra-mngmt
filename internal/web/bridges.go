@@ -210,6 +210,10 @@ func bridgeStateCSS(s bridge.State) string {
 	switch s {
 	case bridge.StateActive:
 		return "running"
+	case bridge.StateDegraded:
+		// "rule is right but traffic doesn't flow" — distinct from drifted
+		// (config wrong) and stopped (rule missing). Renders amber.
+		return "warning"
 	case bridge.StateDrifted:
 		return "error"
 	case bridge.StateMissing:
@@ -270,42 +274,48 @@ func (s *Server) snapshotAllBridges() []bridge.Bridge {
 }
 
 // rollupState combines several leaf states into the effective state of a
-// composite: all-active stays Active; mixed yields Drifted (partial up);
-// all-missing stays Missing; all-unknown stays Unknown.
+// composite. Bad states bubble up so the parent reflects the worst child:
+//
+//	any Degraded         → Degraded   (rule looks right but traffic isn't)
+//	any Drifted          → Drifted    (config mismatch)
+//	mixed Active+Missing → Drifted    (partial up — existing convention)
+//	all Active           → Active
+//	all Missing          → Missing
+//	all Unknown          → Unknown
 func rollupState(states []bridge.State) bridge.State {
 	if len(states) == 0 {
 		return bridge.StateUnknown
 	}
-	allActive := true
-	allMissing := true
-	allUnknown := true
-	anyActive := false
+	var hasActive, hasDegraded, hasDrifted, hasMissing, hasUnknown bool
 	for _, st := range states {
-		if st != bridge.StateActive {
-			allActive = false
-		}
-		if st != bridge.StateMissing {
-			allMissing = false
-		}
-		if st != bridge.StateUnknown {
-			allUnknown = false
-		}
-		if st == bridge.StateActive {
-			anyActive = true
+		switch st {
+		case bridge.StateActive:
+			hasActive = true
+		case bridge.StateDegraded:
+			hasDegraded = true
+		case bridge.StateDrifted:
+			hasDrifted = true
+		case bridge.StateMissing:
+			hasMissing = true
+		case bridge.StateUnknown:
+			hasUnknown = true
 		}
 	}
 	switch {
-	case allUnknown:
-		return bridge.StateUnknown
-	case allActive:
-		return bridge.StateActive
-	case allMissing:
-		return bridge.StateMissing
-	case anyActive:
-		// Some up, some down → drifted.
+	case hasDegraded:
+		return bridge.StateDegraded
+	case hasDrifted:
 		return bridge.StateDrifted
-	default:
+	case hasActive && hasMissing:
+		return bridge.StateDrifted
+	case hasActive:
+		return bridge.StateActive
+	case hasMissing:
 		return bridge.StateMissing
+	case hasUnknown:
+		return bridge.StateUnknown
+	default:
+		return bridge.StateUnknown
 	}
 }
 

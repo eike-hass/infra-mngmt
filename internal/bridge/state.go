@@ -1,23 +1,29 @@
 package bridge
 
 import (
+	"net"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // State is the observed runtime status of a bridge.
 type State int
 
 const (
-	StateUnknown State = iota
-	StateActive        // present in the system and matches the declared form
-	StateDrifted       // present but listenaddr/connect/etc. differ from declared
-	StateMissing       // not present in the system
+	StateUnknown  State = iota
+	StateActive         // present, matches declared form, and a TCP connect to the listener succeeds
+	StateDegraded       // present and matches declared form, but the listener does not accept TCP connects
+	StateDrifted        // present but listenaddr/connect/etc. differ from declared
+	StateMissing        // not present in the system
 )
 
 func (s State) String() string {
 	switch s {
 	case StateActive:
 		return "active"
+	case StateDegraded:
+		return "degraded"
 	case StateDrifted:
 		return "drifted"
 	case StateMissing:
@@ -25,6 +31,50 @@ func (s State) String() string {
 	default:
 		return "unknown"
 	}
+}
+
+// ProbeTimeout caps how long Status spends checking each listener. Kept
+// small because a healthy listener responds within ms; the dominant cost
+// is for genuinely dead listeners. Setting it to <= 0 disables probing
+// entirely — Status then falls back to the legacy "netsh match = Active"
+// semantics, useful for unit tests and any caller that doesn't want the
+// network I/O.
+var ProbeTimeout = 500 * time.Millisecond
+
+// probeListen attempts a TCP connect to addr:port within ProbeTimeout.
+// Returns true iff the connect succeeds (or probing is disabled, in which
+// case we trust the netsh match). Overridable in tests.
+//
+// We use a real TCP connect rather than just checking the netsh entry
+// because iphlpsvc can hold a portproxy rule in its database without
+// actually forwarding — observed after Windows boot, where the rules
+// load before iphlpsvc finishes wiring its proxy state. In that case
+// the connect fails outright (no SYN+ACK arrives), and Status reports
+// StateDegraded so the UI doesn't claim "active" when traffic isn't
+// flowing.
+//
+// Deliberate scope: this probe is only meaningful for the *bridge*.
+// iphlpsvc accepts the local SYN before attempting upstream forwarding,
+// so the probe returns success as soon as SYN+ACK arrives — even if the
+// upstream service (the thing the bridge points at) is down. That's
+// intentional: a bridge's job is to forward traffic; whether the upstream
+// is healthy is a separate concern, surfaced by the relevant process /
+// container panel. Don't "fix" this by upgrading the probe to write+read
+// or HTTP HEAD — you'll start conflating bridge health with upstream
+// health, which is exactly what this enum is designed to keep apart.
+var probeListen = func(addr string, port int) bool {
+	if ProbeTimeout <= 0 {
+		return true
+	}
+	if addr == "" || port <= 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(addr, strconv.Itoa(port)), ProbeTimeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // PortproxyEntry is one row from `netsh interface portproxy show all` output.
@@ -137,7 +187,11 @@ func (b *Bridge) ComparePortproxy(e PortproxyEntry, wslHostIP string) (active, d
 }
 
 // Status walks the observed portproxy entries and returns the State of the
-// bridge. Use ComparePortproxy directly for richer diagnostics.
+// bridge. When the netsh rule matches the declared form, an additional TCP
+// connect probe to the listen address+port determines whether iphlpsvc is
+// actually forwarding: success yields StateActive, failure yields
+// StateDegraded (rule looks right but traffic doesn't flow). Use
+// ComparePortproxy directly for richer diagnostics.
 func (b *Bridge) Status(entries []PortproxyEntry, wslHostIP string) State {
 	if b.Type != TypePortproxy {
 		return StateUnknown
@@ -149,7 +203,10 @@ func (b *Bridge) Status(entries []PortproxyEntry, wslHostIP string) State {
 	for _, e := range entries {
 		active, drifted := b.ComparePortproxy(e, wslHostIP)
 		if active {
-			return StateActive
+			if probeListen(listen, b.Listen.Port) {
+				return StateActive
+			}
+			return StateDegraded
 		}
 		if drifted {
 			return StateDrifted

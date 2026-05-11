@@ -1,10 +1,22 @@
 package web
 
 import (
+	"os"
 	"testing"
 
+	"github.com/eike-hass/infra-mngmt/internal/bridge"
 	"github.com/eike-hass/infra-mngmt/internal/entity"
 )
+
+// TestMain disables bridge TCP probing for the whole web test suite.
+// Status() would otherwise try to dial test listen IPs that don't exist,
+// reporting StateDegraded and breaking the existing "netsh match = Active"
+// expectations in handler/smart-apply tests. Real-mode behavior is
+// covered by the bridge package's own tests.
+func TestMain(m *testing.M) {
+	bridge.ProbeTimeout = 0
+	os.Exit(m.Run())
+}
 
 func TestSseEscape(t *testing.T) {
 	cases := map[string]string{

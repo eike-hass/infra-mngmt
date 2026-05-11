@@ -378,6 +378,13 @@ func TestRollupStateEmpty(t *testing.T) {
 	}
 }
 
+func TestRollupStateAnyDegradedSurfacesDegraded(t *testing.T) {
+	got := rollupState([]bridge.State{bridge.StateActive, bridge.StateDegraded})
+	if got != bridge.StateDegraded {
+		t.Errorf("expected Degraded to bubble up over Active; got %v", got)
+	}
+}
+
 func TestRebuildBridgeViewsCompositeFoldsMembers(t *testing.T) {
 	parent := bridge.Bridge{Name: "stack", Kind: bridge.KindComposite, Description: "test stack"}
 	winChild := bridge.Bridge{Name: "stack-win", Tier: bridge.TierWindows, Type: bridge.TypePortproxy, CompositeOf: "stack",
