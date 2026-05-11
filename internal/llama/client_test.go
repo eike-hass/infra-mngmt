@@ -3,6 +3,7 @@ package llama
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -152,8 +153,8 @@ func TestMetricsNotImplementedReturnsUnavailable(t *testing.T) {
 func TestSlotsParses(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[
-			{"id":0,"id_task":42,"n_ctx":4096,"is_processing":true,"next_token":{"has_next_token":true,"n_remain":80,"n_decoded":120}},
-			{"id":1,"id_task":-1,"n_ctx":4096,"is_processing":false,"next_token":{"has_next_token":false,"n_remain":0,"n_decoded":0}}
+			{"id":0,"id_task":42,"n_ctx":4096,"is_processing":true,"prompt":"summarize this text","next_token":{"has_next_token":true,"n_remain":80,"n_decoded":120}},
+			{"id":1,"id_task":-1,"n_ctx":4096,"is_processing":false,"prompt":"","next_token":{"has_next_token":false,"n_remain":0,"n_decoded":0}}
 		]`))
 	}))
 	defer srv.Close()
@@ -167,6 +168,9 @@ func TestSlotsParses(t *testing.T) {
 	}
 	if slots[0].ID != 0 || !slots[0].IsProcessing || slots[0].Progress().NDecoded != 120 || slots[0].Progress().NRemain != 80 {
 		t.Errorf("slot 0: %+v", slots[0])
+	}
+	if slots[0].Prompt != "summarize this text" {
+		t.Errorf("slot 0 Prompt = %q, want %q", slots[0].Prompt, "summarize this text")
 	}
 	if slots[1].IsProcessing || slots[1].IDTask != -1 {
 		t.Errorf("slot 1: %+v", slots[1])
@@ -392,6 +396,63 @@ func TestDrainCancelsThenReturns(t *testing.T) {
 	}
 	if res.Iterations < 2 {
 		t.Errorf("expected at least 2 iters, got %d", res.Iterations)
+	}
+}
+
+func TestLoadModelPostsJSONBody(t *testing.T) {
+	var gotPath, gotBody, gotCT string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotCT = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer srv.Close()
+
+	if err := New(srv.URL, "").LoadModel(context.Background(), "user/Model:Q4_K_M"); err != nil {
+		t.Fatalf("LoadModel: %v", err)
+	}
+	if gotPath != "/models/load" {
+		t.Errorf("path = %q, want /models/load", gotPath)
+	}
+	if gotCT != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotCT)
+	}
+	if gotBody != `{"model":"user/Model:Q4_K_M"}` {
+		t.Errorf("body = %q, want JSON with model field", gotBody)
+	}
+}
+
+func TestUnloadModelPostsJSONBody(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer srv.Close()
+
+	if err := New(srv.URL, "").UnloadModel(context.Background(), "foo"); err != nil {
+		t.Fatalf("UnloadModel: %v", err)
+	}
+	if gotPath != "/models/unload" {
+		t.Errorf("path = %q, want /models/unload", gotPath)
+	}
+}
+
+func TestLoadModelSurfacesUpstreamError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"unknown model"}`))
+	}))
+	defer srv.Close()
+
+	err := New(srv.URL, "").LoadModel(context.Background(), "ghost")
+	if err == nil {
+		t.Fatal("expected error on 404, got nil")
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Errorf("error should include status code, got: %v", err)
 	}
 }
 

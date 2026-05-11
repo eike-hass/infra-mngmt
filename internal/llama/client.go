@@ -325,15 +325,17 @@ type SlotParams struct {
 
 // Slot is the per-slot subset the UI renders. Upstream returns the full
 // sampler `params{...}` and a richer `next_token` — we lift the
-// non-prompt-leaking parts. Users on this project keep the panel behind
-// trusted_networks, so showing sampler config is acceptable; the full
-// prompt and per-sampler probability tables remain unexposed.
+// non-prompt-leaking parts plus the prompt itself. The panel sits behind
+// trusted_networks so prompt exposure is acceptable for now; tighten this
+// down (gate behind a config flag, truncate, redact) if the trust boundary
+// ever widens.
 type Slot struct {
 	ID           int            `json:"id"`
 	IDTask       int            `json:"id_task"`
 	NCtx         int            `json:"n_ctx"`
 	IsProcessing bool           `json:"is_processing"`
 	Speculative  bool           `json:"speculative"`
+	Prompt       string         `json:"prompt"`
 	Params       SlotParams     `json:"params"`
 	NextToken    nextTokenField `json:"next_token"`
 }
@@ -557,6 +559,46 @@ func (c *Client) Models(ctx context.Context) ([]Model, error) {
 		return nil, fmt.Errorf("parse models: %w", err)
 	}
 	return wrapped.Data, nil
+}
+
+// LoadModel asks the router to load a preset. Async on the server side:
+// the response is {"success": true} as soon as the load is queued, and the
+// model's /v1/models status transitions unloaded → loading → loaded over
+// the next ~seconds-to-minutes depending on model size. Under --models-max
+// LRU eviction, this may unload another model first.
+func (c *Client) LoadModel(ctx context.Context, modelID string) error {
+	return c.modelLifecycle(ctx, "/models/load", modelID)
+}
+
+// UnloadModel evicts a loaded preset, freeing its VRAM. Synchronous: the
+// response returns after the child process has shut down.
+func (c *Client) UnloadModel(ctx context.Context, modelID string) error {
+	return c.modelLifecycle(ctx, "/models/unload", modelID)
+}
+
+func (c *Client) modelLifecycle(ctx context.Context, path, modelID string) error {
+	body, err := json.Marshal(map[string]string{"model": modelID})
+	if err != nil {
+		return err
+	}
+	req, err := c.newReq(ctx, http.MethodPost, path, true)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("llama POST %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		rbody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("llama POST %s (model=%s): HTTP %d: %s", path, modelID, resp.StatusCode, bytes.TrimSpace(rbody))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
