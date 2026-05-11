@@ -45,7 +45,10 @@
     "source=gh-config,target=/home/node/.config/gh,type=volume",
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=/home/eike/.config/infra-mngmt,target=/wsl-config,type=bind",
-    "source=/c/Users/eike-/.config/infra-mngmt,target=/windows-config,type=bind"
+    "source=/c/Users/eike-/.config/infra-mngmt,target=/windows-config,type=bind",
+    "source=/home/eike/Workspace/open-design,target=/temp-opendesign,type=bind",
+    "source=/home/eike/Workspace/mcp-fs,target=/temp-mcp-fs,type=bind",
+    "source=/c/Users/eike-/llama,target=/temp-llama,type=bind"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
