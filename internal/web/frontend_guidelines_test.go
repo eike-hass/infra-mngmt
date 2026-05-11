@@ -111,19 +111,19 @@ func TestGuideline_NoTemplateStringConstantsInGo(t *testing.T) {
 //   - login.html.tmpl has its own minimal <style> block. It is intentionally
 //     standalone (no app.css dependency) so the auth flow does not depend on
 //     the rest of the asset pipeline. Documented in §3.2.
-//   - promote_picker.html.tmpl and promote_result.html.tmpl have small
-//     modal-scoped <script> blocks for keyboard handling (ESC, click-outside).
-//     M3 explicitly excluded these from the extraction; they will move when
-//     a future cleanup addresses promote modal interactions holistically.
+//
+// The promote modal templates used to be allowlisted here but their inline
+// <script> bodies were extracted to /static/js/promote.js — the modal
+// lifecycle is wired up by an `htmx:afterSwap` listener targeting
+// `#promote-slot`. Adding new template-level inline scripts should be
+// avoided; the guideline test now blocks them.
 //
 // Doc reference: docs/frontend-architecture.md §3.3, §17 anti-patterns.
 func TestGuideline_TemplatesHaveNoInlineCSSOrJS(t *testing.T) {
 	// File-level allowlist with the *reason* embedded so a reader of a
 	// failure understands what was deliberately let through.
 	allowed := map[string]string{
-		"login.html.tmpl":          "login is a standalone page with no app.css dependency (§3.2)",
-		"promote_picker.html.tmpl": "modal-scoped JS for ESC/click-outside; deferred from M3",
-		"promote_result.html.tmpl": "modal-scoped JS for ESC/click-outside; deferred from M3",
+		"login.html.tmpl": "login is a standalone page with no app.css dependency (§3.2)",
 	}
 	openTagRe := regexp.MustCompile(`<(style|script)(\s|>)`)
 	srcAttrRe := regexp.MustCompile(`<script[^>]*\bsrc=`)
@@ -149,16 +149,18 @@ func TestGuideline_TemplatesHaveNoInlineCSSOrJS(t *testing.T) {
 
 // ─── §10: no CDN URLs, except documented exceptions ─────────────────────────
 
-// TestGuideline_NoCDNURLsInServedAssets blocks regressions on the M1 work.
-// Every third-party JS/CSS file must be vendored under static/vendor/ with
-// an entry in LICENSES.md. The one documented exception is CodeMirror, which
-// is still loaded from esm.sh because vendoring requires bundling its
-// module graph — tracked in §10's "CodeMirror is the outstanding exception"
-// subsection. The exception is granted ONLY to static/js/preview.js.
+// TestGuideline_NoCDNURLsInServedAssets blocks regressions on the M1 +
+// CodeMirror-vendoring work. Every third-party JS/CSS file must be
+// vendored under static/vendor/ with an entry in LICENSES.md.
+//
+// Matches URLs, not bare hostnames — that way comments and docstrings
+// that *reference* a CDN (e.g., explaining what was vendored away) don't
+// trip the guard.
 //
 // Doc reference: docs/frontend-architecture.md §10, §17 anti-patterns.
+var bannedCDNURLRe = regexp.MustCompile(`https?://(unpkg\.com|cdn\.jsdelivr\.net|esm\.sh)/`)
+
 func TestGuideline_NoCDNURLsInServedAssets(t *testing.T) {
-	bannedHosts := []string{"unpkg.com", "cdn.jsdelivr.net", "esm.sh"}
 	for _, root := range []string{"../web/templates", "../web/static"} {
 		walkLines(t, root, hasExt(".html.tmpl", ".js", ".css"), func(path string, lineno int, line string) {
 			// Skip the vendor directory — vendored files may carry their
@@ -166,15 +168,8 @@ func TestGuideline_NoCDNURLsInServedAssets(t *testing.T) {
 			if strings.Contains(path, "/static/vendor/") {
 				return
 			}
-			for _, host := range bannedHosts {
-				if !strings.Contains(line, host) {
-					continue
-				}
-				// CodeMirror via esm.sh is the documented exception.
-				if host == "esm.sh" && filepath.Base(path) == "preview.js" {
-					continue
-				}
-				t.Errorf("%s:%d: references CDN %q — vendor it under static/vendor/ per docs/frontend-architecture.md §10\n\t> %s", path, lineno, host, strings.TrimSpace(line))
+			if bannedCDNURLRe.MatchString(line) {
+				t.Errorf("%s:%d: references a banned CDN URL — vendor it under static/vendor/ per docs/frontend-architecture.md §10\n\t> %s", path, lineno, strings.TrimSpace(line))
 			}
 		})
 	}
@@ -183,10 +178,9 @@ func TestGuideline_NoCDNURLsInServedAssets(t *testing.T) {
 // ─── §6.2: JS modules don't import from URLs (with one exception) ───────────
 
 // TestGuideline_NoURLImportsInJS asserts the rule that production JS only
-// uses browser APIs and same-origin module imports. The one carved-out
-// exception is CodeMirror in preview.js — see §10. New page modules MUST
-// import only from same-origin paths (e.g., "./shared.js" if shared.js
-// gets introduced).
+// uses browser APIs and same-origin module imports. New page modules MUST
+// import only from same-origin paths (e.g., "/static/vendor/codemirror.bundle.js"
+// or "./shared.js" if shared.js gets introduced).
 //
 // Doc reference: docs/frontend-architecture.md §6.2.
 var urlImportRe = regexp.MustCompile(`^\s*import\s+.*from\s+"(https?://|//)`)
@@ -194,10 +188,6 @@ var urlImportRe = regexp.MustCompile(`^\s*import\s+.*from\s+"(https?://|//)`)
 func TestGuideline_NoURLImportsInJS(t *testing.T) {
 	walkLines(t, "../web/static/js", hasExt(".js"), func(path string, lineno int, line string) {
 		if !urlImportRe.MatchString(line) {
-			return
-		}
-		// preview.js may import CodeMirror from esm.sh until that is vendored.
-		if filepath.Base(path) == "preview.js" && strings.Contains(line, "esm.sh") {
 			return
 		}
 		t.Errorf("%s:%d: cross-origin import in production JS — see docs/frontend-architecture.md §6.2\n\t> %s", path, lineno, strings.TrimSpace(line))
@@ -281,6 +271,37 @@ func TestGuideline_NoEvalOrFunctionConstructor(t *testing.T) {
 			return
 		}
 		t.Errorf("%s:%d: dynamic code evaluation (eval / new Function) — see docs/frontend-architecture.md §6.2\n\t> %s", path, lineno, strings.TrimSpace(line))
+	})
+}
+
+// ─── §6.2: no onclick= attributes in templates ──────────────────────────────
+
+// TestGuideline_NoOnclickAttrsInTemplates enforces the rule that event
+// handlers are bound via `addEventListener` in a JS module, not via
+// `onclick="…"` (or other on*= attribute) inline in a template. Dropping
+// inline handlers is what lets the CSP `script-src` directive omit
+// `'unsafe-inline'` — see contentSecurityPolicy in static.go.
+//
+// Doc reference: docs/frontend-architecture.md §6.2, §17 anti-patterns.
+//
+// If you have a *genuinely* dynamic handler that can't be delegated (e.g.,
+// one tied to per-element state computed at template render time), the
+// `hx-on:click="…"` attribute is HTMX's namespace-friendly alternative and
+// is still allowed because HTMX evaluates it without going through inline
+// scripting. This test does NOT flag hx-on:* attributes.
+var onclickAttrRe = regexp.MustCompile(`\son[a-z]+="`)
+
+func TestGuideline_NoOnclickAttrsInTemplates(t *testing.T) {
+	walkLines(t, "../web/templates", hasExt(".html.tmpl"), func(path string, lineno int, line string) {
+		// hx-on:* is HTMX's namespaced alternative and is permitted —
+		// HTMX evaluates the attribute without inline scripting, and the
+		// regex below is shape-matched not to flag it (it requires `on<lower>="`
+		// without a `hx-` prefix in the captured surrounding text). The
+		// explicit guard is belt-and-suspenders.
+		if !onclickAttrRe.MatchString(line) {
+			return
+		}
+		t.Errorf("%s:%d: inline event-handler attribute (onclick / on*=) — see docs/frontend-architecture.md §6.2 (bind via addEventListener in a JS module, or use hx-on:click=)", path, lineno)
 	})
 }
 

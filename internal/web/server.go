@@ -121,6 +121,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 	s.mux = chi.NewRouter()
 	s.mux.Use(middleware.Logger)
 	s.mux.Use(middleware.Recoverer)
+	s.mux.Use(securityHeadersMiddleware)
 
 	// Public routes — no auth required.
 	s.mux.Get("/login", s.handleLoginGet)
@@ -183,6 +184,8 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Get("/partials/logs", s.handleProcessLogs)         // ?instance=&process=
 		r.Get("/partials/llama", s.handleLlamaAll)           // standalone "llama" view body
 		r.Post("/api/llama/drain", s.handleLlamaDrain)       // ?instance=&process=  destructive: cancel all in-flight + queued tasks
+		r.Post("/api/llama/load", s.handleLlamaLoad)         // ?instance=&process=&model=  router-mode: load preset (LRU may evict another)
+		r.Post("/api/llama/unload", s.handleLlamaUnload)     // ?instance=&process=&model=  router-mode: evict preset, frees VRAM
 		r.Post("/api/refresh", s.handleRefresh)
 		r.Get("/partials/container-controls", s.handleContainerControls)
 		r.Get("/api/containers", s.handleContainers)
@@ -286,6 +289,14 @@ func (s *Server) findComposeClient(instance string) *compose.Client {
 // verified by hitting either endpoint without parsing systemd logs.
 func (s *Server) SetBuildInfo(b BuildInfo) {
 	s.buildInfo = b
+	// Cache-buster token for {{static}} URLs. Commit is preferred (stable
+	// across rebuilds of the same source); fall back to build epoch for
+	// unstamped builds so we still bust the cache on each rebuild.
+	bust := b.Commit
+	if bust == "" {
+		bust = b.BuildEpoch
+	}
+	setAssetCacheBuster(bust)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

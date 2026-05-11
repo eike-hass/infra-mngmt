@@ -1,6 +1,5 @@
 
-<div class="promote-modal" id="promote-modal"
-     onclick="if(event.target===this){document.getElementById('promote-close-btn').click();}">
+<div class="promote-modal" id="promote-modal">
   <div class="promote-modal-card promote-result-card {{if .OK}}ok{{else if .Conflict}}warn{{else}}error{{end}}"
        role="dialog" aria-label="Promote result">
     <header class="promote-modal-head">
@@ -43,15 +42,3 @@
     </div>
   </div>
 </div>
-<script>
-(function(){
-  const onKey = (e) => {
-    if(e.key === 'Escape'){
-      e.preventDefault();
-      document.removeEventListener('keydown', onKey);
-      document.getElementById('promote-close-btn')?.click();
-    }
-  };
-  document.addEventListener('keydown', onKey);
-})();
-</script>

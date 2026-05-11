@@ -25,10 +25,40 @@ upgrade, replace the file and update both the version and the upstream URL.
 - License: MIT
 - Project: https://marked.js.org
 
-## CodeMirror 6 — NOT YET VENDORED
+## CodeMirror 6 (bundled)
 
-The CodeMirror runtime is currently loaded from `https://esm.sh/codemirror@6`
-(plus its `@codemirror/lang-markdown` and `@codemirror/state` peers) at runtime.
-Vendoring requires bundling the module graph; that is deferred to migration
-step M5 in `docs/frontend-architecture.md` §16. Until then this is the one
-remaining external dependency at page load.
+- File: `codemirror.bundle.js`
+- Build: `make vendor-codemirror` (Go tool at `cmd/vendor-codemirror/`) — fetches
+  the packages below from `registry.npmjs.org`, populates a temp
+  `node_modules/`, and bundles via the esbuild Go API into a single ESM file.
+- License: MIT (all packages below)
+- Project: https://codemirror.net
+
+Versions at last regeneration (pinned by `dist-tags.latest` at build time;
+regenerate to bump):
+
+| Package | Version |
+|---|---|
+| codemirror | 6.0.2 |
+| @codemirror/autocomplete | 6.20.2 |
+| @codemirror/commands | 6.10.3 |
+| @codemirror/lang-css | 6.3.1 |
+| @codemirror/lang-html | 6.4.11 |
+| @codemirror/lang-javascript | 6.2.5 |
+| @codemirror/lang-markdown | 6.5.0 |
+| @codemirror/language | 6.12.3 |
+| @codemirror/lint | 6.9.6 |
+| @codemirror/search | 6.7.0 |
+| @codemirror/state | 6.6.0 |
+| @codemirror/view | 6.42.1 |
+| @lezer/common | 1.5.2 |
+| @lezer/css | 1.3.3 |
+| @lezer/highlight | 1.2.3 |
+| @lezer/html | 1.3.13 |
+| @lezer/javascript | 1.5.4 |
+| @lezer/lr | 1.4.10 |
+| @lezer/markdown | 1.6.3 |
+| @marijn/find-cluster-break | 1.0.2 |
+| crelt | 1.0.6 |
+| style-mod | 4.1.3 |
+| w3c-keyname | 2.2.8 |

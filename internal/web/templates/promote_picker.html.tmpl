@@ -1,7 +1,6 @@
 
 {{$e := .Entity}}
-<div class="promote-modal" id="promote-modal"
-     onclick="if(event.target===this){document.getElementById('promote-close-btn').click();}">
+<div class="promote-modal" id="promote-modal">
   <div class="promote-modal-card" role="dialog" aria-label="Promote entity">
     <header class="promote-modal-head">
       <div class="promote-modal-titles">
@@ -77,21 +76,3 @@
     </div>
   </div>
 </div>
-<script>
-(function(){
-  const close = () => document.getElementById('promote-close-btn')?.click();
-  const onKey = (e) => {
-    if(e.key === 'Escape'){
-      e.preventDefault();
-      document.removeEventListener('keydown', onKey);
-      close();
-    }
-  };
-  document.addEventListener('keydown', onKey);
-  // Auto-focus the rename input so power users can edit immediately.
-  setTimeout(()=>{
-    const i = document.getElementById('promote-rename-input');
-    if(i){ i.focus(); i.select(); }
-  }, 0);
-})();
-</script>

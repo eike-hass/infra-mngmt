@@ -91,7 +91,13 @@ document.addEventListener('htmx:responseError', (e) => {
 // Use queueMicrotask so we run after app.js's initial bootstrap.
 queueMicrotask(() => refreshControls());
 
-// ── window exports for onclick= attributes ──
+// ── event delegation: VS Code attach button (HTMX-swapped region) ──
+document.body.addEventListener('click', e => {
+  const btn = e.target.closest('#ov-ctr [data-vsid]');
+  if (btn) openVSCodeAttach(btn.dataset.vsid);
+});
+
+// ── window exports for cross-module access ──
 window.openVSCodeAttach = openVSCodeAttach;
 window.closeLogStream = closeLogStream;
 window.openLogStream = openLogStream;

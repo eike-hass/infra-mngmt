@@ -1,18 +1,17 @@
-// ── CodeMirror preamble ──
-// Imports are static module imports — resolved before the rest of this file
-// executes. The old `cmReady` Promise + `window._cm` shim existed when the
-// preamble lived in a separate <script type="module"> than the main script;
-// now that everything is in one module file, the bindings are usable directly.
+// CodeMirror lives in /static/vendor/codemirror.bundle.js (~1.1 MB ESM,
+// produced by `make vendor-codemirror`). It's loaded lazily via dynamic
+// import inside startEdit() — the bundle is only fetched when the user
+// actually clicks "edit", not on initial page render. Resolves
+// docs/frontend-architecture.md §18.4.
 //
-// KNOWN ISSUE: CodeMirror's esm.sh module graph can hang on slow / partially
-// reachable networks (the redirect target /codemirror@<v>/es2022/codemirror.mjs
-// recursively imports dozens of sub-modules). Vendoring CodeMirror as a
-// bundled artifact under static/vendor/ is scheduled as a follow-up; see
-// docs/frontend-architecture.md §16 M5 / §10. Until then, the entity edit
-// flow may fail to open the editor in environments where esm.sh is flaky.
-import {EditorView,basicSetup} from "https://esm.sh/codemirror@6";
-import {markdown} from "https://esm.sh/@codemirror/lang-markdown@6";
-import {EditorState} from "https://esm.sh/@codemirror/state@6";
+// _cm caches the resolved module promise so concurrent clicks (or a
+// second edit in the same session) reuse the same fetch; the browser's
+// module cache means the underlying network request happens at most once.
+let _cm = null;
+function loadCodeMirror() {
+  if (!_cm) _cm = import("/static/vendor/codemirror.bundle.js");
+  return _cm;
+}
 
 let _activeEditor = null;
 
@@ -25,13 +24,18 @@ document.body.addEventListener('htmx:afterSwap', e => {
   if (e.detail.target.id === 'preview') renderPreviewMarkdown();
 });
 
-function startEdit(btn) {
+async function startEdit(btn) {
   const body = btn.closest('.preview-body');
   const raw  = body.querySelector('.raw-src').textContent;
   body.querySelector('.rendered-md').style.display = 'none';
   btn.style.display = 'none';
   const wrap = body.querySelector('.editor-wrap');
   wrap.style.display = 'block';
+  wrap.innerHTML = '<div class="editor-loading" style="padding:12px;color:var(--text2);font-style:italic">loading editor…</div>';
+  const {EditorView, basicSetup, EditorState, markdown} = await loadCodeMirror();
+  // The user could have cancelled (or clicked a different entity) while
+  // we were awaiting the bundle. Bail if the slot was reset.
+  if (wrap.style.display === 'none') return;
   wrap.innerHTML = '';
   const theme = EditorView.theme({
     '&':                   {background:'var(--bg2)', color:'var(--text)'},
@@ -85,7 +89,17 @@ function cancelEdit(btn) {
   body.querySelector('.save-status').textContent = '';
 }
 
-// ── window exports for onclick= attributes ──
+// ── event delegation: preview edit/save/cancel buttons (HTMX-swapped region) ──
+document.body.addEventListener('click', e => {
+  const editBtn = e.target.closest('#preview .edit-btn');
+  if (editBtn) { startEdit(editBtn); return; }
+  const saveBtn = e.target.closest('#preview .save-btn');
+  if (saveBtn) { saveEdit(saveBtn); return; }
+  const cancelBtn = e.target.closest('#preview .cancel-btn');
+  if (cancelBtn) { cancelEdit(cancelBtn); return; }
+});
+
+// ── window exports for cross-module access ──
 window.startEdit = startEdit;
 window.saveEdit = saveEdit;
 window.cancelEdit = cancelEdit;

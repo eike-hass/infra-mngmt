@@ -67,6 +67,14 @@ check: fmt-check vet lint test
 tidy:
 	$(GO) mod tidy
 
+## vendor-codemirror: regenerate internal/web/static/vendor/codemirror.bundle.js
+##                    from upstream npm packages. Network: registry.npmjs.org.
+##                    Re-run after bumping CodeMirror; commit the resulting bundle.
+##                    The tool itself is not part of the production binary —
+##                    `make build` only compiles ./cmd/infra-mngmt.
+vendor-codemirror:
+	$(GO) run ./cmd/vendor-codemirror
+
 ## clean: remove build artifacts and lint cache
 clean:
 	rm -rf $(BIN)

@@ -175,6 +175,13 @@ document.addEventListener('htmx:afterSwap', (e) => {
   }
   if (e.target.id === 'view-llama') {
     applyLlamaLogsOpenFromStorage();
+    // <details> fires 'toggle' on open/close. The event doesn't bubble,
+    // so document-level delegation doesn't work — re-bind per element on
+    // each HTMX swap. Each swap creates fresh DOM nodes, so prior
+    // listeners are GC'd with the old nodes.
+    document.querySelectorAll('details.llama-logs-section[data-llama-logs-key]').forEach(d => {
+      d.addEventListener('toggle', () => onLlamaLogsToggle(d));
+    });
   }
 });
 // And on initial load.
@@ -433,6 +440,49 @@ function removeToast(t) {
   setTimeout(() => t.remove(), 200);
 }
 
+// Vault buttons (allow/disallow/tree drill) workaround.
+//
+// The vault panel loads via htmx into #vault-X-mount with hx-trigger="load",
+// and the response contains hx-post buttons targeting that same mount with
+// hx-swap="innerHTML". htmx 2.0.4 fails to wire the click handlers on those
+// buttons — verified empirically: htmx:configRequest / beforeRequest never
+// fire when the user clicks "remove", even though the button shows
+// `htmx-internal-data` is set (i.e., htmx looked at the button at some
+// point). Removing the hx-preserve on #vaults-section does not help; the
+// failure is independent of preservation. The exact mechanism inside htmx
+// is unclear — suspected interaction between hx-trigger="load"-loaded
+// content and the swap target pointing back at the same mount element.
+//
+// Pragmatic fix: replicate the htmx swap logic for `/api/vault/*` URLs
+// using vanilla fetch + innerHTML/outerHTML assignment. Scope is narrow
+// (vault endpoints only); other partials continue to use htmx normally.
+// If we later figure out the root cause, this can be removed.
+document.body.addEventListener('click', e => {
+  const btn = e.target.closest('button[hx-post], button[hx-get]');
+  if (!btn) return;
+  const method = btn.hasAttribute('hx-post') ? 'POST' : 'GET';
+  const url = btn.getAttribute(method === 'POST' ? 'hx-post' : 'hx-get');
+  if (!url || !url.startsWith('/api/vault/') && !url.startsWith('/partials/vault/')) return;
+  const targetSel = btn.getAttribute('hx-target');
+  const target = targetSel ? document.querySelector(targetSel) : null;
+  const swap = btn.getAttribute('hx-swap') || 'innerHTML';
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  fetch(url, {method}).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text();
+  }).then(html => {
+    if (!target) return;
+    if (swap === 'outerHTML') target.outerHTML = html;
+    else target.innerHTML = html;
+    // After manual swap, re-process for nested htmx attrs (e.g., the tree
+    // drill buttons inside the new panel content). They'll hit this same
+    // delegation handler on click thanks to the URL prefix filter above.
+    if (window.htmx && window.htmx.process) window.htmx.process(target);
+  }).catch(err => {
+    if (window.showToast) window.showToast({title: 'vault action failed', body: err.message || String(err)});
+  });
+});
 document.body.addEventListener('htmx:responseError', e => {
   const xhr = e.detail.xhr;
   const verb = (e.detail.requestConfig && e.detail.requestConfig.verb || '').toUpperCase();
@@ -504,7 +554,41 @@ updateProjectOverview();
 window.activeProject = activeProject;
 window.selectedEntityProject = selectedEntityProject;
 
-// ── window exports for onclick= attributes ──
+// ── index shell: direct addEventListener for static (non-HTMX-swapped) buttons ──
+document.getElementById('vtab-config').addEventListener('click', () => showView('config'));
+document.getElementById('vtab-llama').addEventListener('click', () => showView('llama'));
+document.getElementById('vtab-services').addEventListener('click', () => showView('services'));
+document.getElementById('ov-rescan').addEventListener('click', e => doRescan(e));
+document.getElementById('ov-refresh').addEventListener('click', e => doRefresh(e));
+document.getElementById('ov-toggle').addEventListener('click', () => toggleOverview());
+for (const btn of document.querySelectorAll('.tab-scroll-btn')) {
+  btn.addEventListener('click', () => {
+    const dir = btn.dataset.dir === 'right' ? 140 : -140;
+    document.getElementById('source-tabs-bar').scrollBy({left: dir, behavior: 'smooth'});
+  });
+}
+
+// ── event delegation: entity-list kind-group headers (HTMX-swapped region) ──
+document.body.addEventListener('click', e => {
+  const header = e.target.closest('.kind-group-header');
+  if (header) toggleKindGroup(header);
+});
+
+// ── event delegation: services composite-row toggle + inner action buttons ──
+// Clicks on HTMX action buttons (hx-post/hx-get) must not toggle the row.
+document.body.addEventListener('click', e => {
+  const compositeRow = e.target.closest('.bridge-composite');
+  if (compositeRow && !e.target.closest('button[hx-post], button[hx-get]')) {
+    toggleCompositeMembers(compositeRow.dataset.composite, e);
+  }
+});
+
+// ── event delegation: show-internals toggle button (HTMX-polled region) ──
+document.body.addEventListener('click', e => {
+  if (e.target.closest('.show-internals-btn')) toggleShowInternals();
+});
+
+// ── window exports for cross-module access ──
 window.showView = showView;
 window.doRescan = doRescan;
 window.doRefresh = doRefresh;

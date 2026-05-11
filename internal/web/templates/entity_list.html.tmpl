@@ -1,7 +1,7 @@
 {{define "entity-list-inner"}}
 {{range $group := groupEntitiesByKind .Entities}}
 <div class="kind-group" data-kind="{{$group.Kind}}">
-  <div class="kind-group-header" onclick="toggleKindGroup(this)">
+  <div class="kind-group-header">
     <span class="kind-icon {{$group.Kind}}">{{kindIcon $group.Kind}}</span>
     <span class="kind-group-label">{{$group.Label}}</span>
     <span class="kind-group-count">{{len $group.Entities}}</span>

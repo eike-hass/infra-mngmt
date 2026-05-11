@@ -18,15 +18,15 @@
   <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" width="28" height="20"><polygon points="8,2 14,2 17,7 14,12 8,12 5,7" fill="var(--accent)" opacity="0.95"/><polygon points="13,8 19,8 22,13 19,18 13,18 10,13" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.55"/></svg>infra-mngmt</span>
 
   <div class="view-tabs">
-    <button class="view-tab active" id="vtab-config" onclick="showView('config')">config</button>
-    <button class="view-tab" id="vtab-llama" onclick="showView('llama')">llama</button>
-    <button class="view-tab" id="vtab-services" onclick="showView('services')">services</button>
+    <button class="view-tab active" id="vtab-config">config</button>
+    <button class="view-tab" id="vtab-llama">llama</button>
+    <button class="view-tab" id="vtab-services">services</button>
   </div>
 
   <div class="divider"></div>
 
   <div class="tab-scroll-wrap" id="tab-scroll-wrap">
-    <button class="tab-scroll-btn" onclick="document.getElementById('source-tabs-bar').scrollBy({left:-140,behavior:'smooth'})">‹</button>
+    <button class="tab-scroll-btn" data-dir="left">‹</button>
     <div class="source-tabs" id="source-tabs-bar">
       <button class="tab active" data-project="__all__">all</button>
       {{range .Sources}}
@@ -35,10 +35,10 @@
       </button>
       {{end}}
     </div>
-    <button class="tab-scroll-btn" onclick="document.getElementById('source-tabs-bar').scrollBy({left:140,behavior:'smooth'})">›</button>
+    <button class="tab-scroll-btn" data-dir="right">›</button>
   </div>
 
-  <button class="topbar-btn" id="ov-rescan" onclick="doRescan(event)" title="Rescan sources — discover new projects / devcontainers">⤺</button>
+  <button class="topbar-btn" id="ov-rescan" title="Rescan sources — discover new projects / devcontainers">⤺</button>
 
   <label class="search-wrap" for="search" title="Search (⌘K)">
     <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
@@ -58,7 +58,7 @@
   <button class="pill" data-kind="hook"><span class="pill-icon">↪</span> hooks</button>
   <button class="pill" data-kind="memory"><span class="pill-icon">▤</span> memory</button>
   <button class="pill" data-kind="claude_md"><span class="pill-icon">#</span> CLAUDE.md</button>
-  <button class="topbar-btn kind-bar-refresh" id="ov-refresh" onclick="doRefresh(event)" title="Refresh entities — re-read all known sources">↻</button>
+  <button class="topbar-btn kind-bar-refresh" id="ov-refresh" title="Refresh entities — re-read all known sources">↻</button>
 </div>
 
 <div id="project-overview" style="display:none">
@@ -69,7 +69,7 @@
     <span class="ov-counts" id="ov-counts" style="display:none"></span>
     <span class="ov-spacer"></span>
     <div class="ov-ctr" id="ov-ctr"></div>
-    <span class="ov-toggle" id="ov-toggle" style="display:none" onclick="toggleOverview()">▾</span>
+    <span class="ov-toggle" id="ov-toggle" style="display:none">▾</span>
   </div>
   <div class="ov-detail" id="ov-detail" style="display:none"></div>
   <div id="ov-log-panel" style="display:none"></div>
@@ -101,6 +101,7 @@
 <script type="module" src="{{static "js/app.js"}}"></script>
 <script type="module" src="{{static "js/preview.js"}}"></script>
 <script type="module" src="{{static "js/containers.js"}}"></script>
+<script type="module" src="{{static "js/promote.js"}}"></script>
 
 {{with .Build}}
 {{if or .BuildEpoch .Commit}}

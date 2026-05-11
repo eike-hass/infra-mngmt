@@ -29,7 +29,7 @@
     <tbody>
     {{range .Bridges}}
     {{if eq .Kind "composite"}}
-    <tr class="bridge-composite" data-composite="{{.Name}}" onclick="toggleCompositeMembers('{{.Name}}', event)">
+    <tr class="bridge-composite" data-composite="{{.Name}}">
       <td class="col-name">
         <span class="bridge-disclosure">▸</span>
         <span class="proc-name">{{.Name}}</span>
@@ -43,18 +43,15 @@
           <button class="proc-btn start"
                   hx-post="/bridge/apply?name={{.Name}}"
                   hx-target="#services-inner" hx-swap="outerHTML"
-                  onclick="event.stopPropagation()"
                   title="bring composite to active state; skips UAC if Windows portproxy is already in place">apply</button>
           <button class="proc-btn restart"
                   hx-post="/bridge/pause?name={{.Name}}"
                   hx-target="#services-inner" hx-swap="outerHTML"
-                  onclick="event.stopPropagation()"
                   title="pause: stop WSL relay + remove Windows portproxy. Smart-skips elevation if Windows side is already inactive; otherwise UAC."
                   hx-confirm="Pause composite {{.Name}}? Removing the Windows portproxy will request elevation if the rule is currently in place.">pause</button>
           <button class="proc-btn stop"
                   hx-post="/bridge/reset?name={{.Name}}"
                   hx-target="#services-inner" hx-swap="outerHTML"
-                  onclick="event.stopPropagation()"
                   hx-confirm="Reset composite {{.Name}}? This removes the netsh + firewall rules and will request elevation.">reset</button>
         </div>
       </td>
@@ -179,11 +176,7 @@
      re-renders the vault chrome (cards, headers, panel mounts). Live
      status pills are kept fresh via the OOB swap block at the end of
      this partial — htmx finds each #vault-pill-X by id and patches just
-     the pill, leaving the surrounding card untouched.
-     Mount id is distinct from the panel response's id
-     (vault-{{.Name}}-panel) so allow/disallow swaps don't accidentally
-     wipe the wrapper; user actions target this mount with innerHTML so
-     the wrapper itself is never replaced. */}}
+     the pill, leaving the surrounding card untouched. */}}
 <div class="svc-instance vaults" id="vaults-section" hx-preserve>
   <div class="svc-header">
     <span class="svc-icon" title="filesystem MCP vaults">🔐</span>
@@ -226,9 +219,8 @@
     <span class="svc-endpoint">{{$iv.Endpoint}}</span>
     {{if $iv.Online}}
     <span class="svc-running-count">{{runningCount $iv.Processes}}/{{len $iv.Processes}} running</span>
-    <button class="svc-boot-btn"
+    <button class="svc-boot-btn show-internals-btn"
             data-toggle="show-internals"
-            onclick="toggleShowInternals()"
             title="show internal bridge-* processes for debugging">show internals</button>
     <button class="svc-boot-btn"
             hx-post="/compose/reload?instance={{$iv.Name}}"

@@ -8,6 +8,8 @@ package web
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -538,5 +540,164 @@ func TestPromoteResultRendersGenericError(t *testing.T) {
 	}
 	if !strings.Contains(out, `something broke`) {
 		t.Errorf("generic error missing message text:\n%s", out)
+	}
+}
+
+// ─── §18.1: cache-busting for static assets ─────────────────────────────────
+
+// TestStaticAssetURL_CacheBuster verifies that {{static}}-rendered URLs
+// carry a `?v=<token>` query string once SetBuildInfo has run, so browsers
+// re-fetch JS/CSS after a deploy without our having to rename files on disk.
+//
+// The static handler ignores query strings (it serves by path), so an URL
+// with `?v=abc` resolves to the same content as one without — the suffix
+// only affects HTTP caches keyed by full URL.
+func TestStaticAssetURL_CacheBuster(t *testing.T) {
+	// Save + restore the package-level buster so this test is hermetic.
+	orig := assetCacheBuster.Load()
+	t.Cleanup(func() {
+		if orig != nil {
+			assetCacheBuster.Store(orig)
+		} else {
+			empty := ""
+			assetCacheBuster.Store(&empty)
+		}
+	})
+
+	// Baseline: empty buster → no query string.
+	setAssetCacheBuster("")
+	if got := staticAssetURL("vendor/htmx.min.js"); got != "/static/vendor/htmx.min.js" {
+		t.Errorf("empty buster: got %q, want plain path", got)
+	}
+
+	// After SetBuildInfo with a commit, the buster appears as ?v=<commit>.
+	setAssetCacheBuster("abc12345")
+	if got := staticAssetURL("vendor/htmx.min.js"); got != "/static/vendor/htmx.min.js?v=abc12345" {
+		t.Errorf("with commit buster: got %q", got)
+	}
+
+	// Leading slash on the path is tolerated.
+	if got := staticAssetURL("/css/app.css"); got != "/static/css/app.css?v=abc12345" {
+		t.Errorf("leading-slash path: got %q", got)
+	}
+}
+
+// TestSetBuildInfo_WiresCacheBuster verifies the integration: calling
+// SetBuildInfo with a commit propagates into the {{static}} helper output.
+// Guards the wiring in server.go's SetBuildInfo.
+func TestSetBuildInfo_WiresCacheBuster(t *testing.T) {
+	orig := assetCacheBuster.Load()
+	t.Cleanup(func() {
+		if orig != nil {
+			assetCacheBuster.Store(orig)
+		}
+	})
+
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv.SetBuildInfo(BuildInfo{Commit: "deadbeef"})
+	if got := staticAssetURL("vendor/x.js"); got != "/static/vendor/x.js?v=deadbeef" {
+		t.Errorf("commit buster: got %q", got)
+	}
+
+	// Commit empty, epoch present → falls back to epoch.
+	srv.SetBuildInfo(BuildInfo{BuildEpoch: "1700000000"})
+	if got := staticAssetURL("vendor/x.js"); got != "/static/vendor/x.js?v=1700000000" {
+		t.Errorf("epoch fallback: got %q", got)
+	}
+
+	// Both empty → no query string.
+	srv.SetBuildInfo(BuildInfo{})
+	if got := staticAssetURL("vendor/x.js"); got != "/static/vendor/x.js" {
+		t.Errorf("empty BuildInfo: got %q, want plain path", got)
+	}
+}
+
+// ─── §18.3: CSP + baseline security headers ─────────────────────────────────
+
+// TestSecurityHeaders_SetOnEveryResponse verifies the middleware emits the
+// CSP and supporting baseline headers on responses from every layer of the
+// chi router: public routes, static assets, and authenticated routes.
+// Guards docs/frontend-architecture.md §18.3.
+func TestSecurityHeaders_SetOnEveryResponse(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	// Pick three response sources that exercise different router subtrees.
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"public /favicon.svg", "/favicon.svg"},
+		{"static /static/css/app.css", "/static/css/app.css"},
+		{"public /api/version", "/api/version"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, c.path, nil))
+			h := rr.Header()
+			if got := h.Get("Content-Security-Policy"); got == "" {
+				t.Errorf("Content-Security-Policy header missing")
+			} else {
+				for _, want := range []string{"default-src 'self'", "frame-ancestors 'none'", "base-uri 'none'"} {
+					if !strings.Contains(got, want) {
+						t.Errorf("CSP missing %q\nfull policy: %s", want, got)
+					}
+				}
+			}
+			if got := h.Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+			}
+			if got := h.Get("Referrer-Policy"); got != "no-referrer" {
+				t.Errorf("Referrer-Policy = %q, want no-referrer", got)
+			}
+		})
+	}
+}
+
+// TestSecurityHeaders_CSPScriptSrcNoUnsafeInline locks in the result of
+// the M3 → modal-extraction → onclick-removal chain: with every inline
+// script and on*= attribute removed, the CSP `script-src` directive no
+// longer needs `'unsafe-inline'`. Regressing to inline scripts must come
+// with a deliberate CSP loosening — making it this test's job to fail
+// loudly when that happens.
+//
+// Doc reference: docs/frontend-architecture.md §6.2, §18.3.
+func TestSecurityHeaders_CSPScriptSrcNoUnsafeInline(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/favicon.svg", nil))
+	csp := rr.Header().Get("Content-Security-Policy")
+	// Extract just the script-src directive — `'unsafe-inline'` is still
+	// (intentionally) present in style-src, and we don't want to flag that.
+	for _, directive := range strings.Split(csp, ";") {
+		directive = strings.TrimSpace(directive)
+		if !strings.HasPrefix(directive, "script-src") {
+			continue
+		}
+		if strings.Contains(directive, "'unsafe-inline'") {
+			t.Errorf("script-src contains 'unsafe-inline' — see docs/frontend-architecture.md §6.2\n\tdirective: %s", directive)
+		}
+	}
+}
+
+// TestSecurityHeaders_CSPNoExternalHostsAllowed locks in the result of the
+// CodeMirror vendoring (§10): script-src and connect-src are now `'self'`
+// only — no external CDN allowance. Regressing to a CDN-loaded JS or
+// external XHR target requires deliberately weakening the CSP, which
+// this test forces into the diff.
+func TestSecurityHeaders_CSPNoExternalHostsAllowed(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/favicon.svg", nil))
+	csp := rr.Header().Get("Content-Security-Policy")
+	for _, directiveName := range []string{"script-src", "connect-src"} {
+		for _, directive := range strings.Split(csp, ";") {
+			directive = strings.TrimSpace(directive)
+			if !strings.HasPrefix(directive, directiveName+" ") {
+				continue
+			}
+			if strings.Contains(directive, "://") {
+				t.Errorf("%s contains an external host — see docs/frontend-architecture.md §10\n\tdirective: %s", directiveName, directive)
+			}
+		}
 	}
 }

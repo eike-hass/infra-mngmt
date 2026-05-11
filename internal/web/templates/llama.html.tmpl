@@ -52,6 +52,9 @@
     {{else if not .Models}}
     <div class="llama-row-hint">no models declared in router config</div>
     {{else}}
+    {{/* Capture Instance/Process so the inner model range can build load/unload URLs without reaching for $ (which points at the page root, not the server). */}}
+    {{$inst := .Instance}}
+    {{$proc := .Process}}
     <div class="llama-models">
       {{range .Models}}
       <div class="llama-model llama-model-{{or .Status "unknown"}}{{if .Failed}} failed{{end}}{{if .Synthetic}} synthetic{{end}}">
@@ -62,6 +65,24 @@
             <span class="llama-pill mode" title="auto-injected by the router as a fallback when no [default] is defined in your preset INI. Has no --model arg so it can never launch — this is benign upstream behavior, not a config bug.">router default (synthetic)</span>
           {{else if .Failed}}
             <span class="llama-pill bad" title="upstream /v1/models reports status.failed=true with exit_code={{.ExitCode}}. NOTE: the router uses the same flag for 'preset failed to launch' AND 'LRU-evicted child didn't shut down cleanly' — the exit code is the only discriminator available in the JSON.&#10;&#10;Code {{.ExitCode}}: {{exitCodeHelp .ExitCode}}">failed (exit {{.ExitCode}})</span>
+          {{end}}
+          {{/* Load/unload buttons — synthetic preset has no --model so it can never launch, omit. Loading state shows neither (the request is in flight). */}}
+          {{if not .Synthetic}}
+            {{if eq .Status "loaded"}}
+            <button class="llama-model-btn unload"
+                    hx-post="/api/llama/unload?instance={{$inst}}&process={{$proc}}&model={{urlquery .ID}}"
+                    hx-target="#view-llama"
+                    hx-swap="innerHTML"
+                    hx-confirm="Unload {{.ID}}? Frees VRAM and kills any in-flight generation on this model. Next request to it will trigger a re-load (~seconds-minutes depending on size)."
+                    title="POST /models/unload — synchronous; child llama-server process is gone by the time this returns">unload</button>
+            {{else if or (eq .Status "unloaded") (eq .Status "sleeping") .Failed}}
+            <button class="llama-model-btn load"
+                    hx-post="/api/llama/load?instance={{$inst}}&process={{$proc}}&model={{urlquery .ID}}"
+                    hx-target="#view-llama"
+                    hx-swap="innerHTML"
+                    hx-confirm="Load {{.ID}}? Under --models-max LRU this may evict another currently-loaded model. Load time depends on model size; status will go loading → loaded over the next refresh cycles."
+                    title="POST /models/load — async; response returns once load is queued. Watch the status badge for loading→loaded transition.">load</button>
+            {{end}}
           {{end}}
         </div>
         {{if and .ModelPath (or .Failed (eq .Status "loaded") (eq .Status "sleeping"))}}
@@ -109,7 +130,7 @@
     {{end}}
   {{end}}
 
-  <details class="llama-logs-section" data-llama-logs-key="{{.Instance}}|{{.Process}}" ontoggle="onLlamaLogsToggle(this)">
+  <details class="llama-logs-section" data-llama-logs-key="{{.Instance}}|{{.Process}}">
     <summary title="last 150 lines from the process-compose log buffer for {{.Instance}}/{{.Process}} — refreshes with the panel every 10s. Open/closed state is persisted across panel refreshes via localStorage.">
       <span class="lbl">logs</span>
       <span class="llama-logs-count">{{len .Logs}}{{if .LogsErr}} · err{{end}}</span>
@@ -183,6 +204,12 @@
         <span>{{slotProgress .Progress.NDecoded .Progress.NRemain}}%</span>
       </div>
     </div>
+    {{if .Prompt}}
+    <details class="llama-slot-prompt" title="raw prompt from /slots[].prompt — exposed because the panel sits behind trusted_networks; tighten down (gate behind config flag, truncate, redact) if that boundary widens">
+      <summary>prompt <span class="muted">({{len .Prompt}} chars)</span></summary>
+      <pre>{{.Prompt}}</pre>
+    </details>
+    {{end}}
     {{end}}
 
     <dl class="llama-slot-detail">
