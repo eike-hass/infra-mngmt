@@ -161,6 +161,65 @@ func (s *Server) handleLlamaDrain(w http.ResponseWriter, r *http.Request) {
 	s.handleLlamaAll(w, r)
 }
 
+// handleLlamaLoad asks the router to load a preset by id. Async upstream —
+// response returns as soon as the load is queued; status transitions
+// unloaded → loading → loaded over the panel's normal refresh cadence.
+// Under --models-max=1 this implicitly evicts whatever was loaded; the
+// HTMX confirm dialog at the call site is the user's warning.
+func (s *Server) handleLlamaLoad(w http.ResponseWriter, r *http.Request) {
+	s.handleLlamaLifecycle(w, r, func(ctx context.Context, c *llama.Client, id string) error {
+		return c.LoadModel(ctx, id)
+	}, "load")
+}
+
+// handleLlamaUnload evicts a loaded preset, freeing its VRAM. Synchronous
+// upstream — by the time the response returns, the child process is gone.
+// Any in-flight slot is killed; the HTMX confirm is the user's warning.
+func (s *Server) handleLlamaUnload(w http.ResponseWriter, r *http.Request) {
+	s.handleLlamaLifecycle(w, r, func(ctx context.Context, c *llama.Client, id string) error {
+		return c.UnloadModel(ctx, id)
+	}, "unload")
+}
+
+// handleLlamaLifecycle is the shared body for load/unload — same param
+// shape, same whitelist check, same partial re-render on success.
+func (s *Server) handleLlamaLifecycle(w http.ResponseWriter, r *http.Request, action func(context.Context, *llama.Client, string) error, verb string) {
+	instance := r.URL.Query().Get("instance")
+	process := r.URL.Query().Get("process")
+	modelID := r.URL.Query().Get("model")
+	if !validProcessName(instance) || !validProcessName(process) {
+		http.Error(w, "invalid instance or process name", http.StatusBadRequest)
+		return
+	}
+	if modelID == "" {
+		http.Error(w, "missing model id", http.StatusBadRequest)
+		return
+	}
+	var entry *LlamaEntry
+	for i := range s.llamaServers {
+		if s.llamaServers[i].Instance == instance && s.llamaServers[i].Process == process {
+			entry = &s.llamaServers[i]
+			break
+		}
+	}
+	if entry == nil {
+		http.Error(w, "no such llama_server in config", http.StatusNotFound)
+		return
+	}
+	c := s.llamaClients[llamaKey(instance, process)]
+	if c == nil {
+		http.Error(w, "no client for entry", http.StatusInternalServerError)
+		return
+	}
+	if err := action(r.Context(), c, modelID); err != nil {
+		log.Printf("llama: %s %s/%s model=%s: %v", verb, instance, process, modelID, err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	log.Printf("llama: %s %s/%s model=%s", verb, instance, process, modelID)
+	s.handleLlamaAll(w, r)
+}
+
 // handleLlamaAll renders the standalone "llama" view body — one card per
 // configured llama-server. Auto-refreshes every 5s via HTMX.
 func (s *Server) handleLlamaAll(w http.ResponseWriter, r *http.Request) {

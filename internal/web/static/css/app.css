@@ -228,6 +228,9 @@ body.show-internals tr.proc-internal{display:table-row}
 .llama-build{color:var(--text3);font-family:ui-monospace,monospace;font-size:10px;margin-left:auto}
 .llama-drain-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 8px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all .12s;margin-left:8px}
 .llama-drain-btn:hover{border-color:var(--red);color:var(--red);background:color-mix(in srgb,var(--red) 8%,var(--bg2))}
+.llama-model-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:1px 7px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:9px;text-transform:uppercase;letter-spacing:.04em;transition:all .12s;margin-left:auto}
+.llama-model-btn.load:hover{border-color:var(--kind-claude_md);color:var(--kind-claude_md);background:color-mix(in srgb,var(--kind-claude_md) 8%,var(--bg2))}
+.llama-model-btn.unload:hover{border-color:var(--red);color:var(--red);background:color-mix(in srgb,var(--red) 8%,var(--bg2))}
 .llama-identity{display:flex;flex-wrap:wrap;gap:4px 18px;color:var(--text2);font-size:10px}
 .llama-identity .lbl{color:var(--text3);margin-right:4px;text-transform:uppercase;letter-spacing:.04em}
 .llama-identity code{color:var(--text);background:var(--bg3);padding:1px 5px;border-radius:3px;font-size:10px}
