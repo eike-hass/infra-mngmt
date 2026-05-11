@@ -2,7 +2,9 @@
 
 Status: **in effect — M1–M5 + M7 of §16 have shipped; M6 deferred**. Sections marked **(now)** describe the present codebase; **(target)** describes where we are headed; **(rule)** is binding for new code regardless of where the surrounding files sit today.
 
-This document is the canonical reference for anyone touching anything under [internal/web/](../internal/web/). It is referenced from [CLAUDE.md](../CLAUDE.md) and [README.md](../README.md); changes to the frontend layout, asset pipeline, or interaction model must update this doc in the same change. It exists because the frontend has crossed the line where ad-hoc decisions start to compound, and because we have explicitly chosen *not* to migrate to a SPA framework — that choice only pays off if the discipline below is followed.
+This document is the canonical reference for anyone touching anything under [internal/web/](../internal/web/). It is referenced from [CLAUDE.md](../CLAUDE.md) and [README.md](../README.md); changes to the frontend layout, asset pipeline, or interaction model must update this doc in the same change. **For the orientation guide ("how is the codebase laid out, what UX patterns exist, where do I look when X breaks"), see the companion [frontend-handover.md](frontend-handover.md).**
+
+It exists because the frontend has crossed the line where ad-hoc decisions start to compound, and because we have explicitly chosen *not* to migrate to a SPA framework — that choice only pays off if the discipline below is followed.
 
 ---
 
@@ -292,9 +294,13 @@ The three top-level views (`config`, `services`, `llama`) are sibling `<div>`s t
 - We do not minify our own code. Vendor files are committed in their published distribution form.
 - Subresource Integrity (SRI) is unnecessary because we serve the assets ourselves from the binary.
 
-### CodeMirror is the outstanding exception
+### CodeMirror is now vendored too
 
-CodeMirror 6 is still loaded from `https://esm.sh/codemirror@6` because vendoring it requires bundling a module graph (~50 sub-modules under `@codemirror/*`). esm.sh has proven unreliable in practice — the entity edit flow can hang at the dynamic-import step when esm.sh is slow or the recursive sub-imports time out. **The fix is to vendor a pre-built CodeMirror bundle** (use `go run` + the [esbuild Go API](https://pkg.go.dev/github.com/evanw/esbuild) from the Makefile per the §13 island playbook, but for the smaller scope of just CodeMirror). This work is tracked but not yet scheduled. Until it lands, the edit button on the entity preview pane is best-effort.
+CodeMirror 6 ships as a single pre-bundled file at [static/vendor/codemirror.bundle.js](../internal/web/static/vendor/codemirror.bundle.js) (~1.1 MB). [cmd/vendor-codemirror/main.go](../cmd/vendor-codemirror/main.go) fetches the `@codemirror/*` + `@lezer/*` package tree from `registry.npmjs.org`, populates a temp `node_modules/`, and bundles via the [esbuild Go API](https://pkg.go.dev/github.com/evanw/esbuild) per the §13 island playbook (no Node toolchain involved).
+
+Regenerate with `make vendor-codemirror`. The tool prints a manifest of pinned versions; paste into [LICENSES.md](../internal/web/static/vendor/LICENSES.md) when bumping. The tool is a build-time dependency only — `make build` (which builds `./cmd/infra-mngmt` explicitly) does not link esbuild into the production binary.
+
+Result: one HTTP fetch for the CodeMirror runtime instead of the ~50-request module graph esm.sh walked. CSP's `script-src` and `connect-src` are now `'self'` only (no external host allowance anywhere).
 
 ---
 
@@ -367,7 +373,7 @@ the affected file and the relevant section of this doc. The current checks:
 |---|---|---|
 | `TestGuideline_NoTemplateStringConstantsInGo` | No HTML template content in `internal/web/*.go` raw strings (SVG icon constants exempted by name suffix) | §3.3, §17 |
 | `TestGuideline_TemplatesHaveNoInlineCSSOrJS` | No `<style>` or inline `<script>` body in `templates/*.html.tmpl` (login + promote modals are documented exceptions) | §3.3, §17 |
-| `TestGuideline_NoCDNURLsInServedAssets` | No `unpkg.com` / `cdn.jsdelivr.net` / `esm.sh` references in templates or static assets (CodeMirror via `esm.sh` allowed only in `preview.js`) | §10 |
+| `TestGuideline_NoCDNURLsInServedAssets` | No `unpkg.com` / `cdn.jsdelivr.net` / `esm.sh` URLs in templates or static assets — every external dep must be vendored | §10 |
 | `TestGuideline_NoURLImportsInJS` | ES module `import` statements only use same-origin paths (CodeMirror exception in `preview.js`) | §6.2 |
 | `TestGuideline_VendoredFilesHaveLicenseEntry` | Every file in `static/vendor/` is recorded in `LICENSES.md` | §10 |
 | `TestGuideline_HTMXPollingCadenceFloor` | `hx-trigger="...every Ns..."` has N ≥ 5 (anything tighter must use SSE) | §7.4, §9 |
@@ -428,7 +434,7 @@ This is a sequenced refactor, not a big-bang rewrite. Each step is independently
 
 | Step | Status | Scope | Risk |
 |---|---|---|---|
-| **M1** | ✅ shipped | Created [internal/web/static/](../internal/web/static/) and [internal/web/templates/](../internal/web/templates/), both `embed.FS`-mounted via [static.go](../internal/web/static.go) and [templates.go](../internal/web/templates.go). Vendored htmx 2.0.4, fuse.js 7.0.0, marked 12.0.2 from `registry.npmjs.org` into [static/vendor/](../internal/web/static/vendor/) with [LICENSES.md](../internal/web/static/vendor/LICENSES.md). **CodeMirror still on `esm.sh`** — vendoring deferred (see §18.4). | Low. Pure asset move. |
+| **M1** | ✅ shipped | Created [internal/web/static/](../internal/web/static/) and [internal/web/templates/](../internal/web/templates/), both `embed.FS`-mounted via [static.go](../internal/web/static.go) and [templates.go](../internal/web/templates.go). Vendored htmx, fuse.js, marked, and (in a follow-up) CodeMirror 6 + its `@lezer/*` deps from `registry.npmjs.org` into [static/vendor/](../internal/web/static/vendor/) with [LICENSES.md](../internal/web/static/vendor/LICENSES.md). | Low. Pure asset move. |
 | **M2** | ✅ shipped | Extracted the CSS block from `indexHTML` into [static/css/app.css](../internal/web/static/css/app.css) (~525 lines). Layout references it via `<link rel="stylesheet" href="{{static "css/app.css"}}">`. | Low. CSS-only, easy rollback. |
 | **M3** | ✅ shipped | Inline `<script>` block moved into [static/js/app.js](../internal/web/static/js/app.js) as an ES module. Window exports added for every function called from an `onclick=` attr. | Medium — module scoping shifts globals; verified in `ident-browser`. |
 | **M4** | ✅ shipped | Every HTML constant moved into [templates/*.html.tmpl](../internal/web/templates/) and parsed via `embed.FS`. `internal/web/template.go` deleted entirely (2309 lines gone). | Medium — pure mechanical move; render tests catch most regressions. |
@@ -445,7 +451,7 @@ Verified in `ident-browser` against the deployed binary (commit `e7bf9edf+`, bui
 - ✅ View tabs switch: `config` ↔ `services` ↔ `llama`; HTMX-polled partials load on reveal
 - ✅ HTMX partial swap on entity-card click loads `/partials/entity` into `#preview`
 - ✅ M7 container panel: clicking the `infra-mngmt` source tab loads `/partials/container-controls?project=...` showing the dot, label, `■ stop`, and `VS Code` buttons via the server-rendered partial (not the old JS `renderContainerControls`)
-- ⚠️ Entity **edit** flow blocked: CodeMirror's `esm.sh` module graph (the redirect target `/codemirror@<v>/es2022/codemirror.mjs` recursively imports dozens of sub-modules) hangs the dynamic-import resolution. This is a **pre-existing dependency reliability issue, not a regression** — the same `import` statements lived inline before M3 and would have exhibited the same behavior. Fix: vendor a pre-built CodeMirror bundle into `static/vendor/` per the deferred work in §10. Until then, the edit button does nothing in environments where esm.sh is slow.
+- ✅ Entity **edit** flow now works reliably (verified live with the vendored CodeMirror bundle — editor opens, accepts input, save round-trips). The save attempt on a Docker-volume-backed entity returns 403 "read-only" as expected.
 
 M1–M5 + M7 are pure structural wins. M6 is the only step explicitly skipped.
 
@@ -466,7 +472,7 @@ M1–M5 + M7 are pure structural wins. M6 is the only step explicitly skipped.
 
 ## 18. Open questions
 
-1. **Cache busting for static assets.** When we change `app.css`, browsers may serve the stale copy. The proposal is to embed the binary's git commit hash as a query param: `{{static "app.css"}}` → `/static/app.css?v=<commit>`. Wire into the FuncMap during M2. Not yet decided whether to use commit hash, build time, or content hash.
-2. **HTMX error toast surface.** Today `app.js` has an ad-hoc `showToast` ([template.go:1022](../internal/web/template.go#L1022)). Should that subscribe to `htmx:responseError` globally? Probably yes; defer until M3.
-3. **CSP header.** Once everything is local, we can ship a strict `Content-Security-Policy`: `default-src 'self'; style-src 'self' 'unsafe-inline'`. The `unsafe-inline` is for the small inline-style use cases in §5.3 — revisit whether we can drop it after M2.
-4. **Lazy-loading CodeMirror.** CodeMirror is only used in the preview when an entity is editable. The current code (`window._cmResolve` promise) already implies lazy loading; in M5 this becomes an explicit dynamic import inside `preview.js`.
+1. ✅ **Cache busting for static assets.** Resolved: [internal/web/static.go](../internal/web/static.go) `staticAssetURL` appends `?v=<token>` derived from `BuildInfo.Commit` (falling back to `BuildEpoch` for unstamped builds). Wired via `SetBuildInfo`; covered by `TestStaticAssetURL_CacheBuster` and `TestSetBuildInfo_WiresCacheBuster`.
+2. ✅ **HTMX error toast surface.** Resolved during M7: [containers.js](../internal/web/static/js/containers.js) subscribes to `htmx:responseError` and toasts when any `/api/container/*` action fails. Same hook is the place to extend if other API endpoints need similar treatment — the listener gates on path prefix so it's safe to broaden.
+3. ✅ **CSP header.** Resolved: [securityHeadersMiddleware](../internal/web/static.go) ships `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; …` plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. `script-src` and `connect-src` are now `'self'`-only after the modal-script extraction, the `onclick=` removal, and the CodeMirror vendoring. `'unsafe-inline'` remains in `style-src` for inline `style="display:none"` toggles and dynamic widths — dropping it requires migrating those to class-based toggles; tracked as a follow-up.
+4. ✅ **Lazy-loading CodeMirror.** Resolved: [preview.js](../internal/web/static/js/preview.js) `loadCodeMirror()` wraps a dynamic `import("/static/vendor/codemirror.bundle.js")` and caches the promise, so the ~1.1 MB bundle is fetched at most once and only when the user clicks "edit". Initial page render no longer pays the cost. While the bundle is in flight the editor slot shows a `"loading editor…"` placeholder; a cancel during that window bails before instantiating the editor.
