@@ -56,9 +56,21 @@ type vaultTreeView struct {
 }
 
 type vaultTreeEntry struct {
-	Name    string
-	Full    string
-	Allowed bool // true if Full or any ancestor is in the allowlist
+	Name string
+	Full string
+	// Allowed is true when this exact path is in the allowlist (explicit
+	// listing). Distinct from CoveredBy: a path can be covered by an
+	// ancestor without being explicitly listed itself.
+	Allowed bool
+	// CoveredBy is the closest ancestor in the allowlist that grants
+	// transitive access to this entry, or "" if none. Empty when Allowed
+	// is true (we report the explicit listing instead). Surfaced in the UI
+	// so the user understands that even an unlisted subdir is reachable
+	// — the vault's permission check walks ancestors — without hiding the
+	// "+ allow" button (the user may still want to list the subdir
+	// explicitly, e.g., to remove the broader ancestor later while keeping
+	// this one).
+	CoveredBy string
 }
 
 // vaultDecl looks up a containers.yaml entry that has kind=mcp-fs. Returns
@@ -115,10 +127,16 @@ func (s *Server) loadVaultPanel(ctx context.Context, d *containers.Container, tr
 	}
 	allowedSet := stringSet(al.Allowed)
 	for _, e := range t.Entries {
+		_, explicit := allowedSet[e.Full]
+		var coveredBy string
+		if !explicit {
+			coveredBy = closestAllowedAncestor(e.Full, allowedSet)
+		}
 		tv.Entries = append(tv.Entries, vaultTreeEntry{
-			Name:    e.Name,
-			Full:    e.Full,
-			Allowed: pathAllowed(e.Full, allowedSet),
+			Name:      e.Name,
+			Full:      e.Full,
+			Allowed:   explicit,
+			CoveredBy: coveredBy,
 		})
 	}
 	view.Tree = tv
@@ -129,12 +147,25 @@ func (s *Server) loadVaultPanel(ctx context.Context, d *containers.Container, tr
 // allowed set. Mirrors the vault's own check semantics so the UI's
 // indicator is accurate.
 func pathAllowed(p string, allowed map[string]struct{}) bool {
-	for cur := p; cur != "" && cur != "/" && cur != "."; cur = path.Dir(cur) {
+	if _, ok := allowed[p]; ok {
+		return true
+	}
+	return closestAllowedAncestor(p, allowed) != ""
+}
+
+// closestAllowedAncestor returns the longest path strictly above `p` that
+// is in `allowed`, or "" if no ancestor is allowed. Walks parents starting
+// from `path.Dir(p)`, so an exact match on `p` itself does NOT count —
+// callers that want to know about explicit listing should check the set
+// directly. The skip-self behavior is what makes "covered by" distinct
+// from "explicitly listed" in the tree UI.
+func closestAllowedAncestor(p string, allowed map[string]struct{}) string {
+	for cur := path.Dir(p); cur != "" && cur != "/" && cur != "."; cur = path.Dir(cur) {
 		if _, ok := allowed[cur]; ok {
-			return true
+			return cur
 		}
 	}
-	return false
+	return ""
 }
 
 func stringSet(xs []string) map[string]struct{} {
@@ -187,10 +218,16 @@ func (s *Server) handleVaultTree(w http.ResponseWriter, r *http.Request) {
 	}
 	allowedSet := stringSet(al.Allowed)
 	for _, e := range t.Entries {
+		_, explicit := allowedSet[e.Full]
+		var coveredBy string
+		if !explicit {
+			coveredBy = closestAllowedAncestor(e.Full, allowedSet)
+		}
 		tv.Entries = append(tv.Entries, vaultTreeEntry{
-			Name:    e.Name,
-			Full:    e.Full,
-			Allowed: pathAllowed(e.Full, allowedSet),
+			Name:      e.Name,
+			Full:      e.Full,
+			Allowed:   explicit,
+			CoveredBy: coveredBy,
 		})
 	}
 	s.renderVaultTree(w, d.Name, tv)

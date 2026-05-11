@@ -178,6 +178,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1
 .status-pill.running{background:#1a3a1a;color:var(--green)}.status-pill.running .dot{background:var(--green)}
 .status-pill.stopped{background:#2a2a2a;color:var(--text2)}.status-pill.stopped .dot{background:var(--text3)}
 .status-pill.error{background:#3a1a1a;color:var(--red)}.status-pill.error .dot{background:var(--red)}
+.status-pill.warning{background:#3a2a14;color:var(--orange)}.status-pill.warning .dot{background:var(--orange)}
 .status-pill.starting{background:#2a2a1a;color:var(--yellow)}.status-pill.starting .dot{background:var(--yellow)}
 .status-pill.disabled{background:#1e1e1e;color:var(--text3)}.status-pill.disabled .dot{background:var(--text3)}
 .status-pill.unknown{background:#1e1e1e;color:var(--text3)}.status-pill.unknown .dot{background:var(--text3)}
@@ -283,6 +284,14 @@ body.show-internals tr.proc-internal{display:table-row}
 .llama-slot-detail dt{color:var(--text3);text-transform:uppercase;letter-spacing:.04em;font-size:9px;align-self:center}
 .llama-slot-detail dd{margin:0;color:var(--text);font-family:ui-monospace,monospace}
 .llama-slot-detail dd .muted{color:var(--text3)}
+.llama-slot-prompt{font-size:10px}
+.llama-slot-prompt summary{cursor:pointer;color:var(--text2);list-style:none;outline:none;display:flex;align-items:center;gap:6px;padding:2px 0}
+.llama-slot-prompt summary::-webkit-details-marker{display:none}
+.llama-slot-prompt summary::before{content:"▸";color:var(--text3);font-size:9px;width:9px;display:inline-block;transition:transform .12s}
+.llama-slot-prompt[open] summary::before{transform:rotate(90deg)}
+.llama-slot-prompt summary:hover{color:var(--text)}
+.llama-slot-prompt summary .muted{color:var(--text3);font-family:ui-monospace,monospace}
+.llama-slot-prompt pre{margin:4px 0 0;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,monospace;font-size:10px;line-height:1.5;color:var(--text)}
 .llama-logs-section{margin-top:4px;border-top:1px solid var(--border);padding-top:8px}
 .llama-logs-section summary{cursor:pointer;color:var(--text2);font-size:10px;display:flex;align-items:center;gap:8px;padding:2px 0;list-style:none;outline:none}
 .llama-logs-section summary::-webkit-details-marker{display:none}
@@ -351,6 +360,8 @@ body.show-internals tr.proc-internal{display:table-row}
 .vault-tree-row{display:flex;align-items:center;gap:6px;padding:2px 0}
 .vault-tree-cwd code{color:var(--text2);font-size:11px;flex:1}
 .vault-tree-allowed{color:var(--green);font-size:10px;padding:0 6px}
+.vault-tree-covered{color:var(--text3);font-size:10px;padding:0 6px;font-style:italic}
+.vault-tree-covered code{font-family:inherit;color:var(--text2);font-style:normal}
 .vault-empty{color:var(--text3);font-style:italic;font-size:11px;padding:6px 8px}
 /* ── preview header colored meta ── */
 .meta-kind.mcp_server{color:var(--kind-mcp)}.meta-kind.command{color:var(--kind-command)}

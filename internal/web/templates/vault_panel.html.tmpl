@@ -42,7 +42,13 @@
               hx-get="/partials/vault/tree?name={{$.Name}}&at={{.Full}}"
               hx-target="#vault-tree-{{$.Name}}" hx-swap="outerHTML">{{.Name}}/</button>
       {{if .Allowed}}
-        <span class="vault-tree-allowed">allowed</span>
+        <span class="vault-tree-allowed" title="this path is explicitly listed in the allowlist">allowed</span>
+      {{else if .CoveredBy}}
+        <span class="vault-tree-covered" title="covered transitively by an ancestor; adding explicitly lets you keep this entry if you later remove the ancestor">covered by <code>{{.CoveredBy}}</code></span>
+        <button class="vault-tree-allow-btn"
+                hx-post="/api/vault/allow?name={{$.Name}}&path={{.Full}}&at={{$.Path}}"
+                hx-target="#vault-{{$.Name}}-mount"
+                hx-swap="innerHTML">+ allow explicitly</button>
       {{else}}
         <button class="vault-tree-allow-btn"
                 hx-post="/api/vault/allow?name={{$.Name}}&path={{.Full}}&at={{$.Path}}"

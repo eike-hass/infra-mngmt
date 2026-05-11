@@ -193,3 +193,42 @@ func TestPathAllowed(t *testing.T) {
 		}
 	}
 }
+
+// TestClosestAllowedAncestor regression-guards the vault tree's "covered by"
+// UI bug: when a broad ancestor (e.g. `/data`) is in the allowlist, every
+// subdir was rendered as "allowed" with no add button, leaving the user
+// unable to list specific narrower paths. The fix is to distinguish
+// "explicitly listed" from "covered by ancestor" using this helper.
+func TestClosestAllowedAncestor(t *testing.T) {
+	cases := []struct {
+		name    string
+		allowed []string
+		in      string
+		want    string
+	}{
+		// Exact match doesn't count as its own ancestor — return ""
+		// so the caller's "explicit listing" check is the source of
+		// truth for the literal entry.
+		{"exact match returns empty", []string{"/data/x"}, "/data/x", ""},
+		// Subdir of a listed ancestor: the ancestor is returned.
+		{"covered by direct parent", []string{"/data"}, "/data/sub", "/data"},
+		{"covered by grandparent", []string{"/data"}, "/data/sub/deep", "/data"},
+		// Multiple ancestors in the allowlist: return the longest
+		// (most specific) one.
+		{"longest-match wins", []string{"/data", "/data/sub"}, "/data/sub/deep", "/data/sub"},
+		// No covering ancestor.
+		{"uncovered", []string{"/data/x"}, "/data/y", ""},
+		{"uncovered deep", []string{"/data/x"}, "/data/y/z", ""},
+		// Root path corner case.
+		{"root path", []string{"/data"}, "/data", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := closestAllowedAncestor(c.in, stringSet(c.allowed))
+			if got != c.want {
+				t.Errorf("closestAllowedAncestor(%q, %v) = %q, want %q",
+					c.in, c.allowed, got, c.want)
+			}
+		})
+	}
+}
