@@ -1,14 +1,14 @@
 // ── view switching ──
 function showView(v) {
-  document.getElementById('view-config').style.display   = v === 'config'   ? 'flex' : 'none';
+  document.getElementById('view-entities').style.display = v === 'entities' ? 'flex' : 'none';
   document.getElementById('view-services').style.display = v === 'services' ? 'flex' : 'none';
   document.getElementById('view-llama').style.display    = v === 'llama'    ? 'flex' : 'none';
-  document.getElementById('kind-bar').style.display      = v === 'config'   ? 'flex' : 'none';
-  document.getElementById('tab-scroll-wrap').style.display = v === 'config' ? 'flex' : 'none';
-  document.getElementById('vtab-config').classList.toggle('active',   v === 'config');
+  document.getElementById('kind-bar').style.display      = v === 'entities' ? 'flex' : 'none';
+  document.getElementById('tab-scroll-wrap').style.display = v === 'entities' ? 'flex' : 'none';
+  document.getElementById('vtab-entities').classList.toggle('active', v === 'entities');
   document.getElementById('vtab-services').classList.toggle('active', v === 'services');
   document.getElementById('vtab-llama').classList.toggle('active',    v === 'llama');
-  if (v === 'config') updateProjectOverview(); else document.getElementById('project-overview').style.display = 'none';
+  if (v === 'entities') updateProjectOverview(); else document.getElementById('project-overview').style.display = 'none';
 }
 
 // ── entity filtering ──
@@ -555,7 +555,7 @@ window.activeProject = activeProject;
 window.selectedEntityProject = selectedEntityProject;
 
 // ── index shell: direct addEventListener for static (non-HTMX-swapped) buttons ──
-document.getElementById('vtab-config').addEventListener('click', () => showView('config'));
+document.getElementById('vtab-entities').addEventListener('click', () => showView('entities'));
 document.getElementById('vtab-llama').addEventListener('click', () => showView('llama'));
 document.getElementById('vtab-services').addEventListener('click', () => showView('services'));
 document.getElementById('ov-rescan').addEventListener('click', e => doRescan(e));

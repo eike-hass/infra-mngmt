@@ -9,18 +9,20 @@
   <div class="svc-header">
     <span class="svc-icon" title="network bridges">⇆</span>
     <span class="svc-name">network bridges</span>
-    <span class="svc-endpoint">portproxy + firewall (persistent state)</span>
-    <span class="svc-running-count">{{activeBridgeCount .Bridges}}/{{len .Bridges}} active</span>
-    <button class="svc-boot-btn"
-            hx-post="/bridges/apply"
-            hx-target="#services-inner"
-            hx-swap="outerHTML"
-            title="re-apply every Windows-tier bridge in one UAC prompt">▶ apply all</button>
-    <button class="svc-boot-btn"
-            hx-post="/bridges/refresh"
-            hx-target="#services-inner"
-            hx-swap="outerHTML"
-            title="reload bridges.yaml from disk and re-snapshot state">⟳ refresh</button>
+    <span class="svc-endpoint">portproxy + firewall · persistent state</span>
+    <div class="svc-actions">
+      <span class="svc-running-count">{{activeBridgeCount .Bridges}}/{{len .Bridges}} active</span>
+      <button class="svc-boot-btn start"
+              hx-post="/bridges/apply"
+              hx-target="#services-inner"
+              hx-swap="outerHTML"
+              title="re-apply every Windows-tier bridge in one UAC prompt">apply all</button>
+      <button class="svc-boot-btn restart"
+              hx-post="/bridges/refresh"
+              hx-target="#services-inner"
+              hx-swap="outerHTML"
+              title="reload bridges.yaml from disk and re-snapshot state">reload</button>
+    </div>
   </div>
   <table class="process-table">
     <thead><tr>
@@ -109,18 +111,20 @@
 <div class="svc-instance containers">
   <div class="svc-header">
     <span class="svc-icon" title="docker containers">⬢</span>
+    <span class="svc-name">containers</span>
     {{if .Docker.Configured}}
     <span class="online-dot {{if .Docker.Online}}online{{else}}offline{{end}}"
           title="docker daemon {{if .Docker.Online}}reachable{{else}}unreachable{{if .Docker.Error}} — {{.Docker.Error}}{{end}}{{end}}"></span>
     {{end}}
-    <span class="svc-name">containers</span>
     <span class="svc-endpoint">{{if .Docker.Endpoint}}docker: {{.Docker.Endpoint}}{{else}}docker: matched by name{{end}}</span>
-    <span class="svc-running-count">{{runningContainerCount .Containers}}/{{len .Containers}} running</span>
-    <button class="svc-boot-btn"
-            hx-post="/containers/refresh"
-            hx-target="#services-inner"
-            hx-swap="outerHTML"
-            title="reload containers.yaml from disk and re-snapshot state">⟳ refresh</button>
+    <div class="svc-actions">
+      <span class="svc-running-count">{{runningContainerCount .Containers}}/{{len .Containers}} running</span>
+      <button class="svc-boot-btn restart"
+              hx-post="/containers/refresh"
+              hx-target="#services-inner"
+              hx-swap="outerHTML"
+              title="reload containers.yaml from disk and re-snapshot state">reload</button>
+    </div>
   </div>
   <table class="process-table">
     <thead><tr>
@@ -262,9 +266,12 @@
      the pill, leaving the surrounding card untouched. */}}
 <div class="svc-instance vaults" id="vaults-section" hx-preserve>
   <div class="svc-header">
-    <span class="svc-icon" title="filesystem MCP vaults">🔐</span>
+    <span class="svc-icon" title="filesystem MCP vaults">▣</span>
     <span class="svc-name">vaults</span>
-    <span class="svc-endpoint">filesystem MCPs (mcp-fs) — allowlist gates agent reads</span>
+    <span class="svc-endpoint">mcp-fs · allowlist gates agent reads</span>
+    <div class="svc-actions">
+      <span class="svc-running-count">{{len .Vaults}} configured</span>
+    </div>
   </div>
   <div class="vault-cards">
     {{range .Vaults}}
@@ -297,25 +304,29 @@
 <div class="svc-instance">
   <div class="svc-header">
     <span class="svc-icon" title="process-compose instance">⚙</span>
-    <span class="online-dot {{if $iv.Online}}online{{else}}offline{{end}}"></span>
     <span class="svc-name">{{$iv.Name}}</span>
+    <span class="online-dot {{if $iv.Online}}online{{else}}offline{{end}}"
+          title="process-compose {{if $iv.Online}}reachable{{else}}unreachable{{end}}"></span>
     <span class="svc-endpoint">{{$iv.Endpoint}}</span>
-    {{if $iv.Online}}
-    <span class="svc-running-count">{{runningCount $iv.Processes}}/{{len $iv.Processes}} running</span>
-    <button class="svc-boot-btn show-internals-btn"
-            data-toggle="show-internals"
-            title="show internal bridge-* processes for debugging">show internals</button>
-    <button class="svc-boot-btn"
-            hx-post="/compose/reload?instance={{$iv.Name}}"
-            hx-target="#services-inner"
-            hx-swap="outerHTML"
-            title="re-read compose YAML and reconcile (drops removed entries on recent process-compose versions)">⟳ refresh</button>
-    {{else if $iv.CanBoot}}
-    <button class="svc-boot-btn"
-            hx-post="/compose/start?instance={{$iv.Name}}"
-            hx-target="#services-inner"
-            hx-swap="outerHTML">▶ start process-compose</button>
-    {{end}}
+    <div class="svc-actions">
+      {{if $iv.Online}}
+      <span class="svc-running-count">{{runningCount $iv.Processes}}/{{len $iv.Processes}} running</span>
+      <button class="svc-boot-btn show-internals-btn"
+              data-toggle="show-internals"
+              title="show internal bridge-* processes for debugging">show internals</button>
+      <button class="svc-boot-btn restart"
+              hx-post="/compose/reload?instance={{$iv.Name}}"
+              hx-target="#services-inner"
+              hx-swap="outerHTML"
+              title="re-read compose YAML and reconcile (drops removed entries on recent process-compose versions)">reload</button>
+      {{else if $iv.CanBoot}}
+      <button class="svc-boot-btn start"
+              hx-post="/compose/start?instance={{$iv.Name}}"
+              hx-target="#services-inner"
+              hx-swap="outerHTML"
+              title="start process-compose">start</button>
+      {{end}}
+    </div>
   </div>
   {{if $iv.Online}}
   <table class="process-table">
@@ -387,10 +398,10 @@
     <div class="svc-offline-title">process-compose unreachable</div>
     <div class="svc-offline-endpoint">{{$iv.Endpoint}}</div>
     {{if $iv.CanBoot}}
-    <button class="svc-boot-btn"
+    <button class="svc-boot-btn start"
             hx-post="/compose/start?instance={{$iv.Name}}"
             hx-target="#services-inner"
-            hx-swap="outerHTML">▶ start process-compose</button>
+            hx-swap="outerHTML">start process-compose</button>
     {{else}}
     <div class="svc-offline-hint">no binary configured — add <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">binary</code> to config.json to enable bootstrap</div>
     {{end}}

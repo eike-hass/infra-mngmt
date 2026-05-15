@@ -197,21 +197,23 @@ func TestServicesTemplateNameColumnConstrained(t *testing.T) {
 	if got := strings.Count(out, `class="col-name"`); got < 6 {
 		t.Errorf("expected at least 6 col-name usages (1 th + 1 td per table), got %d", got)
 	}
-	// Refresh-button harmonization: every card-level reload-style button must
-	// use the same `⟳ refresh` label — no legacy ↻ glyph and no "reload"
-	// label on process-compose.
-	if strings.Contains(out, `↻`) {
-		t.Errorf("found legacy ↻ glyph; refresh button should use ⟳:\n%s", out)
+	// Button-label harmonization: no legacy glyphs (intent color carries the
+	// signal now), and every re-read-yaml button uses the same `reload` label
+	// across bridges, containers, and process-compose.
+	for _, glyph := range []string{`↻`, `>⟳ `, `>▶ `} {
+		if strings.Contains(out, glyph) {
+			t.Errorf("found legacy header-button glyph %q; intent class should carry the signal", glyph)
+		}
 	}
-	if strings.Contains(out, `>⟳ reload<`) {
-		t.Errorf("process-compose still uses 'reload' label; should be 'refresh' for consistency")
+	if strings.Contains(out, `>refresh<`) {
+		t.Errorf("found legacy 'refresh' label; should be 'reload' for consistency across cards")
 	}
-	// In the bridges header, ▶ apply all must appear BEFORE ⟳ refresh so the
-	// strong (mutating) action sits left of the safe (read-only) refresh.
-	applyIdx := strings.Index(out, `▶ apply all`)
-	refreshIdx := strings.Index(out, `⟳ refresh`)
-	if applyIdx < 0 || refreshIdx < 0 || applyIdx > refreshIdx {
-		t.Errorf("bridges header order wrong: apply-all=%d refresh=%d (apply-all should come first)", applyIdx, refreshIdx)
+	// In the bridges header, `apply all` must appear BEFORE `reload` so the
+	// strong (mutating) action sits left of the safe (read-only) reload.
+	applyIdx := strings.Index(out, `>apply all<`)
+	reloadIdx := strings.Index(out, `>reload<`)
+	if applyIdx < 0 || reloadIdx < 0 || applyIdx > reloadIdx {
+		t.Errorf("bridges header order wrong: apply-all=%d reload=%d (apply-all should come first)", applyIdx, reloadIdx)
 	}
 }
 

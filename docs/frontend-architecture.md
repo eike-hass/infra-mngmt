@@ -2,7 +2,7 @@
 
 Status: **in effect — M1–M5 + M7 of §16 have shipped; M6 deferred**. Sections marked **(now)** describe the present codebase; **(target)** describes where we are headed; **(rule)** is binding for new code regardless of where the surrounding files sit today.
 
-This document is the canonical reference for anyone touching anything under [internal/web/](../internal/web/). It is referenced from [CLAUDE.md](../CLAUDE.md) and [README.md](../README.md); changes to the frontend layout, asset pipeline, or interaction model must update this doc in the same change. **For the orientation guide ("how is the codebase laid out, what UX patterns exist, where do I look when X breaks"), see the companion [frontend-handover.md](frontend-handover.md).**
+This document is the canonical reference for anyone touching anything under [internal/web/](../internal/web/). It is referenced from [CLAUDE.md](../CLAUDE.md) and [README.md](../README.md); changes to the frontend layout, asset pipeline, interaction model, or visual language must update this doc in the same change.
 
 It exists because the frontend has crossed the line where ad-hoc decisions start to compound, and because we have explicitly chosen *not* to migrate to a SPA framework — that choice only pays off if the discipline below is followed.
 
@@ -24,6 +24,12 @@ It exists because the frontend has crossed the line where ad-hoc decisions start
 - SEO, social previews, accessibility certification (WCAG AA is aspirational, not gated).
 - Multi-user theming, i18n, RTL layouts.
 - Replacing HTMX with React, Vue, or Svelte. See §13 for the narrow circumstances under which a JS island is permitted.
+
+### 1.3 Design philosophy
+
+The product surface is dark, monospace, terminal-adjacent. Information density is high — the user is babysitting infrastructure and wants to see everything at once. No chrome: no rounded cards with generous padding, no hero sections, no progressive disclosure of essential state. When a row needs to expand into a deeper view (composite bridges, log streams, vault tree), it expands **in place** rather than navigating away. Loading is invisible by default; the UI animates only to confirm an action was received (spinning rotation on rescan, pulsing dot during devcontainer up). Color reinforces, never substitutes — every status surface pairs a colored dot or pill with a text label, so a red-green color-blind user can still tell `running` from `error` from the label alone.
+
+The visual tokens (§5.1), component vocabulary (§5.4), and UX patterns (§7.6–§7.9) enforce this philosophy. Don't introduce a new color, glyph, button shape, or interaction surface without checking whether an existing one fits.
 
 ---
 
@@ -142,19 +148,35 @@ The `tmplFuncs` map ([handlers.go:293](../internal/web/handlers.go#L293)) is a c
 
 ### 5.1 Tokens
 
-The variables already in `indexHTML` (`--bg`, `--text`, `--accent`, `--kind-*`, `--level-*`) are the design system. Move them to `:root` in `app.css` and never inline-override them in component CSS.
+`:root` in [`static/css/app.css`](../internal/web/static/css/app.css) is the design system. **Always reuse a token**; never introduce a new hex literal or inline color when one applies. Adding a new value means extending `:root` first.
 
-```css
-:root {
-  --bg:  #0c0c0c;
-  --bg2: #141414;
-  --bg3: #1c1c1c;
-  --text:  #c9c9c9;
-  --text2: #888;
-  --accent:  oklch(68% 0.18 200);
-  /* …kind, level, status colors… */
-}
-```
+**Background / text / border layers** — three depths of each:
+
+| Token | Hex | Where |
+|---|---|---|
+| `--bg`   | `#0c0c0c` | Page background |
+| `--bg2`  | `#141414` | Cards / panels |
+| `--bg3`  | `#1c1c1c` | Buttons / inputs / preview body |
+| `--bg4`  | `#222`    | Active tabs, hovered buttons |
+| `--text`  | `#c9c9c9` | Primary content |
+| `--text2` | `#888`    | Labels, secondary content, placeholder |
+| `--text3` | `#5a5a5a` | De-emphasized (file paths, build chip when fresh) |
+| `--white` | `#f0f0f0` | Logo, active emphasis |
+| `--border`  | `#252525` | Default rule |
+| `--border2` | `#2e2e2e` | Hover state, pill borders |
+
+**Status colors** carry semantic weight; never repurpose:
+
+| Token | Hex | Means |
+|---|---|---|
+| `--green`  | `#6bcf7f` | Running / active / OK |
+| `--red`    | `#e06c6c` | Error / failed / stopped-with-error |
+| `--yellow` | `#ffcc5c` | Warning / drifted / health "Not Ready" |
+| `--orange` | `#f0a04a` | Attention / starting / degraded |
+| `--accent` | `oklch(68% 0.18 200)` (cyan) | Primary action / focus / build chip stale |
+| `--accent2`| `oklch(68% 0.18 302)` (magenta) | Project-scope badge contrast |
+
+**Kind colors** (entity-kind glyph + group pill outline) and **scope colors** (the `glb`/`prj`/`ctr` badge on each entity) live in `:root` as `--kind-{mcp,command,agent,skill,hook,memory,claude_md}` and `--level-{global,project,devcontainer}`. The hues are deliberately distinct so the eye can scan a mixed list by either dimension at a glance.
 
 ### 5.2 Naming
 
@@ -167,6 +189,32 @@ The variables already in `indexHTML` (`--bg`, `--text`, `--accent`, `--kind-*`, 
 - **(rule)** No `!important` except in vendor overrides, with a comment naming the offending rule.
 - **(rule)** No `style="..."` attributes for layout. Inline styles are acceptable only for genuinely dynamic values (CPU bar widths from server data, e.g. [handlers.go cpuBarWidth](../internal/web/handlers.go) — render via `{{cpuBarWidth . | printf "width:%s"}}` once, not piecemeal).
 - **(rule)** Every new color, spacing, or radius value must reuse a token or extend `:root`. No hex literals scattered through component CSS.
+
+### 5.4 Component vocabulary
+
+When designing a new surface, **build it from these**. If you find yourself wanting something not listed, look harder — there's probably a component that fits, or a small extension of one. Adding a new component means updating this section in the same change.
+
+| Component | Class(es) | Purpose |
+|---|---|---|
+| Status pill | `.status-pill` + state (`running` / `error` / `starting` / `stopped` / `degraded` / `disabled` / `unknown` / `ready` / `not-ready`) | Color-coded label, ~10 px text. Process status, container/bridge/vault state, llama health. State class comes from the `statusClass` FuncMap helper. |
+| Status dot | `.dot` (inside `.status-pill`) / `.online-dot` (daemon-reachable) / `.ov-ctr-dot` (devcontainer) | 6 px circle, compact "is-it-up?" indicator paired with a surrounding label. |
+| Kind icon | Inline glyph in `--kind-*` color | Entity-kind row prefix + services-section icon (`⇆` bridges, `⬢` containers, `▣` vaults, `◇` open-design, `⚙` process-compose instance). The vocabulary is intentionally small. |
+| Pill button (kind filter) | `.pill` + active state | Outlined when inactive, tinted background when active (`color-mix(in srgb, var(--kind-X) 12%, transparent)`). Kind-filter bar above the entity list. |
+| View tab | `.view-tab` + `.active` | Top-of-page tabs (`entities` / `services` / `llama`). Active gets `--bg4` + `--border2`. |
+| Source tab | `.tab` + scope-badge children | Per-project tab strip; carries one or more `glb`/`prj`/`ctr` badges. |
+| Two-line row | `.svc-row` / `.bridge-row` / `.svc-process` / `.llama-card` / `.vault-card-header` / `tr.project-header` + `tr.project-member` | Title or name on top (`--white`), description or endpoint below (`--text2`), pills/buttons fixed-width on the right. |
+| Section header | `.svc-instance > .svc-header` with `.svc-name` + `.svc-endpoint` + `.svc-actions` | Each services-panel section follows: icon, name, endpoint/subtitle, then a right-aligned `.svc-actions` container with running-count + lifecycle buttons (`apply all` / `reload` / `start` / `restart` / `stop`). |
+| Action button | `.svc-boot-btn` (section level) / `.proc-btn` (row level) + intent class (`start` / `restart` / `stop`) | Bordered, no background until hover. Intent class colors the hover state — green for start, yellow for restart, red for stop. The label is a verb (`apply`, `pause`, `reset`, `reload`, `start`, `stop`); intent color carries the signal so the glyph (▶ / ⟳ / ↻ / ■) is dropped. Mutating actions sit left of safe `reload`. |
+| Card | `.svc-instance` + per-feature subclass (`.vaults` / `.open-designs`) | `--bg2` rectangle, `--border` outline, 4 px radius, vertical density. Header on top, content below. Never use shadow — borders only. |
+| Modal | `#promote-slot` (today, the only one) | Position-fixed overlay with darkened backdrop. Backdrop click + Escape dismiss; first input auto-focuses on open. |
+| Toast | `.toast` via `window.showToast({title, body, kind, timeout})` where `kind` is `error` (default) / `info` / `ok` | Bottom-right stack, slides in, auto-dismisses after ~8 s. Used for rescan results, container action failures (auto-toasted by the `htmx:responseError` listener), VS Code launch failures. |
+| Build chip | `.build-chip` / `.build-chip.stale` | Bottom-right, always present, monospace 10 px. `<short-sha>+` (`+` if dirty) + relative time. Turns `--accent` with a reload affordance when the server's commit differs from the page's. |
+
+### 5.5 Typography, spacing, radius
+
+- **Typography**: `--font: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;`, base 12 px. Everything is monospace; there is **no sans-serif** anywhere on the product surface (the `<title>` aside). Pills and small labels go 10–11 px; the logo and view tabs go 13 px. Don't introduce a new font.
+- **Spacing**: padding values cluster around `2px`, `4px`, `6px`, `8px`, `12px`, `16px`. Vertical density is high — most rows are 22–28 px tall. If a section needs breathing room, use a 1 px border or a slightly different background (`--bg2` next to `--bg3`) before reaching for whitespace.
+- **Radius**: `3px` on pills, `4px` on cards/inputs, `6px` on the login card. Nothing is fully rounded; nothing is sharp. Don't introduce new radii.
 
 ---
 
@@ -248,13 +296,43 @@ if (!r.ok) showToast({ kind: 'error', body: await r.text() });
 - Building HTML strings on the client and `innerHTML`-ing them. Either swap a server partial, or `createElement`.
 - Long-poll loops (`while(true) { await fetch... await sleep }`). Use SSE or HTMX polling.
 
+### 7.6 State indicators
+
+- **Dot-and-label pairing.** Every status surface is `[colored dot or pill] [label text]`. The label always says the state in words. Color reinforces, never substitutes (see §1.3).
+- **Counts as state.** Section headers carry "N/M" framing (`2/3 active`, `1/3 running`). When N is below M, the count adopts `--yellow` or `--orange` styling so it reads as needing attention at a glance.
+- **The build chip** (`.build-chip`) is the only mid-session notification of a backend change. When the running binary's commit differs from the page's, the chip flips to `--accent` with a reload affordance. Don't add other persistent notification surfaces — this one is enough.
+- **The reload button** (`.svc-boot-btn.restart` with label `reload`) spins via the `spin .7s linear infinite` animation while its request is in flight, stopping when the response lands. Same pattern for any in-flight indicator on a single button — animate the button itself, never a separate spinner.
+
+### 7.7 Information density
+
+Default to showing more, not less. The user came because their terminal/htop/`docker ps` output was too fragmented; the value here is consolidation. Specific patterns:
+
+- **(rule) Collapse, don't navigate.** When there's too much to show at once, expand in place — composite bridges, log streams, vault `<details>`. Never push the user to a new page for "see more."
+- **(rule) Persist collapse state.** A collapsable section's open/closed state survives HTMX swaps and page reloads via `localStorage.setItem('infra-mngmt:<feature>-state', …)`. Kind-group collapse, composite-row expand, llama-logs `<details>` all do this.
+- **(rule) Hide zero-info widgets.** A row element that adds no information in some state must hide in that state. The `default` process-compose namespace is hidden; a `Running + Ready` process suppresses the redundant `Ready` pill (only `Running + Not Ready` keeps it); a devcontainer-only "start via VS Code" button hides on non-devcontainer rows.
+- **(rule) Tooltips carry the depth.** Anywhere a value is compact (status pill, number, glyph), `title="…"` carries the longer explanation. The visible text is the *what*; the tooltip is the *why* (e.g. `■ stop` button → `title="halt the process and stop the restart loop"`).
+
+### 7.8 Empty / loading / error surfaces
+
+- **Empty states get a sentence**, not `(empty)`. The sentence names what the user could do next or explains the consequence: `no llama_servers declared in config.yaml — add at least one entry to populate this view`, `No paths allowed yet — agents can't read anything from this vault`.
+- **Loading states for HTMX-loaded panels** use a one-line italic `--text3` placeholder: `loading vault…`, `loading services…`. No spinners for partial loads — partials are fast. The exception: a button whose action takes 1+ seconds animates its own glyph (see §7.6 reload button).
+- **Three error surfaces, picked by user-flow context**:
+  - **Inline error** (red banner at the top of a content region) for content-endpoint failures: `⚠ no matching process-compose process found`.
+  - **Toast** for action failures: the `htmx:responseError` listener auto-toasts when an action endpoint (`/api/container/*`, etc.) returns ≥ 400. Same surface for VS Code launch failures, rescan errors.
+  - **Modal** for action errors that need the user's continued context (promote conflict / read-only / generic error — all rendered in the same `#promote-slot` so the user sees the result in the same flow they took the action).
+  - **(rule)** Don't introduce a fourth error surface; pick the one whose context matches the action.
+
+### 7.9 No optimistic UI
+
+We don't show optimistic state. The button greys out via `hx-disabled-elt="this"` during the round-trip, then the server's response renders the actual new state. This trades a brief frozen UI for a flicker-back if the action fails — worth the latency on a local-network tool. Don't add optimistic patches without a strong reason; the full state always lives on the server, the client never holds "this is starting" in JS.
+
 ---
 
 ## 8. Routing
 
 ### 8.1 Now
 
-The three top-level views (`config`, `services`, `llama`) are sibling `<div>`s toggled via `display:` in `showView()` ([template.go:641](../internal/web/template.go#L641)). The URL never changes, so reload, back/forward, and link-sharing don't work.
+The three top-level views (`entities`, `services`, `llama`) are sibling `<div>`s toggled via `display:` in `showView()` ([template.go:641](../internal/web/template.go#L641)). The URL never changes, so reload, back/forward, and link-sharing don't work.
 
 ### 8.2 Target
 
@@ -312,7 +390,19 @@ Aspirational, not gated, but required for new code:
 - **(rule)** Form inputs have `<label for>` (or `aria-label` if visually hidden).
 - **(rule)** Color is never the sole signal of state. Status pills already pair color with text — keep that pattern.
 - **(rule)** Focus states are visible. Use `:focus-visible`, not `outline:none`.
-- Keyboard shortcuts (⌘K) have a visible affordance.
+- Keyboard shortcuts have a visible affordance.
+
+### 11.1 Keyboard support
+
+Minimal but specific. Anything that can't be done with mouse-only is also keyboard-accessible:
+
+- `⌘K` / `Ctrl+K` — focus the search box (visible affordance: the placeholder text says `⌘K search`).
+- `Tab` — through every interactive element in DOM order.
+- `Esc` — dismiss the promote modal (any future modal must honor the same key).
+- `Enter` — submits forms (login, save edit, target buttons in promote).
+- `Space` / `Enter` on a focused button — activates it (browser default; never override).
+
+**(rule)** There is **no global hotkey scheme** beyond `⌘K`. A feature that genuinely needs a hotkey adds one through a discoverable affordance (visible kbd badge or tooltip); ad-hoc shortcut bindings without one are not allowed.
 
 ---
 
@@ -448,7 +538,7 @@ This is a sequenced refactor, not a big-bang rewrite. Each step is independently
 Verified in `ident-browser` against the deployed binary (commit `e7bf9edf+`, build epoch `1778439765`):
 
 - ✅ Page renders; build chip relative time formats correctly (confirms `app.js` executes)
-- ✅ View tabs switch: `config` ↔ `services` ↔ `llama`; HTMX-polled partials load on reveal
+- ✅ View tabs switch: `entities` ↔ `services` ↔ `llama`; HTMX-polled partials load on reveal
 - ✅ HTMX partial swap on entity-card click loads `/partials/entity` into `#preview`
 - ✅ M7 container panel: clicking the `infra-mngmt` source tab loads `/partials/container-controls?project=...` showing the dot, label, `■ stop`, and `VS Code` buttons via the server-rendered partial (not the old JS `renderContainerControls`)
 - ✅ Entity **edit** flow now works reliably (verified live with the vendored CodeMirror bundle — editor opens, accepts input, save round-trips). The save attempt on a Docker-volume-backed entity returns 403 "read-only" as expected.

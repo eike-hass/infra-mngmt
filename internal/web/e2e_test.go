@@ -399,7 +399,7 @@ func TestE2E_IndexShellHasJSSelectors(t *testing.T) {
 		`id="empty-list"`,
 		`id="project-overview"`,
 		// View-tab buttons used by showView().
-		`id="vtab-config"`,
+		`id="vtab-entities"`,
 		`id="vtab-llama"`,
 		`id="vtab-services"`,
 		// Pills the JS toggles by data-kind.
