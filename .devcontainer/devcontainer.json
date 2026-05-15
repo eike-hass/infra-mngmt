@@ -43,11 +43,12 @@
     "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume",
     "source=playwright-browsers-v2,target=/home/node/.cache/ms-playwright,type=volume",
     "source=gh-config,target=/home/node/.config/gh,type=volume",
-    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=/home/eike/.config/infra-mngmt,target=/wsl-config,type=bind",
     "source=/c/Users/eike-/.config/infra-mngmt,target=/windows-config,type=bind",
     "source=/home/eike/Workspace/open-design,target=/temp-opendesign,type=bind",
     "source=/home/eike/Workspace/mcp-fs,target=/temp-mcp-fs,type=bind",
+    "source=/home/eike/Workspace/browser-mcp,target=/temp-browser-mcp,type=bind",
+    "source=/home/eike/Workspace/transparent-web,target=/temp-transparent-web,type=bind",
     "source=/c/Users/eike-/llama,target=/temp-llama,type=bind"
   ],
   "containerEnv": {
@@ -57,6 +58,6 @@
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && sudo /usr/local/bin/setup-docker-group.sh",
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
   "waitFor": "postStartCommand"
 }

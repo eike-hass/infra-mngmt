@@ -74,7 +74,6 @@ for domain in \
     "playwright.download.prss.microsoft.com" \
     "golang.org" \
     "proxy.golang.org" \
-    "sum.golang.org" \
     "gopkg.in" \
     "go.googlesource.com" \
     "go.dev" \
