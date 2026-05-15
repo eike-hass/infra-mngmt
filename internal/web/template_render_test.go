@@ -86,7 +86,7 @@ func TestIndexTemplateRendersWithEmptyData(t *testing.T) {
 		`id="search"`,
 		`id="kind-bar"`,
 		`id="source-tabs-bar"`,
-		`id="vtab-config"`,
+		`id="vtab-entities"`,
 		`id="vtab-llama"`,
 		`id="vtab-services"`,
 		`data-kind="all"`,
@@ -140,6 +140,43 @@ func TestIndexTemplateRendersSourceTabsAndBuildChip(t *testing.T) {
 		`scope-badge devcontainer`,
 		`>glb<`, `>prj<`, `>ctr<`, // levelShort short forms
 		`abc12345`, // build chip commit short SHA
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered shell missing %q", want)
+		}
+	}
+}
+
+// Wake pill renders only when WakeURL is non-empty. Empty (default) must
+// produce no `wake-chip` element and no wake.js include — otherwise pages
+// with the feature disabled would still attempt to fetch /static/js/wake.js
+// and run a no-op SW registration cycle.
+func TestIndexTemplateWakePillGatedOnWakeURL(t *testing.T) {
+	tmpl := parseTemplate("index", "templates/index.html.tmpl", "templates/entity_list.html.tmpl")
+
+	// Off path
+	var off bytes.Buffer
+	if err := tmpl.Execute(&off, pageData{}); err != nil {
+		t.Fatalf("Execute (off): %v", err)
+	}
+	if strings.Contains(off.String(), `id="wake-chip"`) {
+		t.Errorf("wake-chip rendered with empty WakeURL")
+	}
+	if strings.Contains(off.String(), `js/wake.js`) {
+		t.Errorf("wake.js script tag rendered with empty WakeURL")
+	}
+
+	// On path
+	wakeURL := "http://localhost:9920/process/start/wsl-wake"
+	var on bytes.Buffer
+	if err := tmpl.Execute(&on, pageData{WakeURL: wakeURL}); err != nil {
+		t.Fatalf("Execute (on): %v", err)
+	}
+	out := on.String()
+	for _, want := range []string{
+		`id="wake-chip"`,
+		`data-wake-url="` + wakeURL + `"`,
+		`js/wake.js`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered shell missing %q", want)
@@ -647,8 +684,12 @@ func TestSecurityHeaders_SetOnEveryResponse(t *testing.T) {
 			if got := h.Get("X-Content-Type-Options"); got != "nosniff" {
 				t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 			}
-			if got := h.Get("Referrer-Policy"); got != "no-referrer" {
-				t.Errorf("Referrer-Policy = %q, want no-referrer", got)
+			// same-origin (not no-referrer) so the wake.js cross-origin POST
+			// to the wake-proxy carries an Origin header. The wake-proxy's
+			// DNS-rebinding defense requires Origin to be set; no-referrer
+			// caused Chromium to null it. See static.go middleware comment.
+			if got := h.Get("Referrer-Policy"); got != "same-origin" {
+				t.Errorf("Referrer-Policy = %q, want same-origin", got)
 			}
 		})
 	}
@@ -685,6 +726,10 @@ func TestSecurityHeaders_CSPScriptSrcNoUnsafeInline(t *testing.T) {
 // only — no external CDN allowance. Regressing to a CDN-loaded JS or
 // external XHR target requires deliberately weakening the CSP, which
 // this test forces into the diff.
+//
+// Exception: connect-src may be extended with the wake-proxy origin when
+// WakeURL is configured (TestSecurityHeaders_CSPExtendsConnectSrcForWakeURL),
+// but script-src is always `'self'`-only.
 func TestSecurityHeaders_CSPNoExternalHostsAllowed(t *testing.T) {
 	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
@@ -700,5 +745,36 @@ func TestSecurityHeaders_CSPNoExternalHostsAllowed(t *testing.T) {
 				t.Errorf("%s contains an external host — see docs/frontend-architecture.md §10\n\tdirective: %s", directiveName, directive)
 			}
 		}
+	}
+}
+
+// When WakeURL is configured, connect-src must list its scheme+host so the
+// browser permits the cross-origin POST from wake.js. Other directives stay
+// untouched — script-src in particular must NOT pick up external hosts
+// (the wake JS is served from our own origin).
+func TestSecurityHeaders_CSPExtendsConnectSrcForWakeURL(t *testing.T) {
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv.SetWakeURL("http://localhost:9920/process/start/wsl-wake")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/favicon.svg", nil))
+	csp := rr.Header().Get("Content-Security-Policy")
+	var connect, script string
+	for _, directive := range strings.Split(csp, ";") {
+		directive = strings.TrimSpace(directive)
+		if strings.HasPrefix(directive, "connect-src ") {
+			connect = directive
+		}
+		if strings.HasPrefix(directive, "script-src ") {
+			script = directive
+		}
+	}
+	if !strings.Contains(connect, "http://localhost:9920") {
+		t.Errorf("connect-src missing wake origin: %q", connect)
+	}
+	if !strings.Contains(connect, "'self'") {
+		t.Errorf("connect-src dropped 'self': %q", connect)
+	}
+	if strings.Contains(script, "://") {
+		t.Errorf("script-src must not gain an external host: %q", script)
 	}
 }

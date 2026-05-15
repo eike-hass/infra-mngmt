@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -41,6 +42,27 @@ func validProcessName(s string) bool { return validName.MatchString(s) }
 func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, s.buildInfo)
+}
+
+// handleServiceWorker serves the embedded sw.js at the root path so its scope
+// covers the whole site. Browsers won't accept a SW whose URL is under
+// /static/ as having root scope without a `Service-Worker-Allowed: /` header,
+// and serving from /sw.js sidesteps that requirement entirely. The script
+// itself is read from the same embed.FS as the other static assets — single
+// source of truth, same cache-buster propagation through the {{static}}
+// helper if the SW ever needs to reference vendored files.
+func (s *Server) handleServiceWorker(w http.ResponseWriter, _ *http.Request) {
+	data, err := fs.ReadFile(staticSubFS, "sw.js")
+	if err != nil {
+		http.Error(w, "service worker not embedded", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/javascript")
+	// SW scripts are short-cached at the browser layer by spec (24h max-age
+	// cap with implicit revalidate). No-store keeps updates predictable while
+	// the SW itself version-checks via cache name (sw.js CACHE_VERSION).
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +200,7 @@ type pageData struct {
 	Entities    []entity.Entity
 	MCPStatuses map[string]*MCPStatus
 	Build       BuildInfo // for the version chip in the header
+	WakeURL     string    // when non-empty, the wake-status pill + wake.js island render; injected into window.WAKE_URL
 }
 
 // kindGroup is one section of entities sharing a kind, used for the grouped
@@ -416,7 +439,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	statuses := s.resolveMCPStatuses(r.Context(), all)
 	tmpl := parseTemplate("index", "templates/index.html.tmpl", "templates/entity_list.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses, Build: s.buildInfo})
+	_ = tmpl.Execute(w, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses, Build: s.buildInfo, WakeURL: s.wakeURL})
 }
 
 // handleEntityListPartial returns just the entity-list inner HTML for in-place

@@ -747,6 +747,7 @@ func runServer(args []string) {
 	srv.SetContainersFile(containersPath)
 	srv.SetLlamaServers(loadLlamaEntries(cfg.LlamaServers))
 	srv.SetBuildInfo(collectBuildInfo())
+	srv.SetWakeURL(cfg.WakeURL)
 	if buildEpoch != "" {
 		log.Printf("infra-mngmt build_epoch=%s", buildEpoch)
 	} else {

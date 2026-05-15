@@ -192,6 +192,31 @@ func TestHandleVersionUnauthenticatedAllowed(t *testing.T) {
 	}
 }
 
+// ─── /sw.js ─────────────────────────────────────────────────────────────────
+
+// Service worker file is publicly fetchable (browsers fetch SWs without page
+// context and without sending the auth cookie reliably) and served as JS so
+// the browser will accept the registration.
+func TestHandleServiceWorker_PublicAndCorrectType(t *testing.T) {
+	srv := New(nil, nil, "secret-token", nil, nil, nil, nil, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	req.RemoteAddr = "8.8.8.8:1234" // unauthenticated
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (public); body = %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/javascript" {
+		t.Errorf("Content-Type = %q, want application/javascript", ct)
+	}
+	// Quick smoke check that the embedded body is actually our SW, not an
+	// empty 200 or someone else's JS.
+	body := rr.Body.String()
+	if !strings.Contains(body, "infra-mngmt-shell-") {
+		t.Errorf("/sw.js body doesn't look like our SW (missing CACHE_NAME prefix)")
+	}
+}
+
 // ─── /api/sources ───────────────────────────────────────────────────────────
 
 func TestHandleSources(t *testing.T) {

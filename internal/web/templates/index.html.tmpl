@@ -15,10 +15,10 @@
 <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
 <header>
-  <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" width="28" height="20"><polygon points="8,2 14,2 17,7 14,12 8,12 5,7" fill="var(--accent)" opacity="0.95"/><polygon points="13,8 19,8 22,13 19,18 13,18 10,13" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.55"/></svg>infra-mngmt</span>
+  <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" width="28" height="20"><polygon points="8,2 14,2 17,7 14,12 8,12 5,7" fill="var(--accent)" opacity="0.95"/><polygon points="13,8 19,8 22,13 19,18 13,18 10,13" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.55"/></svg></span>
 
   <div class="view-tabs">
-    <button class="view-tab active" id="vtab-config">config</button>
+    <button class="view-tab active" id="vtab-entities">entities</button>
     <button class="view-tab" id="vtab-llama">llama</button>
     <button class="view-tab" id="vtab-services">services</button>
   </div>
@@ -75,7 +75,7 @@
   <div id="ov-log-panel" style="display:none"></div>
 </div>
 
-<div id="view-config" style="display:flex;flex:1;overflow:hidden">
+<div id="view-entities" style="display:flex;flex:1;overflow:hidden">
   <div class="entity-list" id="entity-list">
     {{template "entity-list-inner" .}}
   </div>
@@ -102,6 +102,13 @@
 <script type="module" src="{{static "js/preview.js"}}"></script>
 <script type="module" src="{{static "js/containers.js"}}"></script>
 <script type="module" src="{{static "js/promote.js"}}"></script>
+{{if .WakeURL}}
+<span class="wake-chip" id="wake-chip" data-wake-url="{{.WakeURL}}">
+  <span class="wake-chip-label">waking</span>
+  <span class="wake-chip-elapsed" id="wake-chip-elapsed"></span>
+</span>
+<script type="module" src="{{static "js/wake.js"}}"></script>
+{{end}}
 
 {{with .Build}}
 {{if or .BuildEpoch .Commit}}

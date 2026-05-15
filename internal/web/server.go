@@ -78,6 +78,7 @@ type Server struct {
 	sessions           sync.Map       // session ID (string) → struct{}
 	entityCache        entityCacheEntry
 	buildInfo          BuildInfo // populated via SetBuildInfo; surfaced at /api/version
+	wakeURL            string    // populated via SetWakeURL; rendered into the page so JS can wake WSL via the Windows-side wake-proxy
 
 	// vaultFactory builds a VaultClient for a given control-plane URL.
 	// Tests inject a fake; production leaves nil and gets the default
@@ -121,7 +122,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 	s.mux = chi.NewRouter()
 	s.mux.Use(middleware.Logger)
 	s.mux.Use(middleware.Recoverer)
-	s.mux.Use(securityHeadersMiddleware)
+	s.mux.Use(s.securityHeadersMiddleware)
 
 	// Public routes — no auth required.
 	s.mux.Get("/login", s.handleLoginGet)
@@ -137,6 +138,11 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 	// cookie. The exposed fields (epoch, short SHA, dirty bit, go version)
 	// are not security-sensitive — they're already in the server log line.
 	s.mux.Get("/api/version", s.handleVersion)
+	// /sw.js is public (browsers fetch service workers without page context)
+	// and served at the root path so its scope covers everything. The shell
+	// it caches is harmless (markup, no privileged data); fresh visits still
+	// hit handlers under auth as normal.
+	s.mux.Get("/sw.js", s.handleServiceWorker)
 
 	// All other routes require authentication (when a token is configured).
 	s.mux.Group(func(r chi.Router) {
@@ -288,6 +294,16 @@ func (s *Server) findComposeClient(instance string) *compose.Client {
 		}
 	}
 	return nil
+}
+
+// SetWakeURL wires the browser-facing wake-proxy URL into the server. When
+// non-empty, handlers include it in pageData so the index template can render
+// the wake status pill and the wake.js island can POST to it on backend
+// failure. Empty disables the feature end-to-end (no pill, no SW registration).
+// The URL's origin is also added to the CSP's connect-src so the cross-origin
+// fetch from page JS isn't blocked — see contentSecurityPolicy().
+func (s *Server) SetWakeURL(u string) {
+	s.wakeURL = u
 }
 
 // SetBuildInfo wires the binary's build identity into the server. Surfaced

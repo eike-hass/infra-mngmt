@@ -56,6 +56,13 @@ type Config struct {
 	// token_file is set. Loopback is NOT trusted by default — add explicitly
 	// if you want browser-localhost to skip login.
 	TrustedNetworks []string `yaml:"trusted_networks,omitempty"`
+	// WakeURL is the browser-facing URL of the Windows-side wake-proxy that
+	// triggers `wsl.exe -- /bin/true` to bring WSL out of vmIdleTimeout shutdown.
+	// When set, the page renders a status pill and a JS island that pings
+	// /api/version while the tab is visible, firing the wake fetch on failure.
+	// Empty → feature disabled, no pill, no SW registration, no CSP extension.
+	// Example: "http://localhost:9920/process/start/wsl-wake".
+	WakeURL string `yaml:"wake_url,omitempty"`
 	// Explicit project root paths to add (each must contain a .claude/ subdir).
 	ExtraPaths []string `yaml:"extra_paths"`
 }

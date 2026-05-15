@@ -2,8 +2,10 @@ package web
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 )
@@ -84,31 +86,51 @@ func setAssetCacheBuster(s string) {
 //   - base-uri 'none': prevents <base href> injection altering relative URLs.
 //   - object-src 'none': blocks <object>/<embed> plugins.
 //   - form-action 'self': forms post only to our origin (login/logout/promote).
-const contentSecurityPolicy = "default-src 'self'; " +
+const baseContentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self'; " +
 	"style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data:; " +
-	"connect-src 'self'; " +
+	"connect-src 'self'%s; " +
 	"frame-ancestors 'none'; " +
 	"base-uri 'none'; " +
 	"object-src 'none'; " +
 	"form-action 'self'"
+
+// contentSecurityPolicy returns the CSP header value for this server instance.
+// Extends connect-src with the origin of WakeURL when set so the wake.js
+// island can cross-origin POST to the Windows-side wake-proxy without being
+// blocked. Everything else is fixed (the `'self'`-only baseline).
+func (s *Server) contentSecurityPolicy() string {
+	extra := ""
+	if s.wakeURL != "" {
+		if u, err := url.Parse(s.wakeURL); err == nil && u.Scheme != "" && u.Host != "" {
+			extra = " " + u.Scheme + "://" + u.Host
+		}
+	}
+	return fmt.Sprintf(baseContentSecurityPolicy, extra)
+}
 
 // securityHeadersMiddleware sets the CSP header (and a few cheap baseline
 // headers) on every response. Mounted before any route so it covers the
 // /static/* tree and the chi-routed pages alike.
 //
 // Headers set:
-//   - Content-Security-Policy (see contentSecurityPolicy above)
+//   - Content-Security-Policy (per-instance via contentSecurityPolicy())
 //   - X-Content-Type-Options: nosniff (don't MIME-sniff served bytes —
 //     belt-and-suspenders against a misconfigured Content-Type)
-//   - Referrer-Policy: no-referrer (we don't link out; nothing useful to leak)
-func securityHeadersMiddleware(next http.Handler) http.Handler {
+//   - Referrer-Policy: same-origin (don't leak Referer cross-origin —
+//     same protection as no-referrer for our use case since we don't link
+//     out — but DO allow the browser to send the Origin header on
+//     cross-origin POSTs. The earlier `no-referrer` value caused Chromium
+//     to null the Origin on the wake.js fetch, which the wake-proxy then
+//     rejected as bad-origin. See decision logs from 2026-05-15 if you
+//     need to undo this and a different defense.)
+func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("Content-Security-Policy", s.contentSecurityPolicy())
 		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Referrer-Policy", "same-origin")
 		next.ServeHTTP(w, r)
 	})
 }

@@ -15,11 +15,21 @@ PKG   := ./...
 BUILD_EPOCH := $(shell date +%s)
 LDFLAGS := -X main.buildEpoch=$(BUILD_EPOCH)
 
-.PHONY: build test test-cover fmt fmt-check vet lint check tidy clean run
+# Windows-side wake-proxy binary. Cross-compiled from this devcontainer
+# into the host's %USERPROFILE%\.config\infra-mngmt directory (bind-mounted
+# at /windows-config) so Windows process-compose can supervise it. Not part
+# of `make build` because the artifact is Windows-only.
+WAKE_PROXY_OUT ?= /windows-config/wake-proxy.exe
+
+.PHONY: build build-wake-proxy test test-cover fmt fmt-check vet lint check tidy clean run
 
 ## build: compile the server binary into dist/
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/infra-mngmt
+
+## build-wake-proxy: cross-compile the Windows-side wake-proxy.exe
+build-wake-proxy:
+	GOOS=windows GOARCH=amd64 $(GO) build -o $(WAKE_PROXY_OUT) ./cmd/wake-proxy
 
 ## run: build and start the server (re-run after each code change)
 run: build
