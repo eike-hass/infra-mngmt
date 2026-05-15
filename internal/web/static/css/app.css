@@ -542,3 +542,38 @@ body.show-internals tr.proc-internal{display:table-row}
 .editor-wrap .cm-editor{min-height:360px;font-size:12px}
 .editor-wrap .cm-editor.cm-focused{outline:none}
 .editor-wrap .cm-scroller{font-family:ui-monospace,monospace!important}
+
+/* ── Compose-project groups + Open Design card ── */
+/* Status-pill "degraded": project has some services running, some not. */
+.status-pill.degraded{background:#3a2a14;color:var(--orange)}.status-pill.degraded .dot{background:var(--orange)}
+
+/* Project-group rows inside the containers table. The header row is the
+   project itself (with lifecycle controls); member rows are the individual
+   docker containers in the project, indented to make hierarchy visible. */
+tr.project-header{background:var(--bg3)}
+tr.project-header .proc-name{color:var(--white);font-weight:600}
+tr.project-header .proc-compose-file{color:var(--text3);font-size:10px;font-family:ui-monospace,monospace}
+.proc-project-badge{display:inline-block;font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);border:1px solid var(--border2);border-radius:3px;padding:0 4px;margin-left:6px;vertical-align:middle}
+tr.project-member td.col-name{padding-left:24px}
+tr.project-member .proc-name{color:var(--text2)}
+
+/* Open Design card section — privileged display only (no lifecycle here;
+   the project group above the table owns controls). Web URL link +
+   rolled-up status pill + HTMX-loaded token-stats summary. */
+.svc-instance.open-designs .open-design-cards{display:flex;flex-direction:column;gap:8px;padding:8px}
+.open-design-card{border:1px solid var(--border);border-radius:4px;background:var(--bg2);overflow:hidden}
+.open-design-card-header{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg3);flex-wrap:wrap}
+.open-design-card-name{color:var(--white);font-weight:600;font-size:12px}
+.open-design-card-desc{color:var(--text2);font-size:11px}
+.open-design-card-link{color:var(--accent);font-size:11px;text-decoration:none;margin-left:auto}
+.open-design-card-link:hover{text-decoration:underline}
+
+.ods-tokens{padding:6px 10px;background:var(--bg);font-size:11px}
+.ods-tokens-loading{color:var(--text3);font-style:italic}
+.ods-tokens-error{color:var(--orange);display:flex;align-items:center;gap:6px}
+.ods-tokens-summary{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.ods-tokens-label{color:var(--text3);text-transform:uppercase;font-size:10px;letter-spacing:.05em}
+.ods-tokens-stat{color:var(--text2)}
+.ods-tokens-stat b{color:var(--text);font-weight:600}
+.ods-tokens-refresh{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:1px 6px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:11px;margin-left:auto}
+.ods-tokens-refresh:hover{border-color:var(--text2);color:var(--text)}

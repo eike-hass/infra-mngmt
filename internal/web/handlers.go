@@ -1371,12 +1371,21 @@ func IsInternalProcess(p compose.ProcessState) bool {
 
 func (s *Server) handleServicesPartial(w http.ResponseWriter, r *http.Request) {
 	containers := s.rebuildContainerViews(r.Context())
+	projects := s.buildContainerProjectGroups(r.Context())
+	var openDesigns []containerProjectView
+	for _, p := range projects {
+		if p.Kind == "open-design" {
+			openDesigns = append(openDesigns, p)
+		}
+	}
 	data := servicesPageData{
-		Instances:  s.buildInstanceViews(r.Context()),
-		Bridges:    s.rebuildBridgeViews(r.Context()),
-		Containers: containers,
-		Vaults:     buildVaultCardViews(containers),
-		Docker:     s.dockerHealth(r.Context()),
+		Instances:          s.buildInstanceViews(r.Context()),
+		Bridges:            s.rebuildBridgeViews(r.Context()),
+		Containers:         containers,
+		ContainerProjects:  projects,
+		OpenDesignProjects: openDesigns,
+		Vaults:             buildVaultCardViews(containers),
+		Docker:             s.dockerHealth(r.Context()),
 	}
 	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

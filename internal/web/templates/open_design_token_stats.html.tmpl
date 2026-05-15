@@ -1,0 +1,31 @@
+{{- /*
+  open-design token-stats inline summary, swapped into .ods-tokens on the
+  OD card via HTMX. Renders either Stats (success) or an Error line with a
+  retry trigger. No pricing/cost — token totals only, per the sidecar's
+  contract.
+*/ -}}
+{{if .Stats}}
+<div class="ods-tokens-summary">
+  <span class="ods-tokens-label">usage:</span>
+  <span class="ods-tokens-stat"><b>{{.Stats.Sessions}}</b> sessions</span>
+  <span class="ods-tokens-stat"><b>{{.Stats.Messages}}</b> msgs</span>
+  <span class="ods-tokens-stat">in <b>{{.Stats.InputTokens}}</b></span>
+  <span class="ods-tokens-stat">out <b>{{.Stats.OutputTokens}}</b></span>
+  <span class="ods-tokens-stat">cache_read <b>{{.Stats.CacheRead}}</b></span>
+  <span class="ods-tokens-stat">hit <b>{{printf "%.1f" .Stats.CacheHitPct}}%</b></span>
+  <button class="ods-tokens-refresh"
+          hx-get="/partials/open-design/token-stats?name={{.ServiceName}}"
+          hx-target="closest .ods-tokens"
+          hx-swap="innerHTML"
+          title="refresh usage">↻</button>
+</div>
+{{else}}
+<div class="ods-tokens-error">
+  <span>token-stats unreachable: {{.Error}}</span>
+  <button class="ods-tokens-refresh"
+          hx-get="/partials/open-design/token-stats?name={{.ServiceName}}"
+          hx-target="closest .ods-tokens"
+          hx-swap="innerHTML"
+          title="retry">↻</button>
+</div>
+{{end}}

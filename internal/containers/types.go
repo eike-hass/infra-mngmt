@@ -17,9 +17,16 @@
 //     custom networks, complex security flags). The compose file remains
 //     runnable standalone — infra-mngmt is just a supervisor.
 //
-// A container may additionally declare a `kind` (e.g. "mcp-fs") that
-// activates kind-specific behavior in the UI (such as fetching and editing
-// an allowlist for filesystem vaults).
+// Orthogonal to lifecycle, a Compose entry MAY declare its services[] —
+// the docker containers belonging to the project. When set, the UI renders
+// the entry as a project group (header row + per-service rows) inside the
+// services panel instead of as a single flat row; the project header owns
+// the lifecycle button.
+//
+// A container may additionally declare a `kind` (e.g. "mcp-fs",
+// "open-design") that activates kind-specific behavior in the UI — vault
+// allowlist editor for mcp-fs, privileged web-URL + token-stats card for
+// open-design.
 package containers
 
 import (
@@ -52,13 +59,45 @@ type Container struct {
 	ComposeFile string `yaml:"compose_file,omitempty"`
 
 	// Kind is an optional discriminator that activates kind-specific UI
-	// and API integrations. Recognized values: "mcp-fs". Unrecognized
-	// values are rejected at validation time.
+	// and API integrations. Recognized values: "mcp-fs" (vault allowlist
+	// panel) and "open-design" (privileged compose-project card with
+	// web-URL link and token-stats summary). Unrecognized values are
+	// rejected at validation time.
 	Kind string `yaml:"kind,omitempty"`
 
 	// MCPFS is the kind-specific extension for `kind: mcp-fs`. Required
 	// when Kind == "mcp-fs"; forbidden otherwise.
 	MCPFS *MCPFSConfig `yaml:"api,omitempty"`
+
+	// Services, when non-empty, declares this entry as a compose project
+	// with multiple docker containers, enabling project-group rendering in
+	// the services panel (one header row with project lifecycle controls,
+	// per-service rows underneath). Requires ComposeFile to be set — the
+	// project lifecycle is driven via `docker compose -f <file> {up,down}`.
+	//
+	// `kind: open-design` requires services with role "web" and "token-stats"
+	// (each with a non-empty URL). Other kinds may add their own service-role
+	// requirements as they're introduced. Plain compose projects (no kind)
+	// have no per-role requirements — services[] is purely structural.
+	Services []ServiceEntry `yaml:"services,omitempty"`
+}
+
+// ServiceEntry is one docker container inside a compose-project Container.
+//
+// Container is the docker container name (case-insensitive FindByName).
+//
+// Role is an optional, free-form label rendered in the services panel
+// alongside the row. Kind-specific renderers may attach behavior to known
+// roles (e.g. `kind: open-design` reads role="token-stats" + URL to load
+// an inline usage summary).
+//
+// URL is an optional service-level URL — for role="web" it's the link
+// shown next to the row; for role="token-stats" it's the base URL whose
+// /usage path returns JSON. Other roles ignore URL.
+type ServiceEntry struct {
+	Container string `yaml:"container"`
+	Role      string `yaml:"role,omitempty"`
+	URL       string `yaml:"url,omitempty"`
 }
 
 // MCPFSConfig is the kind=mcp-fs extension. Control is the base URL of the
@@ -83,7 +122,8 @@ var (
 	// matching handling downstream — explicit allowlist forces that
 	// thinking rather than silently accepting typos.
 	knownKinds = map[string]struct{}{
-		"mcp-fs": {},
+		"mcp-fs":      {},
+		"open-design": {},
 	}
 )
 
@@ -120,12 +160,30 @@ func (f *File) Validate() error {
 			return fmt.Errorf("containers[%d] %q: compose_file must be a path", i, c.Name)
 		}
 
-		// Kind discriminator + matching extension.
+		// Kind discriminator. Unrecognized kinds are rejected so typos don't
+		// silently produce default rendering.
 		if c.Kind != "" {
 			if _, ok := knownKinds[c.Kind]; !ok {
 				return fmt.Errorf("containers[%d] %q: unknown kind %q", i, c.Name, c.Kind)
 			}
 		}
+
+		// Generic services[] validation. When set, this entry represents a
+		// compose project — ComposeFile is required to drive lifecycle, and
+		// each ServiceEntry's container name must be Docker-legal. Roles are
+		// free-form except where a kind constrains them (below).
+		if len(c.Services) > 0 {
+			if c.ComposeFile == "" {
+				return fmt.Errorf("containers[%d] %q: services[] requires compose_file", i, c.Name)
+			}
+			for j, s := range c.Services {
+				if !nameRe.MatchString(s.Container) {
+					return fmt.Errorf("containers[%d] %q: services[%d].container %q must match %s", i, c.Name, j, s.Container, nameRe.String())
+				}
+			}
+		}
+
+		// Kind-specific extension + service-role constraints.
 		switch c.Kind {
 		case "mcp-fs":
 			if c.MCPFS == nil {
@@ -133,6 +191,37 @@ func (f *File) Validate() error {
 			}
 			if c.MCPFS.Control == "" {
 				return fmt.Errorf("containers[%d] %q: api.control must be a non-empty URL", i, c.Name)
+			}
+		case "open-design":
+			// kind=open-design requires a web service (URL is the OD UI link)
+			// and a token-stats service (URL is the sidecar's base for /usage).
+			// Both back the dedicated card; the card cannot render without them.
+			if len(c.Services) == 0 {
+				return fmt.Errorf("containers[%d] %q: kind %q requires services[] (with roles web + token-stats)", i, c.Name, c.Kind)
+			}
+			var hasWeb, hasTokenStats bool
+			for _, s := range c.Services {
+				switch s.Role {
+				case "web":
+					if s.URL == "" {
+						return fmt.Errorf("containers[%d] %q: kind %q service role=web requires url", i, c.Name, c.Kind)
+					}
+					hasWeb = true
+				case "token-stats":
+					if s.URL == "" {
+						return fmt.Errorf("containers[%d] %q: kind %q service role=token-stats requires url", i, c.Name, c.Kind)
+					}
+					hasTokenStats = true
+				}
+			}
+			if !hasWeb {
+				return fmt.Errorf("containers[%d] %q: kind %q requires a service with role: web", i, c.Name, c.Kind)
+			}
+			if !hasTokenStats {
+				return fmt.Errorf("containers[%d] %q: kind %q requires a service with role: token-stats", i, c.Name, c.Kind)
+			}
+			if c.MCPFS != nil {
+				return fmt.Errorf("containers[%d] %q: api block requires kind: mcp-fs", i, c.Name)
 			}
 		default:
 			if c.MCPFS != nil {

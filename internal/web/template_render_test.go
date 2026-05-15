@@ -21,16 +21,17 @@ import (
 // web package executes. Adding a new file without adding it here is a gap —
 // the smoke test below would not protect the new template.
 var htmlTemplateFiles = map[string]string{
-	"index":              "templates/index.html.tmpl",
-	"entity_list":        "templates/entity_list.html.tmpl",
-	"preview":            "templates/preview.html.tmpl",
-	"services":           "templates/services.html.tmpl",
-	"logs":               "templates/logs.html.tmpl",
-	"llama":              "templates/llama.html.tmpl",
-	"login":              "templates/login.html.tmpl",
-	"promote_picker":     "templates/promote_picker.html.tmpl",
-	"promote_result":     "templates/promote_result.html.tmpl",
-	"container_controls": "templates/container_controls.html.tmpl",
+	"index":                   "templates/index.html.tmpl",
+	"entity_list":             "templates/entity_list.html.tmpl",
+	"preview":                 "templates/preview.html.tmpl",
+	"services":                "templates/services.html.tmpl",
+	"logs":                    "templates/logs.html.tmpl",
+	"llama":                   "templates/llama.html.tmpl",
+	"login":                   "templates/login.html.tmpl",
+	"promote_picker":          "templates/promote_picker.html.tmpl",
+	"promote_result":          "templates/promote_result.html.tmpl",
+	"container_controls":      "templates/container_controls.html.tmpl",
+	"open_design_token_stats": "templates/open_design_token_stats.html.tmpl",
 }
 
 // TestAllHTMLConstantsParseWithFuncMap is the parse-only smoke test for every

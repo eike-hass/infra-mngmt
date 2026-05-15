@@ -181,11 +181,17 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Get("/partials/vault/tree", s.handleVaultTree)
 		r.Post("/api/vault/allow", s.handleVaultAllow)       // ?name=&path=
 		r.Post("/api/vault/disallow", s.handleVaultDisallow) // ?name=&path=
-		r.Get("/partials/logs", s.handleProcessLogs)         // ?instance=&process=
-		r.Get("/partials/llama", s.handleLlamaAll)           // standalone "llama" view body
-		r.Post("/api/llama/drain", s.handleLlamaDrain)       // ?instance=&process=  destructive: cancel all in-flight + queued tasks
-		r.Post("/api/llama/load", s.handleLlamaLoad)         // ?instance=&process=&model=  router-mode: load preset (LRU may evict another)
-		r.Post("/api/llama/unload", s.handleLlamaUnload)     // ?instance=&process=&model=  router-mode: evict preset, frees VRAM
+
+		// Open Design (open-design) inline token-stats summary, lazy-loaded
+		// from the OD card via HTMX. ?name= is the docker container name of
+		// the token-stats service (resolved against declarations to find the
+		// configured usage_url).
+		r.Get("/partials/open-design/token-stats", s.handleOpenDesignTokenStats)
+		r.Get("/partials/logs", s.handleProcessLogs)     // ?instance=&process=
+		r.Get("/partials/llama", s.handleLlamaAll)       // standalone "llama" view body
+		r.Post("/api/llama/drain", s.handleLlamaDrain)   // ?instance=&process=  destructive: cancel all in-flight + queued tasks
+		r.Post("/api/llama/load", s.handleLlamaLoad)     // ?instance=&process=&model=  router-mode: load preset (LRU may evict another)
+		r.Post("/api/llama/unload", s.handleLlamaUnload) // ?instance=&process=&model=  router-mode: evict preset, frees VRAM
 		r.Post("/api/refresh", s.handleRefresh)
 		r.Get("/partials/container-controls", s.handleContainerControls)
 		r.Get("/api/containers", s.handleContainers)

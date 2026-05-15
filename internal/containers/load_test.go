@@ -51,3 +51,68 @@ func TestLoadInvalidYAML(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+// TestLoadComposeProjectWithServices exercises the YAML round-trip for
+// the project-group schema: top-level `services:` on a Container, with
+// optional `role:` and `url:` per service. Without this test, a refactor
+// that renames a yaml tag would only get caught further down (view
+// builder + template), with an opaque error like "WebURL empty".
+func TestLoadComposeProjectWithServices(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "containers.yaml")
+	body := `containers:
+  - name: open-design
+    kind: open-design
+    compose_file: /abs/compose.yaml
+    services:
+      - container: open-design
+        role: web
+        url: http://localhost:7456
+      - container: od-token-stats
+        role: token-stats
+        url: http://localhost:7460
+
+  - name: my-stack
+    compose_file: /abs/other.yaml
+    services:
+      - container: web
+      - container: api
+        role: api
+        url: http://localhost:8080
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(f.Containers) != 2 {
+		t.Fatalf("want 2 containers, got %d", len(f.Containers))
+	}
+
+	od := f.Containers[0]
+	if od.Kind != "open-design" || od.ComposeFile != "/abs/compose.yaml" {
+		t.Errorf("OD entry: kind=%q compose_file=%q", od.Kind, od.ComposeFile)
+	}
+	if len(od.Services) != 2 {
+		t.Fatalf("OD services: want 2, got %d", len(od.Services))
+	}
+	if od.Services[0].Role != "web" || od.Services[0].URL != "http://localhost:7456" {
+		t.Errorf("OD services[0] role/url: %+v", od.Services[0])
+	}
+	if od.Services[1].Role != "token-stats" || od.Services[1].URL != "http://localhost:7460" {
+		t.Errorf("OD services[1] role/url: %+v", od.Services[1])
+	}
+
+	plain := f.Containers[1]
+	if plain.Kind != "" {
+		t.Errorf("plain stack should have no kind, got %q", plain.Kind)
+	}
+	if len(plain.Services) != 2 {
+		t.Fatalf("plain stack services: want 2, got %d", len(plain.Services))
+	}
+	if plain.Services[0].Container != "web" || plain.Services[0].Role != "" {
+		t.Errorf("plain services[0]: %+v", plain.Services[0])
+	}
+}

@@ -741,11 +741,13 @@ func bridgeNames(bs []bridge.Bridge) []string {
 
 // servicesPageData wraps compose-instance, bridge, and declared-container views.
 type servicesPageData struct {
-	Instances  []instanceView
-	Bridges    []bridgeView
-	Containers []containerView
-	Vaults     []vaultCardView
-	Docker     dockerHealthView
+	Instances          []instanceView
+	Bridges            []bridgeView
+	Containers         []containerView
+	ContainerProjects  []containerProjectView // all compose-project entries (services[] non-empty)
+	OpenDesignProjects []containerProjectView // pre-filtered subset where Kind == "open-design"; drives the dedicated card section
+	Vaults             []vaultCardView
+	Docker             dockerHealthView
 }
 
 // vaultCardView is the metadata an mcp-fs container surfaces in the
