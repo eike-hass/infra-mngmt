@@ -30,9 +30,15 @@ const SHELL_PATHS = ["/", "/static/css/app.css", "/static/js/wake.js"];
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) =>
-      // addAll fails atomically if any URL 4xx/5xxs — desirable here so a
-      // partial cache doesn't survive a deploy that broke a shell asset.
-      cache.addAll(SHELL_PATHS),
+      // Best-effort pre-cache. Promise.allSettled (vs. cache.addAll's atomic
+      // semantics) ensures that a single unreachable shell URL — typically
+      // because WSL was idled out at the exact moment the new SW tried to
+      // install — does not abort the install and leave us pinned on the
+      // previous version. The network-first fetch handler self-heals stale
+      // entries on the next successful page load, so the only cost of a
+      // partial pre-cache is one extra round-trip to the network when
+      // WSL comes back.
+      Promise.allSettled(SHELL_PATHS.map((path) => cache.add(path))),
     ),
   );
   self.skipWaiting();
@@ -40,15 +46,33 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((k) => k.startsWith("infra-mngmt-shell-") && k !== CACHE_NAME)
-          .map((k) => caches.delete(k)),
-      ),
-    ),
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const keys = await caches.keys();
+      const oldKeys = keys.filter(
+        (k) => k.startsWith("infra-mngmt-shell-") && k !== CACHE_NAME,
+      );
+      // Fallback: copy any shell entries still missing from the new cache
+      // out of previous-version caches before deleting them. Without this,
+      // if the install above couldn't fetch (WSL down at the moment of the
+      // SW bump), activation would leave the new cache empty, and the next
+      // page load while WSL was still down would render a browser error
+      // instead of the cached shell. Stale headers carried in by the copy
+      // are short-lived — the network-first fetch handler refreshes them
+      // on the first page load that reaches a live backend.
+      for (const oldKey of oldKeys) {
+        const oldCache = await caches.open(oldKey);
+        for (const path of SHELL_PATHS) {
+          if (!(await cache.match(path))) {
+            const oldResp = await oldCache.match(path);
+            if (oldResp) await cache.put(path, oldResp.clone());
+          }
+        }
+        await caches.delete(oldKey);
+      }
+      await self.clients.claim();
+    })(),
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
