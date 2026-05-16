@@ -440,9 +440,8 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-// faviconSVG is served at /favicon.svg — dual interlocking hexagons (host + container).
+// faviconSVG is served at /favicon.svg — dual interlocking hexagons (host + container) on a transparent background.
 const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="6" fill="#0c0c0c"/>
   <polygon points="9,3 18,3 22.5,10.5 18,18 9,18 4.5,10.5" fill="oklch(68% 0.18 200)" opacity="0.95"/>
   <polygon points="14,14 23,14 27.5,21.5 23,29 14,29 9.5,21.5" fill="none" stroke="oklch(68% 0.18 200)" stroke-width="1.5" opacity="0.55"/>
 </svg>`
