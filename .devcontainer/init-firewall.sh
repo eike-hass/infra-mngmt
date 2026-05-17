@@ -63,7 +63,38 @@ while read -r cidr; do
     ipset add allowed-domains "$cidr"
 done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
 
-# Resolve and add other allowed domains
+# Fetch Google IP ranges. Google publishes goog.json daily with every CIDR
+# their CDN serves from; using it instead of per-hostname A-record resolution
+# avoids the stale-allowlist problem the per-hostname loop caused for
+# proxy.golang.org, sum.golang.org, dl.google.com, storage.googleapis.com,
+# go.googlesource.com, golang.org, go.dev, pkg.go.dev. Google rotates the
+# IPs those names point at faster than the container is rebuilt; the CIDR
+# list changes ~weekly and covers every IP we could land on.
+echo "Fetching Google IP ranges..."
+goog_ranges=$(curl -s https://www.gstatic.com/ipranges/goog.json)
+if [ -z "$goog_ranges" ]; then
+    echo "ERROR: Failed to fetch Google IP ranges"
+    exit 1
+fi
+
+if ! echo "$goog_ranges" | jq -e '.prefixes' >/dev/null; then
+    echo "ERROR: Google ipranges response missing .prefixes"
+    exit 1
+fi
+
+echo "Processing Google IPs..."
+while read -r cidr; do
+    if [[ -z "$cidr" ]]; then continue; fi
+    if [[ ! "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+        echo "ERROR: Invalid CIDR range from Google ipranges: $cidr"
+        exit 1
+    fi
+    ipset add allowed-domains "$cidr"
+done < <(echo "$goog_ranges" | jq -r '.prefixes[].ipv4Prefix // empty' | aggregate -q)
+
+# Resolve and add other allowed domains. Anything Google-served is handled by
+# the goog.json block above — don't add it here, or you'll re-introduce the
+# stale-A-record problem.
 for domain in \
     "registry.npmjs.org" \
     "api.anthropic.com" \
@@ -72,14 +103,7 @@ for domain in \
     "update.code.visualstudio.com" \
     "w3.org" \
     "playwright.download.prss.microsoft.com" \
-    "golang.org" \
-    "proxy.golang.org" \
-    "gopkg.in" \
-    "go.googlesource.com" \
-    "go.dev" \
-    "pkg.go.dev" \
-    "dl.google.com" \
-    "storage.googleapis.com"; do
+    "gopkg.in"; do
     echo "Resolving $domain..."
     ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
     if [ -z "$ips" ]; then
@@ -141,4 +165,16 @@ if ! curl --connect-timeout 5 https://api.github.com/zen >/dev/null 2>&1; then
     exit 1
 else
     echo "Firewall verification passed - able to reach https://api.github.com as expected"
+fi
+
+# Verify Google module-proxy access. This is the canary for the goog.json
+# block — if Google's published CIDR list ever stops covering proxy.golang.org
+# (or our fetch of the list silently produced an empty set), Go builds will
+# break in subtle ways. Failing here makes that breakage visible at container
+# startup instead of mid-build.
+if ! curl --connect-timeout 5 -o /dev/null https://proxy.golang.org/ >/dev/null 2>&1; then
+    echo "ERROR: Firewall verification failed - unable to reach https://proxy.golang.org"
+    exit 1
+else
+    echo "Firewall verification passed - able to reach https://proxy.golang.org as expected"
 fi
