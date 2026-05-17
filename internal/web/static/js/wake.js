@@ -76,7 +76,19 @@ function stopPollLoop() {
 async function pollOnce() {
   if (document.visibilityState !== "visible") return;
   if (wakeInProgress) return;
-  if (await pingOk()) return;
+  if (await pingOk()) {
+    // Backend is healthy. If a previous wake attempt left the pill in the
+    // failed state (timed out before the backend came back on its own —
+    // e.g. user manually started a devcontainer that resurrected WSL),
+    // the pill would otherwise stay stuck until a manual reload. Clear it
+    // and refresh so the page reflects live state.
+    if (chip.classList.contains("failed") || chip.classList.contains("active")) {
+      console.info("wake: backend recovered without explicit wake; reloading");
+      hideChip();
+      window.location.reload();
+    }
+    return;
+  }
   await runWake();
 }
 
@@ -101,8 +113,24 @@ async function runWake() {
   // read the response — wake-proxy will accept it and forward to PC, which
   // returns a JSON name response. Whether we can read it doesn't matter;
   // success is observed by /api/version coming back online.
+  //
+  // referrerPolicy is set explicitly to override whatever the document
+  // inherited. Background: with `Referrer-Policy: no-referrer` on the
+  // page (we hit this once via the security middleware default, also
+  // possible via a stale SW-cached shell), browsers map it to
+  // `Origin: null` on cross-origin POSTs per the Fetch spec — observed
+  // in both Firefox and Chromium. wake-proxy then rejects as bad-origin
+  // and the wake silently fails. Pinning the request's policy here
+  // makes the wake fetch resilient to any future page-level policy
+  // change — only this fetch's policy matters for the Origin header on
+  // this request.
   try {
-    await fetch(wakeURL, { method: "POST", mode: "no-cors", cache: "no-store" });
+    await fetch(wakeURL, {
+      method: "POST",
+      mode: "no-cors",
+      cache: "no-store",
+      referrerPolicy: "strict-origin-when-cross-origin",
+    });
   } catch (err) {
     // network-level failure — could be wake-proxy itself down. The poll
     // loop below will surface the failed state if it doesn't recover.
