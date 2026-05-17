@@ -100,7 +100,7 @@ func TestStatusFamilyMismatchIsDrifted(t *testing.T) {
 	}
 }
 
-func TestStatusFamilyAutoMatchesEither(t *testing.T) {
+func TestStatusFamilyAutoConnectAddrMismatchIsDrifted(t *testing.T) {
 	b := validBridge()
 	b.Listen.Port = 9090
 	b.Connect.Port = 9090
@@ -109,6 +109,28 @@ func TestStatusFamilyAutoMatchesEither(t *testing.T) {
 	// connect addr is 127.0.0.1 in our bridge but the entry has ::1 — drifted, not active.
 	if got := b.Status(entries, "172.18.0.1"); got != StateDrifted {
 		t.Errorf("expected drifted (connect addr differs), got %s", got)
+	}
+}
+
+// FamilyAuto used to accept either v4tov4 or v4tov6 in the netsh state. After
+// the auto→v4tov4 default change, a v4tov6 entry on disk for a family=auto
+// bridge is treated as drift so apply can reconcile it. This test pins that
+// behavior by constructing a netsh entry whose connect address matches the
+// declared bridge exactly, with the only difference being the proxy type.
+func TestStatusFamilyAutoRejectsV4tov6Entry(t *testing.T) {
+	// Synthesize a netsh fixture whose entry exactly matches the bridge's
+	// listen+connect but with proxy type v4tov6.
+	customNetsh := `
+Listen on ipv4:             Connect to ipv6:
+
+Address         Port        Address         Port
+--------------- ----------  --------------- ----------
+172.18.0.1      3350        127.0.0.1       3350
+`
+	b := validBridge() // listen ${wsl-host-ip}:3350, connect 127.0.0.1:3350, family auto
+	entries := ParsePortproxyShow(customNetsh)
+	if got := b.Status(entries, "172.18.0.1"); got != StateDrifted {
+		t.Errorf("family=auto with v4tov6 entry should be drifted (apply will reconcile to v4tov4); got %s", got)
 	}
 }
 

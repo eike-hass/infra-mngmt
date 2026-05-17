@@ -170,16 +170,16 @@ func (b *Bridge) ComparePortproxy(e PortproxyEntry, wslHostIP string) (active, d
 		return false, true
 	}
 	switch b.Connect.Family {
-	case FamilyV4:
-		if e.ProxyType != "v4tov4" {
-			return false, true
-		}
 	case FamilyV6:
 		if e.ProxyType != "v4tov6" {
 			return false, true
 		}
-	case FamilyAuto, "":
-		if e.ProxyType != "v4tov4" && e.ProxyType != "v4tov6" {
+	default:
+		// FamilyV4, FamilyAuto, and empty all expect v4tov4 — apply.go
+		// emits v4tov4 for any of those, so a v4tov6 entry on disk is
+		// drift that needs reconciliation (e.g. a leftover from before
+		// the auto→v4tov4 default change).
+		if e.ProxyType != "v4tov4" {
 			return false, true
 		}
 	}

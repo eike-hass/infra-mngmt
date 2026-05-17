@@ -108,7 +108,7 @@ Field rules:
 - `tier` — `wsl` (socat) or `windows` (portproxy+firewall). `container:*` reserved for future use.
 - `${wsl-host-ip}` (Windows-tier listen): resolved at apply time via `Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*)'` and baked into the netsh rule.
 - `${windows-host-ip}` (WSL-tier connect): rendered as an inline bash backtick subshell (` `` /usr/sbin/ip route | awk '/^default/ {print $3}' `` `) embedded in the socat command. Bash re-evaluates it every time the bridge process is (re)launched — covers `wsl --shutdown` IP renumbering, PC restarts, and `bridges apply`-triggered reloads. Backticks are invisible to process-compose's envsubst preprocessor so they pass through untouched.
-- `connect.family` — `auto` probes the listening side at apply time and picks `v4tov4` or `v4tov6`. Override to `v4` / `v6` only when you need a specific path.
+- `connect.family` — `auto` (the default) and `v4` both emit `v4tov4` portproxy rules. Set `v6` only when the connect target is genuinely IPv6-only (use an IPv6 connect address like `::1` in the same entry); a service bound to `::` accepts IPv4 fine through dual-stack and should stay on `v4tov4`.
 - `firewall.remote` — CIDR allowed to reach the listener (typically the WSL2 NAT range, `172.18.0.0/16` on stock setups).
 - The applier restarts `iphlpsvc` after each Windows-tier batch to flush the kernel listener cache.
 

@@ -43,13 +43,19 @@ test:
 test-cover:
 	$(GO) test -cover $(PKG)
 
+# gofmt has no native ignore-list — walk the tree ourselves and skip vendored
+# third-party clones under external/ (e.g. the process-compose upstream fork
+# kept here for bug-fix verification; its files are governed by upstream
+# style, not ours).
+GOFMT_FILES := $(shell find . -name '*.go' -not -path './external/*' -not -path './vendor/*')
+
 ## fmt: rewrite all Go files with gofmt
 fmt:
-	gofmt -w .
+	@gofmt -w $(GOFMT_FILES)
 
 ## fmt-check: fail if any Go file needs reformatting (CI/pre-commit gate)
 fmt-check:
-	@unformatted=$$(gofmt -l .); \
+	@unformatted=$$(gofmt -l $(GOFMT_FILES)); \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt: the following files need formatting:"; \
 		echo "$$unformatted"; \

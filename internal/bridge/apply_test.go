@@ -28,13 +28,13 @@ func TestPowerShellApplyAddsPortproxyAndFirewall(t *testing.T) {
 	got := PowerShellApply([]Bridge{validBridge()})
 
 	mustContain := []string{
-		// Stale-rule cleanup for both proxy types
+		// Stale-rule cleanup for both proxy types (handles migration off a
+		// previously-emitted v4tov6 entry).
 		"netsh interface portproxy delete v4tov4 listenaddress=$wslIp listenport=3350",
 		"netsh interface portproxy delete v4tov6 listenaddress=$wslIp listenport=3350",
-		// Family=auto produces a runtime probe, not a hardcoded proxy type
-		"Get-NetTCPConnection -LocalPort 3350",
+		// Family=auto now deterministically emits v4tov4 — no runtime
+		// IPv6-listener probe, no v4tov6 add.
 		"netsh interface portproxy add v4tov4 listenaddress=$wslIp listenport=3350 connectaddress=127.0.0.1 connectport=3350",
-		"netsh interface portproxy add v4tov6 listenaddress=$wslIp listenport=3350 connectaddress=127.0.0.1 connectport=3350",
 		// Firewall rule delete + recreate
 		"Remove-NetFirewallRule -DisplayName 'Producer Pal MCP'",
 		"New-NetFirewallRule -DisplayName 'Producer Pal MCP'",
@@ -57,17 +57,27 @@ func TestPowerShellApplyAddsPortproxyAndFirewall(t *testing.T) {
 			t.Errorf("script missing %q\nfull script:\n%s", want, got)
 		}
 	}
+	// Auto-detect is gone: no runtime IPv6 probe, no conditional v4tov6 add.
+	for _, mustNot := range []string{
+		"Get-NetTCPConnection",
+		"netsh interface portproxy add v4tov6",
+	} {
+		if strings.Contains(got, mustNot) {
+			t.Errorf("auto-detect should be removed; script still contains %q\nfull script:\n%s", mustNot, got)
+		}
+	}
 }
 
-func TestPowerShellApplyFamilyV4SkipsAutoProbe(t *testing.T) {
+func TestPowerShellApplyFamilyV4(t *testing.T) {
 	b := validBridge()
 	b.Connect.Family = FamilyV4
 	got := PowerShellApply([]Bridge{b})
-	if strings.Contains(got, "Get-NetTCPConnection") {
-		t.Errorf("explicit family=v4 should not emit auto-probe; got:\n%s", got)
-	}
 	if !strings.Contains(got, "netsh interface portproxy add v4tov4 listenaddress=$wslIp") {
-		t.Errorf("should add v4tov4 directly")
+		t.Errorf("explicit family=v4 should add v4tov4 directly; got:\n%s", got)
+	}
+	if strings.Contains(got, "v4tov6") && !strings.Contains(got, "portproxy delete v4tov6") {
+		// The delete-v4tov6 cleanup line is allowed; an add-v4tov6 line is not.
+		t.Errorf("family=v4 must not emit v4tov6 add; got:\n%s", got)
 	}
 }
 
@@ -76,9 +86,6 @@ func TestPowerShellApplyFamilyV6(t *testing.T) {
 	b.Connect.Family = FamilyV6
 	b.Connect.Addr = "::1"
 	got := PowerShellApply([]Bridge{b})
-	if strings.Contains(got, "Get-NetTCPConnection") {
-		t.Errorf("explicit family=v6 should not emit auto-probe")
-	}
 	if !strings.Contains(got, "netsh interface portproxy add v4tov6 listenaddress=$wslIp listenport=3350 connectaddress=::1") {
 		t.Errorf("v6 connect address not used in add line; got:\n%s", got)
 	}

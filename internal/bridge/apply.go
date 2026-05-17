@@ -36,8 +36,17 @@ func (a Action) String() string {
 // computing $wslIp itself — the caller doesn't need to know the IP ahead of
 // time.
 //
-// Behavior mirrors the bash script: clean stale rules, add fresh ones,
-// recreate the firewall rule, restart iphlpsvc to flush the listener cache.
+// Behavior: clean stale rules, add fresh ones, recreate the firewall rule,
+// restart iphlpsvc to flush the listener cache. The portproxy family is
+// derived from the bridge's declared `connect.family` — `auto` (the default)
+// and `v4` both emit `v4tov4`; `v6` emits `v4tov6`. We deliberately do not
+// auto-detect the listening side at apply time: a service bound to `::`
+// (dual-stack, the Windows default) accepts IPv4 connections fine via
+// IPv4-mapped IPv6, and emitting `v4tov6` against an IPv4 connect literal
+// like 127.0.0.1 leaves iphlpsvc unable to install the listener (rule
+// registers in netsh but no socket is ever bound — see Producer Pal incident).
+// Users with a genuinely IPv6-only target should set `family: v6` and an
+// IPv6 connect address explicitly.
 func PowerShellApply(bridges []Bridge) string {
 	if len(bridges) == 0 {
 		return ""
@@ -85,16 +94,8 @@ func writePortproxyApply(b *strings.Builder, br *Bridge) {
 	fmt.Fprintf(b, "# bridge %s\n", br.Name)
 	fmt.Fprintf(b, "netsh interface portproxy delete v4tov4 listenaddress=%s listenport=%d 2>$null | Out-Null\n", listen, br.Listen.Port)
 	fmt.Fprintf(b, "netsh interface portproxy delete v4tov6 listenaddress=%s listenport=%d 2>$null | Out-Null\n", listen, br.Listen.Port)
-
-	if proxyType == "auto" {
-		fmt.Fprintf(b, "$ipv6 = Get-NetTCPConnection -LocalPort %d -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq '::1' -or $_.LocalAddress -eq '::' }\n", br.Connect.Port)
-		fmt.Fprintf(b, "if ($ipv6) {\n  netsh interface portproxy add v4tov6 listenaddress=%s listenport=%d connectaddress=%s connectport=%d | Out-Null\n} else {\n  netsh interface portproxy add v4tov4 listenaddress=%s listenport=%d connectaddress=%s connectport=%d | Out-Null\n}\n",
-			listen, br.Listen.Port, connect, br.Connect.Port,
-			listen, br.Listen.Port, connect, br.Connect.Port)
-	} else {
-		fmt.Fprintf(b, "netsh interface portproxy add %s listenaddress=%s listenport=%d connectaddress=%s connectport=%d | Out-Null\n",
-			proxyType, listen, br.Listen.Port, connect, br.Connect.Port)
-	}
+	fmt.Fprintf(b, "netsh interface portproxy add %s listenaddress=%s listenport=%d connectaddress=%s connectport=%d | Out-Null\n",
+		proxyType, listen, br.Listen.Port, connect, br.Connect.Port)
 
 	fmt.Fprintf(b, "Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue | Out-Null\n", rule)
 	fmt.Fprintf(b, "New-NetFirewallRule -DisplayName '%s' -Direction Inbound -Protocol TCP -LocalPort %d -LocalAddress %s -RemoteAddress '%s' -Action Allow | Out-Null\n",
@@ -134,12 +135,14 @@ func psListenAddr(br *Bridge) string {
 
 func familyToProxyType(f Family) string {
 	switch f {
-	case FamilyV4:
-		return "v4tov4"
 	case FamilyV6:
 		return "v4tov6"
 	default:
-		return "auto"
+		// FamilyAuto, FamilyV4, and empty all map to v4tov4. See PowerShellApply
+		// for the reasoning — auto used to runtime-probe and pick v4tov6 when
+		// the listener was on `::`/`::1`, but that produced broken rules whose
+		// connectaddress remained an IPv4 literal.
+		return "v4tov4"
 	}
 }
 
