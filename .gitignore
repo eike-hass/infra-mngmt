@@ -1,8 +1,16 @@
 dist/
 .mcp.json
 
-# Ignore .claude by default but check in shared, project-scoped skills.
+# Design handoff drops are ephemeral — extracted somewhere convenient (e.g.
+# /tmp/handoff or external/handoff/) for `make proto` to serve, then thrown
+# away once the iteration ships. Not part of the repo history.
+*-handoff.zip
+external/handoff/
+
+# Ignore .claude by default but check in shared, project-scoped skills + agents.
 .claude/*
 !.claude/skills/
+!.claude/agents/
 .claude/skills/*
 !.claude/skills/infra-mngmt-config/
+!.claude/skills/infra-mngmt-design-iteration/

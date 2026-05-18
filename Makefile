@@ -21,7 +21,16 @@ LDFLAGS := -X main.buildEpoch=$(BUILD_EPOCH)
 # of `make build` because the artifact is Windows-only.
 WAKE_PROXY_OUT ?= /windows-config/wake-proxy.exe
 
-.PHONY: build build-wake-proxy test test-cover fmt fmt-check vet lint check tidy clean run
+.PHONY: build build-wake-proxy test test-cover fmt fmt-check vet lint check tidy clean run proto
+
+# Where the design-iteration prototype lives. Handoff drops are gitignored
+# (see .gitignore — *-handoff.zip and external/handoff/ are excluded) but
+# unzipping into the bind-mounted /workspace tree means the files survive
+# devcontainer restarts; /tmp would not. Override on the command line if
+# you've extracted somewhere else:
+#   make proto PROTO_DIR=/somewhere/else/project
+PROTO_DIR  ?= external/handoff/infra-mngmt/project
+PROTO_PORT ?= 7843
 
 ## build: compile the server binary into dist/
 build:
@@ -90,6 +99,17 @@ tidy:
 ##                    `make build` only compiles ./cmd/infra-mngmt.
 vendor-codemirror:
 	$(GO) run ./cmd/vendor-codemirror
+
+## proto: serve a Design handoff prototype so ident-browser can render it
+##        alongside the live app. Foreground; Ctrl-C to stop (or background
+##        with `make proto &`). Override the path:
+##          make proto PROTO_DIR=/tmp/handoff/infra-mngmt/project
+##        Reachable from ident-browser at http://172.17.0.1:$(PROTO_PORT)/
+##        via the appPort publish in .devcontainer/devcontainer.json.
+proto:
+	@test -d "$(PROTO_DIR)" || { echo "no prototype at $(PROTO_DIR) — extract the handoff there or set PROTO_DIR=<path>"; exit 1; }
+	@echo "serving $(PROTO_DIR) at http://172.17.0.1:$(PROTO_PORT)/index.html"
+	@cd "$(PROTO_DIR)" && python3 -m http.server $(PROTO_PORT) --bind 0.0.0.0
 
 ## clean: remove build artifacts and lint cache
 clean:

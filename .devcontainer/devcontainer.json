@@ -10,6 +10,15 @@
     }
   },
   "runArgs": ["--cap-add=NET_ADMIN", "--cap-add=NET_RAW"],
+  // Publish the design-iteration proto-server up to the WSL host so
+  // ident-browser can reach it the same way it reaches the live
+  // infra-mngmt (via the docker bridge gateway at 172.17.0.1). Bare
+  // "host:container" form publishes on 0.0.0.0 on the host — required
+  // because ident-browser only has a route to 172.17.0.1, not the host's
+  // 127.0.0.1. The WSL distro's firewall (init-firewall.sh + Windows
+  // host firewall) keeps the surface internal to WSL. Container bind
+  // must be 0.0.0.0:7843 inside the container — see `make proto`.
+  "appPort": ["7843:7843"],
   "customizations": {
     "vscode": {
       "extensions": [
