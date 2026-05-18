@@ -754,10 +754,11 @@ type servicesPageData struct {
 // dedicated vaults section. The actual allowlist + tree content is loaded
 // lazily by HTMX from /partials/vault/panel and preserved across polls.
 type vaultCardView struct {
-	Name        string
-	Description string
-	State       string // mirrored from the container's State
-	StateClass  string // CSS class for the status pill
+	Name         string
+	Description  string
+	State        string // mirrored from the container's State
+	StateClass   string // CSS class for the status pill
+	AllowedCount int    // number of allowed paths; -1 when unknown (vault unreachable)
 }
 
 // dockerHealthView drives the LED in the containers panel header. Configured

@@ -314,28 +314,31 @@ func runningContainerCount(cs []containerView) int {
 }
 
 var tmplFuncs = template.FuncMap{
-	"kindIcon":              kindIcon,
-	"formatMem":             formatMem,
-	"statusClass":           statusClass,
-	"healthClass":           healthClass,
-	"cpuBarWidth":           cpuBarWidth,
-	"cpuBarClass":           cpuBarClass,
-	"memBarWidth":           memBarWidth,
-	"runningCount":          runningCount,
-	"activeBridgeCount":     activeBridgeCount,
-	"runningContainerCount": runningContainerCount,
-	"canStop":               canStop,
-	"canStart":              canStart,
-	"isInternalProcess":     IsInternalProcess,
-	"pctClass":              pctClass,
-	"pctWidth":              pctWidth,
-	"formatTokensPerSec":    formatTokensPerSec,
-	"formatCount":           formatCount,
-	"slotProgress":          slotProgress,
-	"add":                   addInts,
-	"statusHelp":            statusHelp,
-	"exitCodeHelp":          exitCodeHelp,
-	"entityLevel":           func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
+	"kindIcon":               kindIcon,
+	"formatMem":              formatMem,
+	"statusClass":            statusClass,
+	"healthClass":            healthClass,
+	"cpuBarWidth":            cpuBarWidth,
+	"cpuBarClass":            cpuBarClass,
+	"memBarWidth":            memBarWidth,
+	"runningCount":           runningCount,
+	"activeBridgeCount":      activeBridgeCount,
+	"runningContainerCount":  runningContainerCount,
+	"canStop":                canStop,
+	"canStart":               canStart,
+	"isInternalProcess":      IsInternalProcess,
+	"pctClass":               pctClass,
+	"pctWidth":               pctWidth,
+	"formatTokensPerSec":     formatTokensPerSec,
+	"formatCount":            formatCount,
+	"slotProgress":           slotProgress,
+	"busySlotCount":          busySlotCount,
+	"llamaServerRollup":      llamaServerRollup,
+	"llamaModelsByLoadState": llamaModelsByLoadState,
+	"add":                    addInts,
+	"statusHelp":             statusHelp,
+	"exitCodeHelp":           exitCodeHelp,
+	"entityLevel":            func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
 	"entityLevelShort": func(e entity.Entity) string {
 		switch sourceLevel(e.Source, e.Scope.Global) {
 		case "global":
@@ -1407,7 +1410,7 @@ func (s *Server) handleServicesPartial(w http.ResponseWriter, r *http.Request) {
 		Containers:         containers,
 		ContainerProjects:  projects,
 		OpenDesignProjects: openDesigns,
-		Vaults:             buildVaultCardViews(containers),
+		Vaults:             s.buildVaultCardViews(r.Context(), containers),
 		Docker:             s.dockerHealth(r.Context()),
 	}
 	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
@@ -1417,19 +1420,32 @@ func (s *Server) handleServicesPartial(w http.ResponseWriter, r *http.Request) {
 
 // buildVaultCardViews extracts vault-specific cards from the container
 // view list. Reusing the polled container snapshot avoids a second Docker
-// round-trip per services-partial fetch.
-func buildVaultCardViews(containers []containerView) []vaultCardView {
+// round-trip per services-partial fetch. The allowed-path count is fetched
+// from the vault control plane; when the vault is unreachable the count is
+// set to -1 so the template can render a distinct "unknown" state.
+func (s *Server) buildVaultCardViews(ctx context.Context, containers []containerView) []vaultCardView {
 	var out []vaultCardView
 	for _, c := range containers {
 		if c.Kind != "mcp-fs" {
 			continue
 		}
-		out = append(out, vaultCardView{
-			Name:        c.Name,
-			Description: c.Description,
-			State:       c.State,
-			StateClass:  c.StateClass,
-		})
+		card := vaultCardView{
+			Name:         c.Name,
+			Description:  c.Description,
+			State:        c.State,
+			StateClass:   c.StateClass,
+			AllowedCount: -1, // unknown until fetched
+		}
+		if d := s.vaultDecl(c.Name); d != nil {
+			client := s.newVaultClient(d)
+			fetchCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			al, err := client.GetAllowlist(fetchCtx)
+			cancel()
+			if err == nil {
+				card.AllowedCount = len(al.Allowed)
+			}
+		}
+		out = append(out, card)
 	}
 	return out
 }

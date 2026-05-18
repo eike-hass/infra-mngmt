@@ -7,7 +7,7 @@
 {{if .Bridges}}
 <div class="svc-instance bridges">
   <div class="svc-header">
-    <span class="svc-icon" title="network bridges">⇆</span>
+    <span class="svc-icon" title="network bridges">⇄</span>
     <span class="svc-name">network bridges</span>
     <span class="svc-endpoint">portproxy + firewall · persistent state</span>
     <div class="svc-actions">
@@ -32,29 +32,29 @@
     {{range .Bridges}}
     {{if eq .Kind "composite"}}
     <tr class="bridge-composite" data-composite="{{.Name}}">
-      <td class="col-name">
-        <span class="bridge-disclosure">▸</span>
-        <span class="proc-name">{{.Name}}</span>
-        {{if .Description}}<div class="proc-ns">{{.Description}}</div>{{end}}
-      </td>
-      <td>composite</td>
-      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
-      <td class="bridge-composite-summary" colspan="2">{{len .Members}} member{{if ne (len .Members) 1}}s{{end}}</td>
-      <td class="col-actions">
-        <div class="proc-actions">
-          <button class="proc-btn start"
-                  hx-post="/bridge/apply?name={{.Name}}"
-                  hx-target="#services-inner" hx-swap="outerHTML"
-                  title="bring composite to active state; skips UAC if Windows portproxy is already in place">apply</button>
-          <button class="proc-btn restart"
-                  hx-post="/bridge/pause?name={{.Name}}"
-                  hx-target="#services-inner" hx-swap="outerHTML"
-                  title="pause: stop WSL relay + remove Windows portproxy. Smart-skips elevation if Windows side is already inactive; otherwise UAC."
-                  hx-confirm="Pause composite {{.Name}}? Removing the Windows portproxy will request elevation if the rule is currently in place.">pause</button>
-          <button class="proc-btn stop"
-                  hx-post="/bridge/reset?name={{.Name}}"
-                  hx-target="#services-inner" hx-swap="outerHTML"
-                  hx-confirm="Reset composite {{.Name}}? This removes the netsh + firewall rules and will request elevation.">reset</button>
+      <td colspan="6" class="bridge-composite-cell">
+        <div class="bridge-composite-row">
+          <span class="bridge-disclosure">▸</span>
+          <span class="proc-name">{{.Name}}</span>
+          <span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span>
+          <span class="bridge-composite-hops">{{len .Members}} hop{{if ne (len .Members) 1}}s{{end}}</span>
+          <span class="kicker bridge-composite-kicker">composite</span>
+          {{if .Description}}<span class="bridge-composite-desc">{{.Description}}</span>{{end}}
+          <div class="proc-actions bridge-composite-actions">
+            <button class="proc-btn start"
+                    hx-post="/bridge/apply?name={{.Name}}"
+                    hx-target="#services-inner" hx-swap="outerHTML"
+                    title="bring composite to active state; skips UAC if Windows portproxy is already in place">apply</button>
+            <button class="proc-btn restart"
+                    hx-post="/bridge/pause?name={{.Name}}"
+                    hx-target="#services-inner" hx-swap="outerHTML"
+                    title="pause: stop WSL relay + remove Windows portproxy. Smart-skips elevation if Windows side is already inactive; otherwise UAC."
+                    hx-confirm="Pause composite {{.Name}}? Removing the Windows portproxy will request elevation if the rule is currently in place.">pause</button>
+            <button class="proc-btn stop"
+                    hx-post="/bridge/reset?name={{.Name}}"
+                    hx-target="#services-inner" hx-swap="outerHTML"
+                    hx-confirm="Reset composite {{.Name}}? This removes the netsh + firewall rules and will request elevation.">reset</button>
+          </div>
         </div>
       </td>
     </tr>
@@ -62,11 +62,11 @@
     {{range .Members}}
     <tr class="bridge-member" data-member-of="{{$parentName}}" hidden>
       <td class="col-name bridge-member-name">
-        <span class="bridge-member-indent">└─</span>
+        <span class="bridge-member-indent">└</span>
         <span class="proc-name">{{.Name}}</span>
         {{if .DisplayName}}<div class="proc-ns">{{.DisplayName}}</div>{{end}}
       </td>
-      <td>{{.Tier}}</td>
+      <td><span class="tier-badge {{.Tier}}">{{.Tier}}</span></td>
       <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
       <td><code>{{.Listen}}</code></td>
       <td><code>{{.Connect}}</code></td>
@@ -79,7 +79,7 @@
         <div class="proc-name">{{.Name}}</div>
         {{if .DisplayName}}<div class="proc-ns">{{.DisplayName}}</div>{{end}}
       </td>
-      <td>{{.Tier}}</td>
+      <td><span class="tier-badge {{.Tier}}">{{.Tier}}</span></td>
       <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
       <td><code>{{.Listen}}</code></td>
       <td><code>{{.Connect}}</code></td>
@@ -200,7 +200,8 @@
     {{range .Containers}}
     <tr class="project-member">
       <td class="col-name">
-        <div class="proc-name">{{.Name}}</div>
+        <span class="project-member-indent">└</span>
+        <span class="proc-name">{{.Name}}</span>
       </td>
       <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
       <td>{{if .Status}}<code>{{.Status}}</code>{{else}}—{{end}}</td>
@@ -266,27 +267,39 @@
      the pill, leaving the surrounding card untouched. */}}
 <div class="svc-instance vaults" id="vaults-section" hx-preserve>
   <div class="svc-header">
-    <span class="svc-icon" title="filesystem MCP vaults">▣</span>
+    <span class="svc-icon" title="filesystem MCP vaults">⊟</span>
     <span class="svc-name">vaults</span>
     <span class="svc-endpoint">mcp-fs · allowlist gates agent reads</span>
     <div class="svc-actions">
       <span class="svc-running-count">{{len .Vaults}} configured</span>
     </div>
   </div>
-  <div class="vault-cards">
-    {{range .Vaults}}
-    <div class="vault-card">
-      <div class="vault-card-header">
-        <span class="vault-card-name">{{.Name}}</span>
-        {{if .Description}}<span class="vault-card-desc">{{.Description}}</span>{{end}}
-        <span class="status-pill {{.StateClass}}" id="vault-pill-{{.Name}}"><span class="dot"></span>{{.State}}</span>
-      </div>
-      <div id="vault-{{.Name}}-mount"
-           hx-get="/partials/vault/panel?name={{.Name}}"
+  <div class="vault-rows">
+    {{range $i, $v := .Vaults}}
+    <details class="vault-row" {{if eq $i 0}}open{{end}}>
+      <summary class="vault-row-summary parent-row">
+        <span class="vault-row-chev" aria-hidden="true">▾</span>
+        <div class="vault-row-meta">
+          <div class="vault-row-line1">
+            <span class="vault-row-name">{{$v.Name}}</span>
+            <span class="status-pill {{$v.StateClass}}" id="vault-pill-{{$v.Name}}"><span class="dot"></span>{{$v.State}}</span>
+            {{if ge $v.AllowedCount 0}}
+              {{if eq $v.AllowedCount 0}}
+              <span class="vault-allowed-count zero">no allowed paths</span>
+              {{else}}
+              <span class="vault-allowed-count">{{$v.AllowedCount}} allowed path{{if ne $v.AllowedCount 1}}s{{end}}</span>
+              {{end}}
+            {{end}}
+          </div>
+          {{if $v.Description}}<div class="vault-row-desc">{{$v.Description}}</div>{{end}}
+        </div>
+      </summary>
+      <div class="vault-row-body" id="vault-{{$v.Name}}-mount"
+           hx-get="/partials/vault/panel?name={{$v.Name}}"
            hx-trigger="load">
         <div class="vault-loading">loading vault…</div>
       </div>
-    </div>
+    </details>
     {{end}}
   </div>
 </div>
@@ -301,10 +314,10 @@
   <p style="color:var(--text3);font-style:italic">no process-compose instances configured — add them to config.yaml</p>
 {{else}}
 {{range $iv := .Instances}}
-<div class="svc-instance">
+<div class="svc-instance processes" data-instance="{{$iv.Name}}">
   <div class="svc-header">
     <span class="svc-icon" title="process-compose instance">⚙</span>
-    <span class="svc-name">{{$iv.Name}}</span>
+    <span class="svc-name">process-compose · {{$iv.Name}}</span>
     <span class="online-dot {{if $iv.Online}}online{{else}}offline{{end}}"
           title="process-compose {{if $iv.Online}}reachable{{else}}unreachable{{end}}"></span>
     <span class="svc-endpoint">{{$iv.Endpoint}}</span>

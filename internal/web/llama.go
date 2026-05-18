@@ -559,6 +559,85 @@ func formatCount(v float64) string {
 	}
 }
 
+// busySlotCount returns the number of slots whose IsProcessing flag is true.
+// Surfaced as a FuncMap helper so the llama template can render a "N/M busy"
+// summary above the slot grid without recomputing it inline.
+func busySlotCount(slots []llama.Slot) int {
+	n := 0
+	for _, s := range slots {
+		if s.IsProcessing {
+			n++
+		}
+	}
+	return n
+}
+
+// rolledLlamaMetrics is the per-server header rollup: aggregate slot counts
+// across all loaded models, plus prompt/predict throughput taken from the
+// first loaded model that has metrics available. The shape is flat scalars so
+// the template doesn't need conditionals — empty / zero fields render as "—".
+type rolledLlamaMetrics struct {
+	Available     bool
+	HasThroughput bool
+	PromptPerSec  float64
+	PredictPerSec float64
+	TotalSlots    int
+	BusySlots     int
+}
+
+// llamaServerRollup computes the header-summary metrics for one server view.
+// Single-model servers expose .Metrics / .Slots at the top level; router
+// servers expose them per-model — so the rollup folds both shapes into one
+// header strip.
+func llamaServerRollup(s llamaServerView) rolledLlamaMetrics {
+	r := rolledLlamaMetrics{}
+	if s.Router {
+		for _, m := range s.Models {
+			if m.Status != "loaded" {
+				continue
+			}
+			r.Available = true
+			r.TotalSlots += len(m.Slots)
+			r.BusySlots += busySlotCount(m.Slots)
+			if !r.HasThroughput && m.Metrics.Available {
+				r.HasThroughput = true
+				r.PromptPerSec = m.Metrics.PromptTokensPerSec
+				r.PredictPerSec = m.Metrics.PredictedPerSec
+			}
+		}
+	} else {
+		r.Available = s.HasProps
+		r.TotalSlots = len(s.Slots)
+		r.BusySlots = busySlotCount(s.Slots)
+		if s.Metrics.Available {
+			r.HasThroughput = true
+			r.PromptPerSec = s.Metrics.PromptTokensPerSec
+			r.PredictPerSec = s.Metrics.PredictedPerSec
+		}
+	}
+	return r
+}
+
+// llamaModelsByLoadState splits a model list into (loaded, other) for the
+// router-mode template, which renders loaded models with full chrome and
+// non-loaded ones as compact flat rows.
+type llamaModelSplit struct {
+	Loaded []llamaModelView
+	Other  []llamaModelView
+}
+
+func llamaModelsByLoadState(models []llamaModelView) llamaModelSplit {
+	var split llamaModelSplit
+	for _, m := range models {
+		if m.Status == "loaded" {
+			split.Loaded = append(split.Loaded, m)
+		} else {
+			split.Other = append(split.Other, m)
+		}
+	}
+	return split
+}
+
 // slotProgress returns the per-slot progress percent (0..100) given the
 // generation counters from /slots' next_token{}. Returns 0 when no work is
 // scheduled (n_decoded + n_remain == 0) so the bar is empty rather than NaN.

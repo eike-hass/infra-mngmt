@@ -714,12 +714,14 @@ func TestLlamaPageSingleModel(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"wsl / llama-server",
-		"healthy",
+		"llama-server",
+		"wsl",
+		"llama-head-dot running",
 		"/m/llama-7b.gguf",
 		"b3000-abc",
 		"in flight",
-		"slot #0",
+		"slots ",
+		"#0",
 		"60 / 100 tok",
 	} {
 		if !strings.Contains(body, want) {
@@ -774,11 +776,17 @@ func TestLlamaPageRouterMode(t *testing.T) {
 	if !strings.Contains(body, ">router<") {
 		t.Errorf("expected router pill; body: %s", body)
 	}
-	// Both models rendered.
-	for _, want := range []string{"alpha-q4", "beta-q8", "loaded", "unloaded", "failed"} {
+	// Both models rendered. For the failed model, the status badge is suppressed
+	// and replaced by a single combined pill (e.g. "● failed exit 10").
+	for _, want := range []string{"alpha-q4", "beta-q8", "loaded", "failed exit"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered page missing %q\nbody: %s", want, body)
 		}
+	}
+	// Failed model must NOT render a separate status badge ("unloaded") — the
+	// combined pill carries the full signal.
+	if strings.Contains(body, `class="llama-model-status status-unloaded"`) {
+		t.Errorf("failed model should suppress the status-unloaded badge; found redundant badge in body: %s", body)
 	}
 	// Loaded model gets a slot probe with ?model=; failed/unloaded do not.
 	if slotsCalls != 1 {

@@ -38,7 +38,7 @@
     <button class="tab-scroll-btn" data-dir="right">›</button>
   </div>
 
-  <button class="topbar-btn" id="ov-rescan" title="Rescan sources — discover new projects / devcontainers">⤺</button>
+  <button class="topbar-btn" id="ov-rescan" title="Rescan sources — discover new projects / devcontainers">↻</button>
 
   <label class="search-wrap" for="search" title="Search (⌘K)">
     <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
@@ -49,39 +49,52 @@
   </label>
 </header>
 
-<div class="kind-bar" id="kind-bar">
-  <button class="pill active" data-kind="all">all</button>
-  <button class="pill" data-kind="mcp_server"><span class="pill-icon">⬡</span> MCP servers</button>
-  <button class="pill" data-kind="command"><span class="pill-icon">$</span> commands</button>
-  <button class="pill" data-kind="agent"><span class="pill-icon">◉</span> agents</button>
-  <button class="pill" data-kind="skill"><span class="pill-icon">✦</span> skills</button>
-  <button class="pill" data-kind="hook"><span class="pill-icon">↪</span> hooks</button>
-  <button class="pill" data-kind="memory"><span class="pill-icon">▤</span> memory</button>
-  <button class="pill" data-kind="claude_md"><span class="pill-icon">#</span> CLAUDE.md</button>
-  <button class="topbar-btn kind-bar-refresh" id="ov-refresh" title="Refresh entities — re-read all known sources">↻</button>
-</div>
-
-<div id="project-overview" style="display:none">
-  <div class="ov-row" id="ov-row">
-    <span class="ov-name" id="ov-name" style="display:none"></span>
-    <span class="ov-scopes" id="ov-scopes" style="display:none"></span>
-    <span class="ov-sep" id="ov-sep" style="display:none">·</span>
-    <span class="ov-counts" id="ov-counts" style="display:none"></span>
-    <span class="ov-spacer"></span>
-    <div class="ov-ctr" id="ov-ctr"></div>
-    <span class="ov-toggle" id="ov-toggle" style="display:none">▾</span>
+<div id="view-entities" class="card-shell">
+  <div id="project-overview" style="display:none">
+    <div class="ov-row" id="ov-row">
+      <span class="ov-name" id="ov-name" style="display:none"></span>
+      <span class="ov-scopes" id="ov-scopes" style="display:none"></span>
+      <span class="ov-sep" id="ov-sep" style="display:none">·</span>
+      <span class="ov-counts" id="ov-counts" style="display:none"></span>
+      <span class="ov-spacer"></span>
+      <div class="ov-ctr" id="ov-ctr"></div>
+      <span class="ov-toggle" id="ov-toggle" style="display:none">▾</span>
+    </div>
+    <div class="ov-detail" id="ov-detail" style="display:none"></div>
+    <div id="ov-log-panel" style="display:none"></div>
   </div>
-  <div class="ov-detail" id="ov-detail" style="display:none"></div>
-  <div id="ov-log-panel" style="display:none"></div>
-</div>
-
-<div id="view-entities" style="display:flex;flex:1;overflow:hidden">
-  <div class="entity-list" id="entity-list">
-    {{template "entity-list-inner" .}}
-  </div>
-  <div class="preview" id="preview">
-    <p class="preview-hint">← select an entity to preview</p>
-  </div>
+  <main class="entity-pane">
+    <aside class="entity-sidebar" aria-label="entities">
+      <div class="kind-bar" id="kind-bar" role="tablist" aria-label="filter by kind">
+        <button class="pill active" data-kind="all">all</button>
+        <button class="pill" data-kind="mcp_server" title="MCP servers"><span class="pill-icon">⬡</span><span class="pill-label">MCP</span></button>
+        <button class="pill" data-kind="command" title="commands"><span class="pill-icon">$</span><span class="pill-label">commands</span></button>
+        <button class="pill" data-kind="agent" title="agents"><span class="pill-icon">◉</span><span class="pill-label">agents</span></button>
+        <button class="pill" data-kind="skill" title="skills"><span class="pill-icon">✦</span><span class="pill-label">skills</span></button>
+        <button class="pill" data-kind="hook" title="hooks"><span class="pill-icon">↪</span><span class="pill-label">hooks</span></button>
+        <button class="pill" data-kind="memory" title="memory"><span class="pill-icon">▤</span><span class="pill-label">memory</span></button>
+        <button class="pill" data-kind="claude_md" title="CLAUDE.md"><span class="pill-icon">#</span><span class="pill-label">CLAUDE.md</span></button>
+        <button class="topbar-btn kind-bar-refresh" id="ov-refresh" title="Refresh entities — re-read all known sources">↻</button>
+      </div>
+      <div class="entity-list" id="entity-list">
+        {{template "entity-list-inner" .}}
+      </div>
+    </aside>
+    <div class="preview" id="preview">
+      <div class="preview-empty">
+        <div class="preview-empty-icons">
+          <span class="kind-icon mcp_server">⬡</span>
+          <span class="kind-icon command">$</span>
+          <span class="kind-icon agent">◉</span>
+          <span class="kind-icon skill">✦</span>
+          <span class="kind-icon hook">↪</span>
+        </div>
+        <div class="preview-empty-title">select an entity to inspect</div>
+        <div class="preview-empty-hint">click any entity on the left to view its config,<br>source path, runtime status, or open the markdown body for editing.</div>
+        <div class="preview-empty-kbd"><kbd>⌘K</kbd><span>to search</span></div>
+      </div>
+    </div>
+  </main>
 </div>
 
 <div id="view-services"

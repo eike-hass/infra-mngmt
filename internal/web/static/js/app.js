@@ -244,14 +244,43 @@ function updateProjectOverview() {
       s.appendChild(ic); s.appendChild(document.createTextNode(' '+counts[k]));
       countsEl.appendChild(s);
     });
-    document.getElementById('ov-detail').textContent = displayProject;
-    document.getElementById('ov-detail').style.display = ovExpanded ? '' : 'none';
+    const detailEl = document.getElementById('ov-detail');
+    detailEl.innerHTML = '';
+    // Path line
+    const pathLine = document.createElement('div');
+    pathLine.className = 'ov-detail-path';
+    pathLine.textContent = displayProject;
+    detailEl.appendChild(pathLine);
+    // Kind-breakdown chips row
+    if (Object.keys(counts).length > 0) {
+      const chipsRow = document.createElement('div');
+      chipsRow.className = 'ov-detail-chips';
+      ['mcp_server','command','agent','skill','hook','memory','claude_md'].filter(k => counts[k]).forEach(k => {
+        const chip = document.createElement('span');
+        chip.className = 'ov-detail-chip';
+        const ic = document.createElement('span');
+        ic.className = 'kind-icon ' + k;
+        ic.textContent = kindIcons[k] || '·';
+        const lbl = document.createElement('span');
+        lbl.className = 'ov-detail-chip-label';
+        lbl.textContent = k.replace('_', ' ');
+        const cnt = document.createElement('span');
+        cnt.className = 'ov-detail-chip-count';
+        cnt.textContent = counts[k];
+        chip.appendChild(ic);
+        chip.appendChild(lbl);
+        chip.appendChild(cnt);
+        chipsRow.appendChild(chip);
+      });
+      detailEl.appendChild(chipsRow);
+    }
+    detailEl.style.display = ovExpanded ? '' : 'none';
     document.getElementById('ov-toggle').className = 'ov-toggle' + (ovExpanded ? ' open' : '');
   } else {
     document.getElementById('ov-detail').style.display = 'none';
   }
 
-  ov.style.display = 'block';
+  ov.style.display = isAll ? 'none' : 'block';
   // Delegate container rendering to containers.js via window global.
   if (window.refreshControls) window.refreshControls();
 }

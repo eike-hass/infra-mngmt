@@ -82,11 +82,12 @@ func TestHandleVaultPanelRendersAllowedAndTree(t *testing.T) {
 	}
 	body := w.Body.String()
 	for _, want := range []string{
-		"/data/projA",      // allowlist row
-		"projA/", "projB/", // tree entries (rendered name + slash)
-		"hx-post=\"/api/vault/disallow", // remove button
-		"hx-post=\"/api/vault/allow",    // + allow button (for projB which isn't allowed)
-		"vault-tree-allowed",            // projA already allowed → "allowed" pill
+		"/data/projA",                     // allowlist row
+		"vault-tree-name\">projA</span>/", // tree entry projA (wrapped in name span)
+		"vault-tree-name\">projB</span>/", // tree entry projB
+		"hx-post=\"/api/vault/disallow",   // remove button
+		"hx-post=\"/api/vault/allow",      // + allow button (for projB which isn't allowed)
+		"vault-flag-allowed",              // projA already allowed → "allowed" pill
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n--- body ---\n%s", want, body)

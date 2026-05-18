@@ -3,24 +3,28 @@
   {{if .Error}}
     <div class="vault-error">{{.Error}}</div>
   {{end}}
-  <div class="vault-allow-list">
-    <div class="vault-section-label">{{len .Allowed}} allowed path{{if ne (len .Allowed) 1}}s{{end}}</div>
+  <div class="vault-section">
+    <div class="kicker vault-section-label">{{len .Allowed}} allowed path{{if ne (len .Allowed) 1}}s{{end}}</div>
     {{if .Allowed}}
+      <div class="vault-allow-list">
       {{range .Allowed}}
-        <div class="vault-allow-row">
+        <div class="vault-allow-row mono">
+          <span class="vault-flag-allowed">allowed</span>
           <code>{{.}}</code>
+          <span class="vault-allow-spacer"></span>
           <button class="vault-revoke-btn"
                   hx-post="/api/vault/disallow?name={{$.Name}}&path={{.}}"
                   hx-target="#vault-{{$.Name}}-mount"
                   hx-swap="innerHTML">remove</button>
         </div>
       {{end}}
+      </div>
     {{else}}
       <div class="vault-empty">No paths allowed yet — agents can't read anything from this vault.</div>
     {{end}}
   </div>
   <details class="vault-browse">
-    <summary class="vault-browse-summary">Browse + add paths</summary>
+    <summary class="vault-browse-summary kicker">browse + add paths</summary>
     {{if .Tree}}
       {{template "vault-tree" .Tree}}
     {{end}}
@@ -28,29 +32,33 @@
 </div>
 {{define "vault-tree"}}
 <div class="vault-tree" id="vault-tree-{{.Name}}">
-  <div class="vault-tree-row vault-tree-cwd">
-    <code>{{.Path}}</code>
+  <div class="vault-tree-cwd-row mono">
+    <span class="vault-tree-cwd-icon">▸</span>
+    <code class="vault-tree-cwd-path">{{.Path}}</code>
     {{if .ParentPath}}
       <button class="vault-tree-up"
               hx-get="/partials/vault/tree?name={{.Name}}&at={{.ParentPath}}"
-              hx-target="#vault-tree-{{.Name}}" hx-swap="outerHTML">..</button>
+              hx-target="#vault-tree-{{.Name}}" hx-swap="outerHTML"
+              title="up one directory">../</button>
     {{end}}
   </div>
   {{range .Entries}}
-    <div class="vault-tree-row">
+    <div class="vault-tree-row mono">
+      <span class="vault-tree-icon">▸</span>
       <button class="vault-tree-into"
               hx-get="/partials/vault/tree?name={{$.Name}}&at={{.Full}}"
-              hx-target="#vault-tree-{{$.Name}}" hx-swap="outerHTML">{{.Name}}/</button>
+              hx-target="#vault-tree-{{$.Name}}" hx-swap="outerHTML">{{$.Path}}/<span class="vault-tree-name">{{.Name}}</span>/</button>
       {{if .Allowed}}
-        <span class="vault-tree-allowed" title="this path is explicitly listed in the allowlist">allowed</span>
+        <span class="vault-flag-allowed" title="this path is explicitly listed in the allowlist">allowed</span>
       {{else if .CoveredBy}}
         <span class="vault-tree-covered" title="covered transitively by an ancestor; adding explicitly lets you keep this entry if you later remove the ancestor">covered by <code>{{.CoveredBy}}</code></span>
         <button class="vault-tree-allow-btn"
                 hx-post="/api/vault/allow?name={{$.Name}}&path={{.Full}}&at={{$.Path}}"
                 hx-target="#vault-{{$.Name}}-mount"
-                hx-swap="innerHTML">+ allow explicitly</button>
+                hx-swap="innerHTML"
+                title="add an explicit entry — useful if the ancestor gets removed later">allow here</button>
       {{else}}
-        <button class="vault-tree-allow-btn"
+        <button class="vault-tree-allow-btn primary"
                 hx-post="/api/vault/allow?name={{$.Name}}&path={{.Full}}&at={{$.Path}}"
                 hx-target="#vault-{{$.Name}}-mount"
                 hx-swap="innerHTML">+ allow</button>

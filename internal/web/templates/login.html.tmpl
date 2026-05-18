@@ -7,17 +7,26 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0d0d0d;--bg2:#111;--bg3:#181818;--border:#222;--border2:#2a2a2a;--text:#c9c9c9;--text2:#888;--text3:#444;--white:#f0f0f0;--accent:#4a9eff;--red:#e06c6c}
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:ui-monospace,monospace;font-size:12px;display:flex;align-items:center;justify-content:center}
-.card{background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:32px 36px;width:320px}
-.logo{color:var(--white);font-size:14px;font-weight:600;letter-spacing:.04em;margin-bottom:24px}
+:root{
+  --bg:#0c0c0c;--bg2:#141414;--bg3:#1c1c1c;
+  --card-bg:color-mix(in srgb,var(--bg2) 84%,transparent);
+  --border:#252525;--border2:#2e2e2e;
+  --text:#c9c9c9;--text2:#989898;--text3:#5e5e5e;--white:#f0f0f0;
+  --accent:oklch(68% 0.18 200);--red:#e06c6c;
+  --dur-fast:120ms;--ease-out:cubic-bezier(.2,.8,.2,1);
+  --font:ui-monospace,'Cascadia Code','SF Mono',monospace;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;display:flex;align-items:center;justify-content:center}
+.card{background:var(--card-bg);border:1px solid var(--border2);border-radius:6px;padding:32px 36px;width:320px;animation:modalIn 180ms var(--ease-out) both}
+@keyframes modalIn{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
+.logo{color:var(--white);font-size:14px;font-weight:600;letter-spacing:.04em;margin-bottom:24px;display:flex;align-items:center;gap:6px}
 .logo span{color:var(--text3);font-weight:normal}
-label{display:block;color:var(--text2);margin-bottom:6px;font-size:11px}
-input[type=password]{width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:4px;font-family:inherit;font-size:12px;outline:none;margin-bottom:16px}
-input[type=password]:focus{border-color:#444}
-button{width:100%;background:var(--accent);border:none;color:#000;padding:8px;border-radius:4px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
-button:hover{opacity:.88}
-.error{background:#2a1212;border:1px solid #5a1818;color:var(--red);padding:8px 10px;border-radius:4px;margin-bottom:14px;font-size:11px}
+label{display:block;color:var(--text3);margin-bottom:6px;font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+input[type=password]{width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:4px;font-family:inherit;font-size:12px;outline:none;margin-bottom:16px;transition:border-color var(--dur-fast) var(--ease-out)}
+input[type=password]:focus{border-color:var(--accent)}
+button{width:100%;background:color-mix(in srgb,var(--accent) 14%,transparent);border:1px solid var(--accent);color:var(--accent);padding:8px;border-radius:4px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:.04em;transition:background var(--dur-fast) var(--ease-out)}
+button:hover{background:color-mix(in srgb,var(--accent) 22%,transparent)}
+.error{background:color-mix(in srgb,var(--red) 12%,transparent);border:1px solid color-mix(in srgb,var(--red) 40%,var(--border2));color:var(--red);padding:8px 10px;border-radius:4px;margin-bottom:14px;font-size:11px}
 </style>
 </head>
 <body>

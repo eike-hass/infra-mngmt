@@ -157,7 +157,7 @@ func TestServicesTemplateCardIconsAndPidColumn(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		`class="svc-icon" title="network bridges">⇆<`,
+		`class="svc-icon" title="network bridges">⇄<`,
 		`class="svc-icon" title="docker containers">⬢<`,
 		`class="svc-icon" title="process-compose instance">⚙<`,
 		`class="col-pid">pid<`,           // header

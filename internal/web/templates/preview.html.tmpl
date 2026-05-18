@@ -14,7 +14,14 @@
   {{end}}
 {{end}}
 <div class="preview-header">
-  <div class="preview-name">{{$e.Name}}</div>
+  <div class="preview-name-row">
+    <div class="preview-name">{{$e.Name}}</div>
+    <button class="promote-btn"
+            hx-get="/partials/promote-picker?id={{$e.ID}}"
+            hx-target="#promote-slot"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this">promote →</button>
+  </div>
   <div class="preview-meta">
     <span>kind: <span class="meta-kind {{$e.Kind}}">{{$e.Kind}}</span></span>
     <span>level: <span class="meta-level {{entityLevel $e}}">{{entityLevel $e}}</span></span>
@@ -34,13 +41,6 @@
   </div>
   {{end}}
   <div class="preview-path">{{$e.Path}}</div>
-  <div class="preview-toolbar">
-    <button class="promote-btn"
-            hx-get="/partials/promote-picker?id={{$e.ID}}"
-            hx-target="#promote-slot"
-            hx-swap="innerHTML"
-            hx-disabled-elt="this">promote →</button>
-  </div>
   <div id="promote-slot" class="promote-slot"></div>
 </div>
 {{if $c}}
