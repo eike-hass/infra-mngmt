@@ -166,15 +166,86 @@ function applyLlamaLogsOpenFromStorage() {
   });
 }
 
+// ── llama header disclosure (collapse/expand card body) ──
+// Persisted per card key (instance|process) in localStorage.
+const LLAMA_COLLAPSED_KEY = 'im_llama_collapsed';
+
+function readLlamaCollapsedSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(LLAMA_COLLAPSED_KEY) || '[]')); }
+  catch (_) { return new Set(); }
+}
+
+function writeLlamaCollapsedSet(set) {
+  try { localStorage.setItem(LLAMA_COLLAPSED_KEY, JSON.stringify([...set])); } catch (_) {}
+}
+
+function applyLlamaCollapsedFromStorage() {
+  const collapsed = readLlamaCollapsedSet();
+  document.querySelectorAll('.llama-head[role="button"]').forEach(head => {
+    const card = head.closest('.llama-card');
+    const key = (head.getAttribute('aria-controls') || '').replace('llama-body-', '').replace(/-/g, '|');
+    if (card && collapsed.has(key)) {
+      card.classList.add('collapsed');
+      head.setAttribute('aria-expanded', 'false');
+    }
+  });
+}
+
+function toggleLlamaCard(head) {
+  const card = head.closest('.llama-card');
+  if (!card) return;
+  const nowCollapsed = card.classList.toggle('collapsed');
+  head.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+  // Derive key from aria-controls id: "llama-body-{inst}-{proc}" → "inst|proc"
+  // Must match applyLlamaCollapsedFromStorage which also uses replace(/-/g,'|').
+  const bodyId = head.getAttribute('aria-controls') || '';
+  const key = bodyId.replace(/^llama-body-/, '').replace(/-/g, '|');
+  const set = readLlamaCollapsedSet();
+  if (nowCollapsed) set.add(key); else set.delete(key);
+  writeLlamaCollapsedSet(set);
+}
+
+function bindProjectHeaders() {
+  document.querySelectorAll('tr.project-header[data-project]').forEach(hdr => {
+    hdr.addEventListener('click', (e) => {
+      // Don't collapse when clicking action buttons inside the header.
+      if (e.target.closest('button')) return;
+      const proj = hdr.dataset.project;
+      const collapsed = hdr.classList.toggle('collapsed');
+      document.querySelectorAll('tr.project-member[data-project="'+CSS.escape(proj)+'"]')
+        .forEach(m => m.classList.toggle('project-collapsed', collapsed));
+    });
+  });
+}
+
+function bindLlamaDisclosures() {
+  document.querySelectorAll('.llama-head[role="button"]').forEach(head => {
+    head.addEventListener('click', (e) => {
+      // Don't collapse when clicking action buttons inside the header.
+      if (e.target.closest('button')) return;
+      toggleLlamaCard(head);
+    });
+    head.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleLlamaCard(head);
+      }
+    });
+  });
+}
+
 // Re-apply both states whenever htmx swaps in fresh services HTML.
 document.addEventListener('htmx:afterSwap', (e) => {
   if (!e.target) return;
   if (e.target.id === 'services-inner' || e.target.id === 'view-services') {
     applyShowInternalsFromStorage();
     reapplyCompositeExpansion();
+    bindProjectHeaders();
   }
   if (e.target.id === 'view-llama') {
     applyLlamaLogsOpenFromStorage();
+    applyLlamaCollapsedFromStorage();
+    bindLlamaDisclosures();
     // <details> fires 'toggle' on open/close. The event doesn't bubble,
     // so document-level delegation doesn't work — re-bind per element on
     // each HTMX swap. Each swap creates fresh DOM nodes, so prior
@@ -189,6 +260,9 @@ document.addEventListener('DOMContentLoaded', () => {
   applyShowInternalsFromStorage();
   reapplyCompositeExpansion();
   applyLlamaLogsOpenFromStorage();
+  applyLlamaCollapsedFromStorage();
+  bindLlamaDisclosures();
+  bindProjectHeaders();
 });
 
 function toggleKindGroup(headerEl) {
@@ -207,6 +281,7 @@ function toggleKindGroup(headerEl) {
 
 // ── project overview ──
 const kindIcons = {mcp_server:'⬡',command:'$',agent:'◉',skill:'✦',memory:'▤',hook:'↪',claude_md:'#'};
+const kindLabels = {mcp_server:'mcp servers',command:'commands',agent:'agents',skill:'skills',memory:'memory',hook:'hooks',claude_md:'claude.md'};
 let ovExpanded = false;
 let selectedEntityProject = null;
 
@@ -236,14 +311,11 @@ function updateProjectOverview() {
     const scopesEl = document.getElementById('ov-scopes');
     scopesEl.innerHTML = '';
     if (tab) tab.querySelectorAll('.scope-badge').forEach(b => scopesEl.appendChild(b.cloneNode(true)));
+    // Prototype: single total "N entities" / "1 entity" text in the header
+    // row; per-kind breakdown lives only in the expanded panel below.
     const countsEl = document.getElementById('ov-counts');
-    countsEl.innerHTML = '';
-    ['mcp_server','command','agent','skill','hook','memory','claude_md'].filter(k => counts[k]).forEach(k => {
-      const s = document.createElement('span'); s.className = 'ov-count';
-      const ic = document.createElement('span'); ic.className = 'kind-icon '+k; ic.textContent = kindIcons[k]||'·';
-      s.appendChild(ic); s.appendChild(document.createTextNode(' '+counts[k]));
-      countsEl.appendChild(s);
-    });
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    countsEl.textContent = total + ' ' + (total === 1 ? 'entity' : 'entities');
     const detailEl = document.getElementById('ov-detail');
     detailEl.innerHTML = '';
     // Path line
@@ -263,7 +335,7 @@ function updateProjectOverview() {
         ic.textContent = kindIcons[k] || '·';
         const lbl = document.createElement('span');
         lbl.className = 'ov-detail-chip-label';
-        lbl.textContent = k.replace('_', ' ');
+        lbl.textContent = kindLabels[k] || k.replace('_', ' ');
         const cnt = document.createElement('span');
         cnt.className = 'ov-detail-chip-count';
         cnt.textContent = counts[k];
@@ -353,8 +425,7 @@ function showRescanToast(msg, kind) {
 async function doRefresh(e) {
   e.stopPropagation();
   const btn = document.getElementById('ov-refresh');
-  btn.classList.add('spinning');
-  btn.disabled = true;
+  if (btn) { btn.classList.add('spinning'); btn.disabled = true; }
   // Remember which entity was selected so we can re-mark it after the swap.
   const prevSelectedId = document.querySelector('.entity-card.selected')?.dataset.id || null;
   try {
@@ -372,8 +443,7 @@ async function doRefresh(e) {
     applyFilters();
     updateProjectOverview();
   } finally {
-    btn.classList.remove('spinning');
-    btn.disabled = false;
+    if (btn) { btn.classList.remove('spinning'); btn.disabled = false; }
   }
 }
 
@@ -418,17 +488,23 @@ document.addEventListener('keydown', e => {
 });
 
 // ── entity preview ──
-document.getElementById('entity-list').addEventListener('click', e => {
-  const card = e.target.closest('.entity-card');
-  if (!card) return;
+function activateEntityCard(card) {
   document.querySelectorAll('.entity-card.selected').forEach(c=>c.classList.remove('selected'));
   card.classList.add('selected');
+  card.setAttribute('aria-current', 'true');
+  document.querySelectorAll('.entity-card:not(.selected)').forEach(c=>c.removeAttribute('aria-current'));
   selectedEntityProject = card.dataset.project || null;
   window.selectedEntityProject = selectedEntityProject;
   updateProjectOverview();
   document.getElementById('preview').innerHTML = '<div class="preview-loading"><span class="spinner"></span>loading…</div>';
   htmx.ajax('GET', '/partials/entity?id='+encodeURIComponent(card.dataset.id), {target:'#preview',swap:'innerHTML'});
+}
+document.getElementById('entity-list').addEventListener('click', e => {
+  const card = e.target.closest('.entity-card');
+  if (!card) return;
+  activateEntityCard(card);
 });
+// Cards are real <button>s — Space/Enter activate natively, no extra keydown needed.
 
 // ── toast notifications ─────────────────────────────────────────
 // HTMX swallows 4xx/5xx by default (no swap), so without this the user sees
@@ -588,7 +664,7 @@ document.getElementById('vtab-entities').addEventListener('click', () => showVie
 document.getElementById('vtab-llama').addEventListener('click', () => showView('llama'));
 document.getElementById('vtab-services').addEventListener('click', () => showView('services'));
 document.getElementById('ov-rescan').addEventListener('click', e => doRescan(e));
-document.getElementById('ov-refresh').addEventListener('click', e => doRefresh(e));
+document.getElementById('ov-refresh')?.addEventListener('click', e => doRefresh(e));
 document.getElementById('ov-toggle').addEventListener('click', () => toggleOverview());
 for (const btn of document.querySelectorAll('.tab-scroll-btn')) {
   btn.addEventListener('click', () => {

@@ -13,8 +13,15 @@
 {{$split := llamaModelsByLoadState .Models}}
 <article class="llama-card{{if $dead}} dead{{end}}" aria-label="llama server {{.Process}}">
   {{/* ── Header — two-line meta: status + name/instance/router on line 1,
-       endpoint · build on line 2; right side carries the live rollup. ── */}}
-  <div class="llama-head parent-row">
+       endpoint · build on line 2; right side carries the live rollup.
+       Acts as a disclosure toggle — click/Enter/Space collapses the card body. ── */}}
+  <div class="llama-head parent-row"
+       role="button"
+       tabindex="0"
+       aria-expanded="true"
+       aria-controls="llama-body-{{$inst}}-{{$proc}}"
+       title="click to collapse / expand server details">
+    <span class="llama-head-chev">{{chevSVG}}</span>
     <span class="llama-head-dot {{if $dead}}error{{else}}running{{end}}"
           title="{{if $dead}}/health failed: {{.HealthErr}}{{else}}/health → 200{{end}}"></span>
     <div class="llama-head-meta">
@@ -55,7 +62,8 @@
     {{end}}
   </div>
 
-  {{/* ── Body ── */}}
+  {{/* ── Body — wrapped for collapse toggle ── */}}
+  <div class="llama-card-body" id="llama-body-{{$inst}}-{{$proc}}">
   {{if .Router}}
     {{if .ModelsErr}}
     <div class="llama-body llama-body-err">models: {{.ModelsErr}}</div>
@@ -164,6 +172,7 @@
 
   <details class="llama-logs-section" data-llama-logs-key="{{.Instance}}|{{.Process}}">
     <summary title="last 150 lines from the process-compose log buffer for {{.Instance}}/{{.Process}} — refreshes with the panel every 10s. Open/closed state is persisted across panel refreshes via localStorage.">
+      <span class="summary-chev">{{chevSVG}}</span>
       <span class="kicker">recent logs</span>
       <span class="llama-logs-count">· {{len .Logs}}{{if .LogsErr}} · err{{end}}</span>
     </summary>
@@ -177,6 +186,7 @@
     <div class="llama-logs-empty">no log lines yet</div>
     {{end}}
   </details>
+  </div>{{/* end llama-card-body */}}
 </article>
 {{end}}
 </div>
@@ -240,7 +250,7 @@
       {{if .IsProcessing}}
       {{if .Prompt}}
       <details class="llama-slot-prompt" title="raw prompt from /slots[].prompt — exposed because the panel sits behind trusted_networks; tighten down (gate behind config flag, truncate, redact) if that boundary widens">
-        <summary>prompt <span class="muted">({{len .Prompt}} chars)</span></summary>
+        <summary><span class="summary-chev">{{chevSVG}}</span>prompt <span class="muted">({{len .Prompt}} chars)</span></summary>
         <pre>{{.Prompt}}</pre>
       </details>
       {{end}}

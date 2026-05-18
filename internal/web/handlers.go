@@ -385,6 +385,20 @@ var tmplFuncs = template.FuncMap{
 	},
 	"groupEntitiesByKind": groupEntitiesByKind,
 	"static":              staticAssetURL,
+	// cardDelayMs returns the stagger-animation delay in ms for a card index.
+	// Each card is delayed by 15ms * index, capped at 30 cards (450ms total).
+	"cardDelayMs": func(i int) int {
+		if i > 30 {
+			i = 30
+		}
+		return i * 15
+	},
+	// chevSVG renders the shared disclosure-triangle SVG used by every
+	// chevron in the UI. Open state points down (▾); closed state is a
+	// rotate(-90deg) scale(.96) handled in CSS. Path matches app-common.jsx.
+	"chevSVG": func() template.HTML {
+		return template.HTML(`<svg viewBox="0 0 10 10" fill="currentColor" aria-hidden="true"><path d="M2 4 L5 7 L8 4 Z"/></svg>`)
+	},
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

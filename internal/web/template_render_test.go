@@ -136,9 +136,9 @@ func TestIndexTemplateRendersSourceTabsAndBuildChip(t *testing.T) {
 		`~/.claude`,                                 // global tab label
 		`data-project="/home/u/repo"`,               // project tab key
 		`repo<span class="scope-badge project"`,     // project tab label adjoins first level badge
-		`scope-badge global`, `scope-badge project`, // levelShort outputs
+		`scope-badge global`, `scope-badge project`, // scope badge class names
 		`scope-badge devcontainer`,
-		`>glb<`, `>prj<`, `>ctr<`, // levelShort short forms
+		`>global<`, `>project<`, `>devcontainer<`, // full-length level labels in source-tab badges
 		`abc12345`, // build chip commit short SHA
 	} {
 		if !strings.Contains(out, want) {

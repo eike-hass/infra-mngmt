@@ -26,7 +26,7 @@
   </div>
   <table class="process-table">
     <thead><tr>
-      <th class="col-name">bridge</th><th>tier</th><th class="col-state">state</th><th>listen</th><th>connect</th><th class="col-actions"></th>
+      <th class="col-name">name</th><th>tier</th><th class="col-state">state</th><th>listen</th><th>connect</th><th class="col-actions"></th>
     </tr></thead>
     <tbody>
     {{range .Bridges}}
@@ -34,7 +34,7 @@
     <tr class="bridge-composite" data-composite="{{.Name}}">
       <td colspan="6" class="bridge-composite-cell">
         <div class="bridge-composite-row">
-          <span class="bridge-disclosure">▸</span>
+          <span class="bridge-disclosure">{{chevSVG}}</span>
           <span class="proc-name">{{.Name}}</span>
           <span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span>
           <span class="bridge-composite-hops">{{len .Members}} hop{{if ne (len .Members) 1}}s{{end}}</span>
@@ -128,9 +128,63 @@
   </div>
   <table class="process-table">
     <thead><tr>
-      <th class="col-name">container</th><th class="col-state">state</th><th>status</th><th>cpu</th><th>mem</th><th>id</th><th class="col-actions"></th>
+      <th class="col-name">name</th><th class="col-state">state</th><th>status</th><th>cpu</th><th>mem</th><th>id</th><th class="col-actions"></th>
     </tr></thead>
     <tbody>
+    {{/* Compose-project groups first (prototype: app-services-v3.jsx
+         ContainersTable). One header row per ContainerProject with rolled-up
+         state + project lifecycle controls, then one row per service
+         container. Service rows have no per-row action button — the group
+         header owns the lifecycle. */}}
+    {{range .ContainerProjects}}
+    {{$projName := .Name}}
+    <tr class="project-header" data-project="{{.Name}}">
+      <td class="col-name">
+        <div class="proc-name">
+          <span class="project-disclosure">{{chevSVG}}</span>
+          <span class="project-name">{{.Name}}</span>
+          <span class="kicker project-kind-label">compose</span>
+        </div>
+        {{if .Description}}<div class="proc-ns">{{.Description}}</div>{{end}}
+      </td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td colspan="4">{{if .ComposeFile}}<code class="proc-compose-file">{{.ComposeFile}}</code>{{else}}—{{end}}</td>
+      <td class="col-actions">
+        <div class="proc-actions">
+          {{if eq .StateClass "running"}}
+          <button class="proc-btn stop"
+                  hx-post="/decl-container/stop?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">stop</button>
+          {{else}}
+          <button class="proc-btn start"
+                  hx-post="/decl-container/start?name={{.Name}}"
+                  hx-target="#services-inner" hx-swap="outerHTML">start</button>
+          {{end}}
+        </div>
+      </td>
+    </tr>
+    {{range .Containers}}
+    <tr class="project-member" data-project="{{$projName}}">
+      <td class="col-name">
+        <span class="project-member-indent">└</span>
+        <span class="proc-name">{{.Name}}</span>
+      </td>
+      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
+      <td>{{if .Status}}<code>{{.Status}}</code>{{else}}—{{end}}</td>
+      <td>—</td>
+      <td>—</td>
+      <td>{{if .ID}}<code>{{.ID}}</code>{{else}}—{{end}}</td>
+      <td class="col-actions"></td>
+    </tr>
+    {{end}}
+    {{end}}{{/* end range .ContainerProjects */}}
+    {{/* Standalone divider — only when BOTH compose stacks and standalone
+         containers are present (prototype: line 293 in app-services-v3.jsx). */}}
+    {{if and .ContainerProjects .Containers}}
+    <tr class="standalone-divider">
+      <td colspan="7"><span class="kicker">standalone · {{len .Containers}} container{{if ne (len .Containers) 1}}s{{end}}</span></td>
+    </tr>
+    {{end}}
     {{range .Containers}}
     <tr>
       <td class="col-name">
@@ -170,48 +224,7 @@
         </div>
       </td>
     </tr>
-    {{end}}{{/* end range .Containers (flat rows) */}}
-    {{/* Compose-project groups: one header row per ContainerProject with
-         rolled-up state + project lifecycle controls, then one row per
-         service container in that project. Service rows have no per-row
-         action button — the group header owns the lifecycle. */}}
-    {{range .ContainerProjects}}
-    <tr class="project-header" data-project="{{.Name}}">
-      <td class="col-name">
-        <div class="proc-name">{{.Name}} <span class="proc-project-badge">project</span></div>
-        {{if .Description}}<div class="proc-ns">{{.Description}}</div>{{end}}
-      </td>
-      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
-      <td colspan="4">{{if .ComposeFile}}<code class="proc-compose-file">{{.ComposeFile}}</code>{{else}}—{{end}}</td>
-      <td class="col-actions">
-        <div class="proc-actions">
-          {{if eq .StateClass "running"}}
-          <button class="proc-btn stop"
-                  hx-post="/decl-container/stop?name={{.Name}}"
-                  hx-target="#services-inner" hx-swap="outerHTML">stop</button>
-          {{else}}
-          <button class="proc-btn start"
-                  hx-post="/decl-container/start?name={{.Name}}"
-                  hx-target="#services-inner" hx-swap="outerHTML">start</button>
-          {{end}}
-        </div>
-      </td>
-    </tr>
-    {{range .Containers}}
-    <tr class="project-member">
-      <td class="col-name">
-        <span class="project-member-indent">└</span>
-        <span class="proc-name">{{.Name}}</span>
-      </td>
-      <td class="col-state"><span class="status-pill {{.StateClass}}"><span class="dot"></span>{{.State}}</span></td>
-      <td>{{if .Status}}<code>{{.Status}}</code>{{else}}—{{end}}</td>
-      <td>—</td>
-      <td>—</td>
-      <td>{{if .ID}}<code>{{.ID}}</code>{{else}}—{{end}}</td>
-      <td class="col-actions"></td>
-    </tr>
-    {{end}}
-    {{end}}
+    {{end}}{{/* end range .Containers (standalone rows) */}}
     </tbody>
   </table>
 </div>
@@ -278,7 +291,7 @@
     {{range $i, $v := .Vaults}}
     <details class="vault-row" {{if eq $i 0}}open{{end}}>
       <summary class="vault-row-summary parent-row">
-        <span class="vault-row-chev" aria-hidden="true">▾</span>
+        <span class="vault-row-chev" aria-hidden="true">{{chevSVG}}</span>
         <div class="vault-row-meta">
           <div class="vault-row-line1">
             <span class="vault-row-name">{{$v.Name}}</span>
@@ -344,7 +357,7 @@
   {{if $iv.Online}}
   <table class="process-table">
     <thead><tr>
-      <th class="col-name">process</th><th class="col-state">status</th><th class="col-pid">pid</th><th>restarts</th><th>cpu</th><th>mem</th><th>age</th><th class="col-actions"></th>
+      <th class="col-name">name</th><th class="col-state">status</th><th class="col-pid">pid</th><th>restarts</th><th>cpu</th><th>mem</th><th>age</th><th class="col-actions"></th>
     </tr></thead>
     <tbody>
     {{range $iv.Processes}}
@@ -407,8 +420,8 @@
   </table>
   {{else}}
   <div class="svc-offline">
-    <span class="svc-offline-icon">⬡</span>
-    <div class="svc-offline-title">process-compose unreachable</div>
+    <span class="svc-offline-icon">⚠ unreachable</span>
+    <div class="svc-offline-title">process-compose not reachable</div>
     <div class="svc-offline-endpoint">{{$iv.Endpoint}}</div>
     {{if $iv.CanBoot}}
     <button class="svc-boot-btn start"

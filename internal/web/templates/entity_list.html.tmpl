@@ -5,24 +5,25 @@
     <span class="kind-icon {{$group.Kind}}">{{kindIcon $group.Kind}}</span>
     <span class="kind-group-label">{{$group.Label}}</span>
     <span class="kind-group-count">{{len $group.Entities}}</span>
-    <span class="kind-group-chev">▾</span>
+    <span class="kind-group-chev">{{chevSVG}}</span>
   </div>
   <div class="kind-group-items">
-    {{range $group.Entities}}
-    {{$status := index $.MCPStatuses .ID}}
-    <div class="entity-card"
-         data-id="{{.ID}}"
-         data-project="{{.Scope.Project}}"
-         data-kind="{{.Kind}}"
-         data-name="{{.Name}}"
-         data-scope="{{.Scope.Label}}"
-         data-tool="{{entityTool .}}">
+    {{range $i, $e := $group.Entities}}
+    {{$status := index $.MCPStatuses $e.ID}}
+    <button type="button" class="entity-card bare"
+         data-id="{{$e.ID}}"
+         data-project="{{$e.Scope.Project}}"
+         data-kind="{{$e.Kind}}"
+         data-name="{{$e.Name}}"
+         data-scope="{{$e.Scope.Label}}"
+         data-tool="{{entityTool $e}}"
+         style="animation-delay:{{cardDelayMs $i}}ms">
       <span class="kind-icon {{.Kind}}">{{kindIcon .Kind}}</span>
       <span class="entity-name">{{.Name}}</span>
       {{if $status}}<span class="runtime-badge {{$status.State}}" title="{{$status.State}}{{if $status.Process}} · {{$status.Instance}}/{{$status.Process}}{{end}}"></span>{{end}}
       {{$tool := entityTool .}}{{if $tool}}<span class="entity-tool-tag {{$tool}}" title="tool: {{$tool}}">{{toolIcon $tool}}</span>{{end}}
       <span class="entity-scope-tag {{entityLevel .}}" title="{{entityLevel .}}">{{entityLevelShort .}}</span>
-    </div>
+    </button>
     {{end}}
   </div>
 </div>

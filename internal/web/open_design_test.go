@@ -237,9 +237,10 @@ func TestServicesTemplateRendersProjectGroupAndCard(t *testing.T) {
 	for _, want := range []string{
 		// Containers section: project group with header + member rows.
 		`<tr class="project-header" data-project="open-design"`,
-		`proc-project-badge`,
+		`project-disclosure`, // SVG chevron in the disclosure header
+		`project-kind-label">compose`,
 		`/decl-container/stop?name=open-design`, // lifecycle button on header
-		`<tr class="project-member">`,
+		`<tr class="project-member" data-project="open-design"`,
 		// OD card section: slim, no buttons, no per-service pills.
 		`id="open-designs-section"`,
 		`open-design-card-name">open-design`,

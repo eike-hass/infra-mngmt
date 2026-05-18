@@ -18,7 +18,7 @@
   <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" width="28" height="20"><polygon points="8,2 14,2 17,7 14,12 8,12 5,7" fill="var(--accent)" opacity="0.95"/><polygon points="13,8 19,8 22,13 19,18 13,18 10,13" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.55"/></svg></span>
 
   <div class="view-tabs">
-    <button class="view-tab active" id="vtab-entities">entities</button>
+    <button class="view-tab active" id="vtab-entities">config</button>
     <button class="view-tab" id="vtab-llama">llama</button>
     <button class="view-tab" id="vtab-services">services</button>
   </div>
@@ -31,14 +31,14 @@
       <button class="tab active" data-project="__all__">all</button>
       {{range .Sources}}
       <button class="tab" data-project="{{.Key}}">
-        {{.Label}}{{range .Levels}}<span class="scope-badge {{.}}" title="{{.}}">{{levelShort .}}</span>{{end}}
+        {{.Label}}{{range .Levels}}<span class="scope-badge {{.}}" title="{{.}}">{{.}}</span>{{end}}
       </button>
       {{end}}
     </div>
     <button class="tab-scroll-btn" data-dir="right">›</button>
   </div>
 
-  <button class="topbar-btn" id="ov-rescan" title="Rescan sources — discover new projects / devcontainers">↻</button>
+  <button class="topbar-btn topbar-rescan" id="ov-rescan" title="Rescan sources — discover new projects / devcontainers" aria-label="rescan sources"><span class="topbar-rescan-icon" aria-hidden="true">↻</span></button>
 
   <label class="search-wrap" for="search" title="Search (⌘K)">
     <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
@@ -58,7 +58,7 @@
       <span class="ov-counts" id="ov-counts" style="display:none"></span>
       <span class="ov-spacer"></span>
       <div class="ov-ctr" id="ov-ctr"></div>
-      <span class="ov-toggle" id="ov-toggle" style="display:none">▾</span>
+      <span class="ov-toggle" id="ov-toggle" style="display:none">{{chevSVG}}</span>
     </div>
     <div class="ov-detail" id="ov-detail" style="display:none"></div>
     <div id="ov-log-panel" style="display:none"></div>
@@ -74,7 +74,6 @@
         <button class="pill" data-kind="hook" title="hooks"><span class="pill-icon">↪</span><span class="pill-label">hooks</span></button>
         <button class="pill" data-kind="memory" title="memory"><span class="pill-icon">▤</span><span class="pill-label">memory</span></button>
         <button class="pill" data-kind="claude_md" title="CLAUDE.md"><span class="pill-icon">#</span><span class="pill-label">CLAUDE.md</span></button>
-        <button class="topbar-btn kind-bar-refresh" id="ov-refresh" title="Refresh entities — re-read all known sources">↻</button>
       </div>
       <div class="entity-list" id="entity-list">
         {{template "entity-list-inner" .}}
