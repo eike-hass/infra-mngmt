@@ -291,12 +291,11 @@
 {{end}}
 {{end}}
 {{if .Vaults}}
-{{/* The vaults section is hx-preserve'd so the 8s services poll never
-     re-renders the vault chrome (cards, headers, panel mounts). Live
-     status pills are kept fresh via the OOB swap block at the end of
-     this partial — htmx finds each #vault-pill-X by id and patches just
-     the pill, leaving the surrounding card untouched. */}}
-<div class="svc-instance vaults" id="vaults-section" hx-preserve>
+{{/* The vaults section re-renders on every services-panel poll (every 8s),
+     mirroring the llama-view pattern. The body's hx-trigger="load" re-fires
+     each time the row is inserted, polling /partials/vault/panel at the
+     same cadence — fine for a local mcp-fs control plane. */}}
+<div class="svc-instance vaults" id="vaults-section">
   <div class="svc-header">
     <span class="svc-icon" title="filesystem MCP vaults">⊟</span>
     <span class="svc-name">vaults</span>
@@ -334,12 +333,6 @@
     {{end}}
   </div>
 </div>
-{{/* OOB live-pill updates: fresh pill markup keyed by id; htmx applies
-     each as a discrete outerHTML swap on the existing pill inside the
-     preserved section. */}}
-{{range .Vaults}}
-<span class="status-pill {{.StateClass}}" id="vault-pill-{{.Name}}" hx-swap-oob="true"><span class="dot"></span>{{.State}}</span>
-{{end}}
 {{end}}
 {{if not .Instances}}
   <p style="color:var(--text3);font-style:italic">no process-compose instances configured — add them to config.yaml</p>

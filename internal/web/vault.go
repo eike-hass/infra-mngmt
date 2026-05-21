@@ -37,8 +37,13 @@ type vaultPanelView struct {
 	Control     string   // the control-plane URL (for diagnostics, not exposed in UI)
 	Allowed     []string // current allowlist
 	Tree        *vaultTreeView
-	Error       string    // populated when the call to the vault failed
-	FetchedAt   time.Time // for the "as of" hint
+	Error       string // populated when the call to the vault failed
+	// ErrorKind tags the broad category of failure so the template can route
+	// copy. "unreachable" → allowlist fetch failed, vault is effectively down,
+	// render the full centered explainer + retry. "tree" → allowlist worked
+	// but tree fetch failed; small inline banner, allowlist still usable.
+	ErrorKind string
+	FetchedAt time.Time // for the "as of" hint
 }
 
 // vaultTreeView is one rendered tree level. Path is the directory whose
@@ -110,7 +115,8 @@ func (s *Server) loadVaultPanel(ctx context.Context, d *containers.Container, tr
 
 	al, err := c.GetAllowlist(ctx)
 	if err != nil {
-		view.Error = "fetch allowlist: " + err.Error()
+		view.ErrorKind = "unreachable"
+		view.Error = err.Error()
 		return view
 	}
 	view.Allowed = al.Allowed
@@ -118,6 +124,7 @@ func (s *Server) loadVaultPanel(ctx context.Context, d *containers.Container, tr
 	t, err := c.Tree(ctx, treeAt)
 	if err != nil {
 		// Allowlist alone is still useful; show it with a tree-load note.
+		view.ErrorKind = "tree"
 		view.Error = "fetch tree: " + err.Error()
 		return view
 	}

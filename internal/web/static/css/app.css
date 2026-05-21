@@ -589,6 +589,14 @@ body.show-internals tr.proc-internal{display:table-row}
    38px left aligns the body column with the meta column in the summary
    (14px summary pad + 10px chevron + 10px gap + nudge). */
 .vault-row-body,.vault-row > .vault-panel{padding:10px 14px 14px 38px;background:var(--card-bg-2);border-top:1px solid var(--border);font-size:11px}
+/* Unreachable state: HTMX's `hx-trigger="load"` on the body wrapper
+   replaces the wrapper itself with the response (the .vault-panel div sits
+   as a direct child of <details class="vault-row">). The existing
+   `.vault-row > .vault-panel` rule above applies its 10/14/14/38 padding +
+   1px border-top + card-bg-2 background, which leaves a card-bg band and
+   a dark line above the red wash. Override with a more-specific selector
+   so the .svc-unreachable's tint reaches the card edges. */
+.vault-row > .vault-panel.vault-panel-down{padding:0;background:transparent;border-top:none}
 .vault-section{margin-bottom:10px}
 .vault-section-label{margin-bottom:4px}
 .vault-loading{color:var(--text3);font-style:italic;padding:4px 0;font-size:11px}
@@ -893,12 +901,19 @@ tr.project-member .proc-name{color:var(--text2)}
 .ods-refresh-inline{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 8px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;line-height:1}
 .ods-refresh-inline:hover{border-color:var(--accent);color:var(--accent)}
 
-/* OD project-down explainer — centered red-wash treatment when the
-   compose project itself is stopped. Matches the prototype's
-   InstanceUnreachable shape (app-services-v3.jsx:483). */
-.ods-down{display:flex;flex-direction:column;align-items:center;gap:6px;padding:24px 14px;background:rgba(224,108,108,.04)}
-.ods-down-warn{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text)}
-.ods-down-warn-icon{color:var(--red)}
-.ods-down-name{color:var(--white);font-weight:600}
-.ods-down-explain{font-size:10px;color:var(--text3);text-align:center;max-width:440px;line-height:1.5}
-.ods-down-strong{color:var(--text)}
+/* Section-unreachable explainer — matches the prototype's InstanceUnreachable
+   pattern (app-services-v3.jsx:483). Shared by:
+   • OD card project-down state (.ods-down → alias for .svc-unreachable)
+   • Vault sidecar unreachable state
+   Both kinds get the same centered red-wash treatment: warn line + explainer
+   + a follow-on action (jump to containers, retry, etc).
+   The leading ⚠ icon sits inside .svc-unreachable-warn; the explainer text
+   inside .svc-unreachable-explain. */
+.svc-unreachable,.ods-down{display:flex;flex-direction:column;align-items:center;gap:6px;padding:24px 14px;background:rgba(224,108,108,.04)}
+.svc-unreachable-warn,.ods-down-warn{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text)}
+.svc-unreachable-warn-icon,.ods-down-warn-icon{color:var(--red)}
+.svc-unreachable-name,.ods-down-name{color:var(--white);font-weight:600}
+.svc-unreachable-explain,.ods-down-explain{font-size:10px;color:var(--text3);text-align:center;max-width:440px;line-height:1.5}
+.svc-unreachable-strong,.ods-down-strong{color:var(--text)}
+.svc-unreachable-action,.ods-down-jump{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:3px 10px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;margin-top:6px}
+.svc-unreachable-action:hover,.ods-down-jump:hover{border-color:var(--accent);color:var(--accent)}

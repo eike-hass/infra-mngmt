@@ -1,6 +1,24 @@
 
-<div class="vault-panel" id="vault-{{.Name}}-panel">
+<div class="vault-panel{{if eq .ErrorKind "unreachable"}} vault-panel-down{{end}}" id="vault-{{.Name}}-panel">
+  {{if eq .ErrorKind "unreachable"}}
+  {{/* Vault sidecar unreachable — full centered explainer + retry button +
+       a jump to the containers table where the vault's lifecycle lives.
+       Matches the OD card's project-down treatment + prototype's
+       InstanceUnreachable. */}}
+  <div class="svc-unreachable expand-enter">
+    <div class="svc-unreachable-warn">
+      <span class="svc-unreachable-warn-icon" aria-hidden="true">⚠</span>
+      <span>vault <span class="svc-unreachable-name">{{.Name}}</span> isn't reachable</span>
+    </div>
+    <div class="svc-unreachable-explain">
+      the mcp-fs control plane didn't respond — allowlist + tree can't be read until it's back. lifecycle for this vault's container lives in the <span class="svc-unreachable-strong">containers</span> table above. the services panel polls every 8s; this card refreshes once it's reachable again.
+    </div>
+  </div>
+  {{else}}
   {{if .Error}}
+    {{/* Partial failure — allowlist worked but tree fetch failed. Keep the
+         small inline banner so the operator still sees + can use the
+         allowlist below. */}}
     <div class="vault-error">{{.Error}}</div>
   {{end}}
   <div class="vault-section">
@@ -29,6 +47,7 @@
       {{template "vault-tree" .Tree}}
     {{end}}
   </details>
+  {{end}}
 </div>
 {{define "vault-tree"}}
 <div class="vault-tree" id="vault-tree-{{.Name}}">
