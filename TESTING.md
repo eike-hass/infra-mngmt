@@ -40,7 +40,10 @@ Tests live next to the code they cover:
 | `internal/containers/` | `load_test.go`, `types_test.go` | containers.yaml schema + load |
 | `internal/deps/` | `load_test.go`, `match_test.go`, `types_test.go` | dependencies.yaml schema, scope-pattern rule matching |
 | `internal/graph/` | `refs_test.go` | dependencies-driven resolution + legacy substring fallback, bridge/container state rollup |
-| `internal/web/` | `helpers_test.go`, `handlers_http_test.go`, `template_test.go`, `e2e_test.go`, `status_test.go` | Helper funcs, HTTP routing/auth, template smoke tests, end-to-end flows |
+| `internal/rates/` | `rates_test.go`, `testutil_test.go` | model-rates.yaml load (missing file → empty map, valid YAML, bad YAML) |
+| `internal/llama/` | `client_test.go` | llama.cpp REST client (health, props, /v1/models, /metrics, /slots probe + parse) |
+| `internal/vault/` | `client_test.go` | mcp-fs vault control-plane client (allowlist, tree, grant/revoke) |
+| `internal/web/` | `helpers_test.go`, `handlers_http_test.go`, `template_test.go`, `template_render_test.go`, `e2e_test.go`, `status_test.go`, `open_design_test.go`, `frontend_guidelines_test.go` | Helper funcs, HTTP routing/auth, template render, end-to-end flows, OD card aggregation + rendering, frontend-rules enforcement |
 
 ## Patterns
 

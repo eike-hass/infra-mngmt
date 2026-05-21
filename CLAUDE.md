@@ -58,21 +58,25 @@ internal/
                          # composegen.go renders a process-compose fragment for wsl/socat tier)
   containers/            # containers.yaml: declared-container declarations + load
   deps/                  # dependencies.yaml: rules, scope-pattern matching
+  rates/                 # model-rates.yaml: per-model token pricing for the OD card cost rollup
+  llama/                 # llama.cpp REST client (health, props, models, metrics, slots)
+  vault/                 # mcp-fs vault client (allowlist + tree browse + grant/revoke)
   graph/
     refs.go              # Resolver: deps + legacy substring fallback; bridge/process/container state rollup
   web/                   # HTTP server + frontend assets — see docs/frontend-architecture.md
     server.go            # HTTP router, middleware, auth
     handlers.go          # Entity + process routes; container stats fan-out; FuncMap
     bridges.go           # bridge views + apply/reset/refresh handlers
-    containers.go        # declared-container views + handlers
+    containers.go        # declared-container views + OD card aggregation (per-model rollup + cost)
+    vault.go             # mcp-fs vault panel handlers
     status.go            # MCP runtime status resolver (uses graph package)
     static.go            # embed.FS mount for /static/*; static FuncMap helper
     templates.go         # embed.FS + parseTemplate helper for templates/*.html.tmpl
     templates/           # one .html.tmpl per page/partial (no Go-string templates)
     static/
       css/app.css        # shared design tokens + component CSS
-      js/                # ES modules: app.js (shared), preview.js, containers.js
-      vendor/            # htmx, fuse, marked + LICENSES.md (CodeMirror still esm.sh)
+      js/                # ES modules: app.js (shared), preview.js, containers.js, promote.js, wake.js
+      vendor/            # htmx, fuse, marked, codemirror.bundle.js + LICENSES.md
 config/
   config.go              # App config: YAML primary, JSON fallback for legacy installs
   wsl.go                 # `wsl-windows` sentinel → Windows host IP via /proc/net/route
@@ -139,7 +143,7 @@ extra_paths: []
 
 `wsl-windows` in an endpoint is a sentinel resolved at startup to the Windows host IP from `/proc/net/route` (the WSL guest's default-route gateway — see `config/wsl.go`). Necessary for WSL2 NAT mode where the gateway IP changes on each restart. The older resolv.conf-based path is no longer used because Win11 + Hyper-V firewall makes the resolv.conf nameserver a local DNS proxy bound to WSL's loopback, not routable.
 
-`bridges.yaml`, `dependencies.yaml`, `containers.yaml` live alongside `config.yaml` and are auto-discovered (or pointed at via `bridges_file`/`dependencies_file`/`containers_file` in the main config).
+`bridges.yaml`, `dependencies.yaml`, `containers.yaml`, and `model-rates.yaml` live alongside `config.yaml` and are auto-discovered (or pointed at via `bridges_file`/`dependencies_file`/`containers_file`/`model_rates_file` in the main config). `model-rates.yaml` is optional — when absent, the OD card's `≈ cost` slot renders `—` for every model (no built-in fallback rates).
 
 For `tier: wsl, type: socat` bridges, infra-mngmt also generates `process-compose.bridges.yaml` (path configurable via `bridges_compose_file`) — a fragment the user's main `process-compose.yaml` includes via `extends:`. Generated entries live under namespace `bridges`. The Windows-host IP gets resolved by an inline backtick subshell (`` `ip route | awk '/^default/{print $3}'` ``) embedded in each socat command, evaluated by bash at every process (re)start — not via env_cmds, since PC's reload endpoint doesn't re-evaluate them on all versions. See README §4 and `.claude/skills/infra-mngmt-config/SKILL.md` for the schema and runtime model.
 

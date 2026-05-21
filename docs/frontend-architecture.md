@@ -54,7 +54,7 @@ The server is `net/http` + chi, configured in [internal/web/server.go](../intern
 
 ### 3.1 Now
 
-Templates live as Go raw-string constants inside [internal/web/template.go](../internal/web/template.go) (~2280 lines) and a few siblings ([vault.go:263](../internal/web/vault.go#L263)). CSS and JS are inlined inside `indexHTML`. CDN URLs are referenced directly from `<script>` and `<link>` tags. There is no static asset directory.
+The §3.2 layout is the current shape — M1–M5 + M7 of §16 have shipped, so templates live in `templates/*.html.tmpl` (parsed via `embed.FS`), CSS lives in `static/css/app.css`, JS lives as ES modules under `static/js/`, and every vendored asset is in `static/vendor/`. There is no `internal/web/template.go`; the old raw-string constants were removed in M4. CDN references have been eliminated everywhere except for `cmd/vendor-codemirror/` (a build-time tool that downloads and bundles CodeMirror, not part of the production binary).
 
 ### 3.2 Target
 
@@ -176,7 +176,20 @@ The `tmplFuncs` map ([handlers.go:293](../internal/web/handlers.go#L293)) is a c
 | `--accent` | `oklch(68% 0.18 200)` (cyan) | Primary action / focus / build chip stale |
 | `--accent2`| `oklch(68% 0.18 302)` (magenta) | Project-scope badge contrast |
 
-**Kind colors** (entity-kind glyph + group pill outline) and **scope colors** (the `glb`/`prj`/`ctr` badge on each entity) live in `:root` as `--kind-{mcp,command,agent,skill,hook,memory,claude_md}` and `--level-{global,project,devcontainer}`. The hues are deliberately distinct so the eye can scan a mixed list by either dimension at a glance.
+**Kind colors** (entity-kind glyph + group pill outline) and **scope colors** (the `global`/`project`/`devcontainer` badge on each entity) live in `:root` as `--kind-{mcp,command,agent,skill,hook,memory,claude_md}` and `--level-{global,project,devcontainer}`. The hues are deliberately distinct so the eye can scan a mixed list by either dimension at a glance.
+
+**Motion tokens** drive every transition + animation in the app:
+
+| Token | Value | Where |
+|---|---|---|
+| `--dur-tap`  | `80ms`  | Button press feedback (`transform: scale(.96)` on `:active`) |
+| `--dur-fast` | `120ms` | Hover, chevron rotate, expand-enter, `.row-hover` background fade |
+| `--dur-base` | `180ms` | slideIn for entity cards, modal/promote enter |
+| `--dur-slow` | `320ms` | Wide layout transitions (search input expand) |
+| `--ease-out`    | `cubic-bezier(.2,.8,.2,1)`  | Default ease for hover + transition-out |
+| `--ease-spring` | `cubic-bezier(.4,1.4,.4,1)` | Chevron rotate, "pop" emphasis on toggles |
+
+**(rule)** New transitions and `@keyframes` reuse these tokens — never hand-type a duration or ease curve.
 
 ### 5.2 Naming
 
@@ -205,7 +218,9 @@ When designing a new surface, **build it from these**. If you find yourself want
 | Two-line row | `.svc-row` / `.bridge-row` / `.svc-process` / `.llama-card` / `.vault-card-header` / `tr.project-header` + `tr.project-member` | Title or name on top (`--white`), description or endpoint below (`--text2`), pills/buttons fixed-width on the right. |
 | Section header | `.svc-instance > .svc-header` with `.svc-name` + `.svc-endpoint` + `.svc-actions` | Each services-panel section follows: icon, name, endpoint/subtitle, then a right-aligned `.svc-actions` container with running-count + lifecycle buttons (`apply all` / `reload` / `start` / `restart` / `stop`). |
 | Action button | `.svc-boot-btn` (section level) / `.proc-btn` (row level) + intent class (`start` / `restart` / `stop`) | Bordered, no background until hover. Intent class colors the hover state — green for start, yellow for restart, red for stop. The label is a verb (`apply`, `pause`, `reset`, `reload`, `start`, `stop`); intent color carries the signal so the glyph (▶ / ⟳ / ↻ / ■) is dropped. Mutating actions sit left of safe `reload`. |
-| Card | `.svc-instance` + per-feature subclass (`.vaults` / `.open-designs`) | `--bg2` rectangle, `--border` outline, 4 px radius, vertical density. Header on top, content below. Never use shadow — borders only. |
+| Card | `.svc-instance` + per-feature subclass (`.vaults` / `.open-design` / `.containers` / `.processes`) | `--bg2` rectangle, `--border` outline, 4 px radius, vertical density. Header on top, content below. Never use shadow — borders only. |
+| Model chip | `.model-chip` (shared) / `.ods-chip` (OD-specific, has inner `name + out + cost` spans) | Pill with a colored dot + tinted background + tinted border, all driven by a single `--m: <oklch>` inline style. Used by the OD card chip strip and the llama view's per-model row so the same model id renders with the same hue across views. The dot uses `box-shadow: 0 0 4px var(--m)` for a subtle glow. Color is derived deterministically from the model id (`odColorFor` / `modelColor` FuncMap) via SHA-256 → hue; stays inside the 68% L / 0.18 C OKLCH plane so every chip lives in the same visual family. |
+| Unreachable card | `.svc-unreachable` (alias: `.ods-down`) + `-warn` / `-warn-icon` / `-name` / `-explain` / `-strong` / `-action` children | Centered red-wash explainer (`background: rgba(224,108,108,.04)`) used when a section's backend is unreachable: OD compose project stopped, vault sidecar down, llama-server `/health` failing. Always carries: `⚠` icon + `<section-name> isn't reachable` line + small explainer pointing at where lifecycle lives. No retry button — section auto-refreshes on its parent poll (services 8s, llama 10s). |
 | Modal | `#promote-slot` (today, the only one) | Position-fixed overlay with darkened backdrop. Backdrop click + Escape dismiss; first input auto-focuses on open. |
 | Toast | `.toast` via `window.showToast({title, body, kind, timeout})` where `kind` is `error` (default) / `info` / `ok` | Bottom-right stack, slides in, auto-dismisses after ~8 s. Used for rescan results, container action failures (auto-toasted by the `htmx:responseError` listener), VS Code launch failures. |
 | Build chip | `.build-chip` / `.build-chip.stale` | Bottom-right, always present, monospace 10 px. `<short-sha>+` (`+` if dirty) + relative time. Turns `--accent` with a reload affordance when the server's commit differs from the page's. |

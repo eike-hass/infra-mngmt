@@ -158,7 +158,7 @@ extra_paths:
 
 Each `process_compose` entry can carry the API token for its instance one of two ways: `token` (literal) or `token_file` (path read at startup). The file form is preferred — it keeps the secret out of `config.yaml` and the same path can be passed to process-compose itself via `--token-file`, so both sides read one file. Sent on the wire as the `X-PC-Token-Key` header. Leave both unset if the instance has no auth. See [SECURITY.md](SECURITY.md) for the full setup.
 
-`bridges.yaml`, `dependencies.yaml`, and `containers.yaml` are auto-discovered alongside `config.yaml` (or set `bridges_file:`/`dependencies_file:`/`containers_file:` to override). They drive the bridge applier (Windows portproxy + firewall via one UAC prompt; WSL-tier socat relays via a process-compose fragment that the user's main YAML references with `extends:` — see §4), the entity → service/bridge dependency resolver, and the declared-container panel respectively.
+`bridges.yaml`, `dependencies.yaml`, `containers.yaml`, and `model-rates.yaml` are auto-discovered alongside `config.yaml` (or set `bridges_file:`/`dependencies_file:`/`containers_file:`/`model_rates_file:` to override). They drive the bridge applier (Windows portproxy + firewall via one UAC prompt; WSL-tier socat relays via a process-compose fragment that the user's main YAML references with `extends:` — see §4), the entity → service/bridge dependency resolver, the declared-container panel, and the Open Design card's blended-cost rollup respectively. `model-rates.yaml` is optional; when absent the OD card simply renders `—` in every cost slot.
 
 ### Field reference
 
@@ -177,6 +177,7 @@ Each `process_compose` entry can carry the API token for its instance one of two
 | `bridges_compose_file`           | `process-compose.bridges.yaml` alongside config | Path to the generated process-compose fragment that runs `tier: wsl, type: socat` relays. The user's main process-compose.yaml is expected to reference it via `extends:` — see §4.  |
 | `dependencies_file`              | `dependencies.yaml` alongside config            | Path to dependencies.yaml.                                                                                                                                                           |
 | `containers_file`                | `containers.yaml` alongside config              | Path to containers.yaml.                                                                                                                                                             |
+| `model_rates_file`               | `model-rates.yaml` alongside config             | Path to operator-supplied per-model token pricing (USD per million tokens) used by the Open Design card's blended-cost rollup. Optional — missing file → every cost slot renders `—`. |
 | `extra_paths`                    | `[]`                                            | Additional project root directories to scan for `.claude/` beyond `~` and `$CWD`.                                                                                                    |
 
 ### WSL2 NAT networking — the `wsl-windows` hostname

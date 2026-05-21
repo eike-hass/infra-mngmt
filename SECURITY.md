@@ -35,7 +35,7 @@ Process and instance names in API calls are validated against `^[a-zA-Z0-9_\-]{1
 
 ### Template escaping
 
-All HTML templates use Go's `html/template` package, which auto-escapes all values. No `template.HTML` casting is used, so user-controlled content (entity names, MCP attributes, log lines) cannot inject script.
+All HTML templates use Go's `html/template` package, which auto-escapes all values. `template.HTML` is used only for compile-time SVG icon constants (e.g. `chevSVG`, `kindIcon`, `toolIcon`) and `template.CSS` only via the `safeCSS` FuncMap helper for self-constructed OKLCH color strings (see [docs/frontend-architecture.md §4.3](docs/frontend-architecture.md)) — never for user-controlled data. Auto-escape enforcement is mechanically verified by `TestGuideline_TemplateHTMLOnlyForIcons` in [internal/web/frontend_guidelines_test.go](internal/web/frontend_guidelines_test.go), which fails if `template.HTML(x)` ever wraps an identifier that doesn't end in `SVG` / `Icon`.
 
 ### CSRF
 
