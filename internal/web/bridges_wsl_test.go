@@ -68,7 +68,7 @@ func TestFindWSLComposeClientMatchesByDir(t *testing.T) {
 	srv := New(nil, []ComposeEntry{
 		{Name: "windows", Endpoint: "http://w", ComposeFile: "/c/Users/x/.config/im/process-compose.yaml"},
 		{Name: "wsl", Endpoint: "http://l", ComposeFile: "/etc/im/process-compose.yaml"},
-	}, "", nil, nil, nil, nil, nil)
+	}, "", nil, nil, nil, nil, nil, nil)
 	srv.SetBridgesComposeFile("/etc/im/process-compose.bridges.yaml")
 
 	c := srv.findWSLComposeClient()
@@ -83,7 +83,7 @@ func TestFindWSLComposeClientMatchesByDir(t *testing.T) {
 func TestFindWSLComposeClientReturnsNilWhenNoMatch(t *testing.T) {
 	srv := New(nil, []ComposeEntry{
 		{Name: "windows", Endpoint: "http://w", ComposeFile: "/c/Users/x/process-compose.yaml"},
-	}, "", nil, nil, nil, nil, nil)
+	}, "", nil, nil, nil, nil, nil, nil)
 	srv.SetBridgesComposeFile("/etc/im/process-compose.bridges.yaml")
 	if c := srv.findWSLComposeClient(); c != nil {
 		t.Errorf("expected nil, got %s", c.Name())
@@ -114,7 +114,7 @@ func TestApplyBridgesWSLWritesFragmentAndReloads(t *testing.T) {
 	}
 	srv := New(nil, []ComposeEntry{
 		{Name: "wsl", Endpoint: pcSrv.URL, ComposeFile: composePath},
-	}, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil)
+	}, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil, nil)
 	srv.SetBridgesComposeFile(fragPath)
 
 	if err := srv.applyBridges([]bridge.Bridge{br}); err != nil {
@@ -152,7 +152,7 @@ func TestApplyBridgesWSLToleratesReloadFailure(t *testing.T) {
 	}
 	srv := New(nil, []ComposeEntry{
 		{Name: "wsl", Endpoint: pcSrv.URL, ComposeFile: composePath},
-	}, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil)
+	}, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil, nil)
 	srv.SetBridgesComposeFile(fragPath)
 
 	if err := srv.applyBridges([]bridge.Bridge{br}); err != nil {
@@ -185,7 +185,7 @@ func TestRebuildBridgeViewsDerivesWSLStateFromCompose(t *testing.T) {
 	}
 	srv := New(nil, []ComposeEntry{
 		{Name: "wsl", Endpoint: pcSrv.URL, ComposeFile: composePath},
-	}, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil)
+	}, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil, nil)
 	srv.SetBridgesComposeFile(fragPath)
 
 	views := srv.rebuildBridgeViews(context.Background())
@@ -222,7 +222,7 @@ Address         Port        Address         Port
 		Connect:  bridge.Endpoint{Addr: "127.0.0.1", Port: 8080, Family: bridge.FamilyAuto},
 		Firewall: bridge.Firewall{DisplayName: "x", Remote: "10.0.0.0/8"},
 	}
-	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil)
+	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil, nil)
 
 	// If smart-skip is broken, RunPowerShellElevated runs and fails (no
 	// powershell.exe in the test environment). A nil-error return means
@@ -250,7 +250,7 @@ func TestApplyBridgesSmartElevatesWhenWindowsMissing(t *testing.T) {
 		Connect:  bridge.Endpoint{Addr: "127.0.0.1", Port: 8080, Family: bridge.FamilyAuto},
 		Firewall: bridge.Firewall{DisplayName: "x", Remote: "10.0.0.0/8"},
 	}
-	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil)
+	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil, nil)
 
 	// We expect this to attempt elevation and fail with a powershell-related
 	// error. A nil error would mean smart-skip wrongly suppressed it.
@@ -296,7 +296,7 @@ func TestApplyBridgesSmartFallsBackOnProbeFailure(t *testing.T) {
 		Connect:  bridge.Endpoint{Addr: "127.0.0.1", Port: 8080, Family: bridge.FamilyAuto},
 		Firewall: bridge.Firewall{DisplayName: "x", Remote: "10.0.0.0/8"},
 	}
-	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil)
+	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil, nil)
 
 	// Probe fails → fallback to apply-all → elevation attempted → real error.
 	if err := srv.applyBridges([]bridge.Bridge{br}); err == nil {
@@ -313,7 +313,7 @@ func TestExpandToMembersReturnsCompositeChildren(t *testing.T) {
 		Listen: bridge.Endpoint{Addr: "172.17.0.1", Port: 80}, Connect: bridge.Endpoint{Addr: "127.0.0.1", Port: 80, Family: bridge.FamilyAuto}}
 	srv := New(nil, nil, "", nil, []graph.BridgeInfo{
 		{Bridge: parent}, {Bridge: child1}, {Bridge: child2},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	got := srv.expandToMembers("stack")
 	if len(got) != 2 {
@@ -329,7 +329,7 @@ func TestExpandToMembersReturnsSingleLeaf(t *testing.T) {
 	leaf := bridge.Bridge{Name: "alone", Tier: bridge.TierWindows, Type: bridge.TypePortproxy,
 		Listen: bridge.Endpoint{Addr: "10.0.0.1", Port: 80}, Connect: bridge.Endpoint{Addr: "127.0.0.1", Port: 80, Family: bridge.FamilyAuto},
 		Firewall: bridge.Firewall{DisplayName: "x", Remote: "10.0.0.0/8"}}
-	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: leaf}}, nil, nil, nil)
+	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: leaf}}, nil, nil, nil, nil)
 	got := srv.expandToMembers("alone")
 	if len(got) != 1 || got[0].Name != "alone" {
 		t.Errorf("expected single leaf, got %+v", got)
@@ -337,7 +337,7 @@ func TestExpandToMembersReturnsSingleLeaf(t *testing.T) {
 }
 
 func TestExpandToMembersUnknownReturnsNil(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	if got := srv.expandToMembers("ghost"); got != nil {
 		t.Errorf("expected nil for unknown name, got %+v", got)
 	}
@@ -392,7 +392,7 @@ func TestRebuildBridgeViewsCompositeFoldsMembers(t *testing.T) {
 		Firewall: bridge.Firewall{DisplayName: "stack-win", Remote: "10.0.0.0/8"}}
 	srv := New(nil, nil, "", nil, []graph.BridgeInfo{
 		{Bridge: parent}, {Bridge: winChild},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	views := srv.rebuildBridgeViews(context.Background())
 	// Top level should have ONE row (the composite). The member is folded.
@@ -446,7 +446,7 @@ func TestApplyBridgesStartsWSLProcessesAfterReload(t *testing.T) {
 	}
 	srv := New(nil, []ComposeEntry{
 		{Name: "wsl", Endpoint: pcSrv.URL, ComposeFile: composePath},
-	}, "", nil, []graph.BridgeInfo{{Bridge: wslLeaf}}, nil, nil, nil)
+	}, "", nil, []graph.BridgeInfo{{Bridge: wslLeaf}}, nil, nil, nil, nil)
 	srv.SetBridgesComposeFile(fragPath)
 
 	if err := srv.applyBridges([]bridge.Bridge{wslLeaf}); err != nil {
@@ -499,7 +499,7 @@ func TestPauseBridgesStopsWSLProcessAndSkipsRemovalWhenWindowsAlreadyMissing(t *
 	}
 	srv := New(nil, []ComposeEntry{
 		{Name: "wsl", Endpoint: pcSrv.URL, ComposeFile: composePath},
-	}, "", nil, []graph.BridgeInfo{{Bridge: wslLeaf}, {Bridge: winLeaf}}, nil, nil, nil)
+	}, "", nil, []graph.BridgeInfo{{Bridge: wslLeaf}, {Bridge: winLeaf}}, nil, nil, nil, nil)
 	srv.SetBridgesComposeFile(fragPath)
 
 	if err := srv.pauseBridges([]bridge.Bridge{wslLeaf, winLeaf}); err != nil {
@@ -533,7 +533,7 @@ Address         Port        Address         Port
 		Connect:  bridge.Endpoint{Addr: "127.0.0.1", Port: 8080, Family: bridge.FamilyAuto},
 		Firewall: bridge.Firewall{DisplayName: "x", Remote: "10.0.0.0/8"},
 	}
-	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: winLeaf}}, nil, nil, nil)
+	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: winLeaf}}, nil, nil, nil, nil)
 
 	if err := srv.pauseBridges([]bridge.Bridge{winLeaf}); err == nil {
 		t.Error("pause should attempt elevation when Windows leaf is active; smart-skip wrongly suppressed it")
@@ -553,7 +553,7 @@ func TestPauseBridgesSkipsElevationWhenWindowsMissing(t *testing.T) {
 		Connect:  bridge.Endpoint{Addr: "127.0.0.1", Port: 8080, Family: bridge.FamilyAuto},
 		Firewall: bridge.Firewall{DisplayName: "x", Remote: "10.0.0.0/8"},
 	}
-	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: winLeaf}}, nil, nil, nil)
+	srv := New(nil, nil, "", nil, []graph.BridgeInfo{{Bridge: winLeaf}}, nil, nil, nil, nil)
 
 	if err := srv.pauseBridges([]bridge.Bridge{winLeaf}); err != nil {
 		t.Errorf("pause should skip elevation when Windows leaf is already Missing; got %v", err)
@@ -579,7 +579,7 @@ func TestRebuildBridgeViewsWSLMissingWhenNoProcess(t *testing.T) {
 	}
 	srv := New(nil, []ComposeEntry{
 		{Name: "wsl", Endpoint: pcSrv.URL, ComposeFile: filepath.Join(dir, "process-compose.yaml")},
-	}, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil)
+	}, "", nil, []graph.BridgeInfo{{Bridge: br}}, nil, nil, nil, nil)
 	srv.SetBridgesComposeFile(filepath.Join(dir, "process-compose.bridges.yaml"))
 
 	views := srv.rebuildBridgeViews(context.Background())

@@ -15,7 +15,7 @@ import (
 
 // helper to build a server with two host-style sources.
 func twoSourceServer(srcA, srcB source.Source) *Server {
-	return New([]source.Source{srcA, srcB}, nil, "", nil, nil, nil, nil, nil)
+	return New([]source.Source{srcA, srcB}, nil, "", nil, nil, nil, nil, nil, nil)
 }
 
 func TestPromoteCopiesFileBackedEntity(t *testing.T) {
@@ -148,7 +148,7 @@ func TestPromotePickerListsOtherSources(t *testing.T) {
 	b := newMockSource("host:/b", entity.ProjectScope("/proj-b"))
 	c := newMockSource("host:/c", entity.ProjectScope("/proj-c"))
 	e := a.addEntity(entity.KindCommand, "x", []byte("body"))
-	srv := New([]source.Source{a, b, c}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b, c}, nil, "", nil, nil, nil, nil, nil, nil)
 
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet,
@@ -172,7 +172,7 @@ func TestPromotePickerListsOtherSources(t *testing.T) {
 func TestPromotePickerEmptyWhenSoleSource(t *testing.T) {
 	a := newMockSource("host:/only", entity.GlobalScope())
 	e := a.addEntity(entity.KindCommand, "x", []byte("body"))
-	srv := New([]source.Source{a}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a}, nil, "", nil, nil, nil, nil, nil, nil)
 
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet,
@@ -186,7 +186,7 @@ func TestPromotePickerEmptyWhenSoleSource(t *testing.T) {
 }
 
 func TestPromoteClearReturnsEmpty(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/promote-clear", nil))
 	if rr.Code != 200 {
@@ -205,7 +205,7 @@ func TestPromotePickerGroupsByTier(t *testing.T) {
 	c := newMockSource("host:/c", entity.ProjectScope("/c")) // project tier
 	e := a.addEntity(entity.KindCommand, "x", []byte("body"))
 
-	srv := New([]source.Source{a, b, c}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b, c}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/promote-picker?id="+e.ID, nil))
 	body := rr.Body.String()
@@ -225,7 +225,7 @@ func TestPromotePickerMarksReadOnlyTarget(t *testing.T) {
 	b.readOnly = true
 	e := a.addEntity(entity.KindCommand, "x", []byte("body"))
 
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/promote-picker?id="+e.ID, nil))
 	body := rr.Body.String()
@@ -250,7 +250,7 @@ func TestPromotePickerMarksExistingTarget(t *testing.T) {
 	// Pre-populate b so the target shows as "exists/replaces".
 	b.addEntity(entity.KindCommand, "x", []byte("orig-b"))
 
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/promote-picker?id="+e.ID, nil))
 	body := rr.Body.String()
@@ -271,7 +271,7 @@ func TestPromotePickerMarksNewTarget(t *testing.T) {
 	e := a.addEntity(entity.KindCommand, "fresh", []byte("body"))
 	// b has no entity by that name → should be flagged as "new".
 
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/promote-picker?id="+e.ID, nil))
 	body := rr.Body.String()
@@ -290,7 +290,7 @@ func TestPromotePickerSortsWritableFirst(t *testing.T) {
 	bRW := newMockSource("host:/zzz-writable", entity.ProjectScope("/zzz-writable"))
 	e := a.addEntity(entity.KindCommand, "x", []byte("body"))
 
-	srv := New([]source.Source{a, bRO, bRW}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, bRO, bRW}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/promote-picker?id="+e.ID, nil))
 	body := rr.Body.String()
@@ -406,7 +406,7 @@ func TestPromoteRenameToExistingNameAtSameSourceRejected(t *testing.T) {
 	a := newMockSource("host:/a", entity.GlobalScope())
 	e := a.addEntity(entity.KindCommand, "x", []byte("body"))
 
-	srv := New([]source.Source{a}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
 		"/api/promote?from="+e.ID+"&to="+a.ID(), nil))
@@ -472,7 +472,7 @@ func TestPromoteSkillWithMirrorRemovesStaleFiles(t *testing.T) {
 	b := source.NewHostFS(bClaude, entity.GlobalScope())
 	skill := findSkillEntity(t, a, "x")
 
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
 		"/api/promote?from="+skill.ID+"&to="+b.ID()+"&overwrite=true&mirror=true", nil))
@@ -514,7 +514,7 @@ func TestPromoteSkillWithoutMirrorPreservesStaleFiles(t *testing.T) {
 	b := source.NewHostFS(bClaude, entity.GlobalScope())
 	skill := findSkillEntity(t, a, "x")
 
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
 		"/api/promote?from="+skill.ID+"&to="+b.ID()+"&overwrite=true", nil))
@@ -564,7 +564,7 @@ func TestPromoteMirrorPreservesUnrelatedSkillsAtTarget(t *testing.T) {
 	b := source.NewHostFS(bClaude, entity.GlobalScope())
 	skill := findSkillEntity(t, a, "x")
 
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
 		"/api/promote?from="+skill.ID+"&to="+b.ID()+"&overwrite=true&mirror=true", nil))
@@ -596,7 +596,7 @@ func TestPromoteMirrorOnNewSkillNoTargetIsOK(t *testing.T) {
 	b := source.NewHostFS(bClaude, entity.GlobalScope())
 	skill := findSkillEntity(t, a, "x")
 
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
 		"/api/promote?from="+skill.ID+"&to="+b.ID()+"&mirror=true", nil))
@@ -613,7 +613,7 @@ func TestPromotePickerHasMirrorCheckbox(t *testing.T) {
 	b := newMockSource("host:/b", entity.GlobalScope())
 	e := a.addEntity(entity.KindCommand, "x", []byte("body"))
 
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/promote-picker?id="+e.ID, nil))
 	body := rr.Body.String()
@@ -660,7 +660,7 @@ func TestPromotePickerSeedsRenameInputWithEntityName(t *testing.T) {
 	b := newMockSource("host:/b", entity.GlobalScope())
 	e := a.addEntity(entity.KindCommand, "myname", []byte("body"))
 
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/promote-picker?id="+e.ID, nil))
 	body := rr.Body.String()

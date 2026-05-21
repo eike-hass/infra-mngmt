@@ -50,7 +50,7 @@ func TestResolveMCPStatusesParallelProbes(t *testing.T) {
 			Scope:  "*",
 			Needs:  []deps.Need{{Kind: "service", Name: "alpha"}},
 		}},
-		nil, nil,
+		nil, nil, nil,
 	)
 
 	e := entity.Entity{
@@ -104,7 +104,7 @@ func TestResolveMCPStatusesAllStuckBoundedByTimeout(t *testing.T) {
 			{Name: "wsl", Endpoint: a.URL},
 			{Name: "windows", Endpoint: b.URL},
 		},
-		"", nil, nil, nil, nil, nil,
+		"", nil, nil, nil, nil, nil, nil,
 	)
 
 	deadline := composeProbeTimeout + 500*time.Millisecond

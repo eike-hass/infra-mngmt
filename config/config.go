@@ -43,6 +43,11 @@ type Config struct {
 	BridgesFile      string           `yaml:"bridges_file,omitempty"`
 	DependenciesFile string           `yaml:"dependencies_file,omitempty"`
 	ContainersFile   string           `yaml:"containers_file,omitempty"`
+	// ModelRatesFile points to an optional per-model token-pricing YAML
+	// (USD per million tokens) used by the Open Design card's blended-cost
+	// approximation. When unset, falls back to model-rates.yaml alongside
+	// config.yaml. Missing file is fine — every cost slot renders `—`.
+	ModelRatesFile string `yaml:"model_rates_file,omitempty"`
 	// BridgesComposeFile is the path to the generated process-compose fragment
 	// that owns long-running socat relays for tier=wsl bridges. The user's
 	// main process-compose.yaml references it via `extends:` so the fragment

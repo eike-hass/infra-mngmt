@@ -631,7 +631,7 @@ func TestSetBuildInfo_WiresCacheBuster(t *testing.T) {
 		}
 	})
 
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetBuildInfo(BuildInfo{Commit: "deadbeef"})
 	if got := staticAssetURL("vendor/x.js"); got != "/static/vendor/x.js?v=deadbeef" {
 		t.Errorf("commit buster: got %q", got)
@@ -657,7 +657,7 @@ func TestSetBuildInfo_WiresCacheBuster(t *testing.T) {
 // chi router: public routes, static assets, and authenticated routes.
 // Guards docs/frontend-architecture.md §18.3.
 func TestSecurityHeaders_SetOnEveryResponse(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	// Pick three response sources that exercise different router subtrees.
 	cases := []struct {
 		name string
@@ -704,7 +704,7 @@ func TestSecurityHeaders_SetOnEveryResponse(t *testing.T) {
 //
 // Doc reference: docs/frontend-architecture.md §6.2, §18.3.
 func TestSecurityHeaders_CSPScriptSrcNoUnsafeInline(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/favicon.svg", nil))
 	csp := rr.Header().Get("Content-Security-Policy")
@@ -731,7 +731,7 @@ func TestSecurityHeaders_CSPScriptSrcNoUnsafeInline(t *testing.T) {
 // WakeURL is configured (TestSecurityHeaders_CSPExtendsConnectSrcForWakeURL),
 // but script-src is always `'self'`-only.
 func TestSecurityHeaders_CSPNoExternalHostsAllowed(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/favicon.svg", nil))
 	csp := rr.Header().Get("Content-Security-Policy")
@@ -753,7 +753,7 @@ func TestSecurityHeaders_CSPNoExternalHostsAllowed(t *testing.T) {
 // untouched — script-src in particular must NOT pick up external hosts
 // (the wake JS is served from our own origin).
 func TestSecurityHeaders_CSPExtendsConnectSrcForWakeURL(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetWakeURL("http://localhost:9920/process/start/wsl-wake")
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/favicon.svg", nil))

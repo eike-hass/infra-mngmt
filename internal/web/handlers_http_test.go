@@ -142,7 +142,7 @@ func (m *mockSource) addEntity(kind entity.Kind, name string, content []byte) en
 }
 
 func newServerWithSource(srcs ...source.Source) *Server {
-	s := New(srcs, nil, "", nil, nil, nil, nil, nil)
+	s := New(srcs, nil, "", nil, nil, nil, nil, nil, nil)
 	return s
 }
 
@@ -181,7 +181,7 @@ func TestHandleVersionUnauthenticatedAllowed(t *testing.T) {
 	// /api/version is a public route — must succeed even when a token is set
 	// AND the request comes from an untrusted source (no session cookie, no
 	// allowlisted CIDR). Deploy scripts should be able to hit it without auth.
-	srv := New(nil, nil, "secret-token", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "secret-token", nil, nil, nil, nil, nil, nil)
 	srv.SetBuildInfo(BuildInfo{BuildEpoch: "1700000000", Commit: "deadbeef"})
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
@@ -198,7 +198,7 @@ func TestHandleVersionUnauthenticatedAllowed(t *testing.T) {
 // context and without sending the auth cookie reliably) and served as JS so
 // the browser will accept the registration.
 func TestHandleServiceWorker_PublicAndCorrectType(t *testing.T) {
-	srv := New(nil, nil, "secret-token", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "secret-token", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
 	req.RemoteAddr = "8.8.8.8:1234" // unauthenticated
@@ -373,7 +373,7 @@ func TestHandleRefreshInvalidatesCache(t *testing.T) {
 // ─── /api/containers (no docker) ────────────────────────────────────────────
 
 func TestHandleContainersNoDocker(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil) // dc = nil
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil) // dc = nil
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/containers", nil))
 	if rr.Code != 200 {
@@ -385,7 +385,7 @@ func TestHandleContainersNoDocker(t *testing.T) {
 }
 
 func TestHandleContainerStartNoDocker(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/start?id=abc", nil))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -394,7 +394,7 @@ func TestHandleContainerStartNoDocker(t *testing.T) {
 }
 
 func TestHandleContainerOpenVSCodeNoDocker(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/open-vscode?id=abc", nil))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -406,7 +406,7 @@ func TestHandleContainerOpenVSCodeMissingID(t *testing.T) {
 	// Passing nil docker would short-circuit before ID validation, so we
 	// only validate the URI builder + the no-docker path here. The
 	// missing-id branch is covered indirectly via the same code path.
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/open-vscode", nil))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -500,7 +500,7 @@ func TestFindDevcontainerCLIEnvOverride(t *testing.T) {
 }
 
 func TestHandleContainerDevcontainerUpNoDocker(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/devcontainer-up?id=abc", nil))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -522,7 +522,7 @@ func TestAuthMiddlewareNoTokenAllowsAll(t *testing.T) {
 
 func TestAuthMiddlewareRedirectsWhenNoSession(t *testing.T) {
 	m := newMockSource("host:/x", entity.GlobalScope())
-	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/sources", nil))
 	if rr.Code != http.StatusSeeOther {
@@ -543,7 +543,7 @@ func requestFrom(method, target, sourceIP string) *http.Request {
 
 func TestAuthBypassedFromTrustedNetwork(t *testing.T) {
 	m := newMockSource("host:/x", entity.GlobalScope())
-	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil,
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil,
 		[]string{"127.0.0.0/8", "172.17.0.0/16"})
 
 	// Loopback bypasses auth without a session cookie.
@@ -563,7 +563,7 @@ func TestAuthBypassedFromTrustedNetwork(t *testing.T) {
 
 func TestAuthRequiredFromUntrustedNetwork(t *testing.T) {
 	m := newMockSource("host:/x", entity.GlobalScope())
-	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil,
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil,
 		[]string{"127.0.0.0/8"})
 
 	rr := httptest.NewRecorder()
@@ -576,7 +576,7 @@ func TestAuthRequiredFromUntrustedNetwork(t *testing.T) {
 func TestAuthBypassRequiresExplicitConfig(t *testing.T) {
 	// Empty trustedNetworks: even loopback needs a session cookie.
 	m := newMockSource("host:/x", entity.GlobalScope())
-	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil, nil)
 
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, requestFrom(http.MethodGet, "/api/sources", "127.0.0.1"))
@@ -588,7 +588,7 @@ func TestAuthBypassRequiresExplicitConfig(t *testing.T) {
 func TestAuthInvalidCIDRsAreSkipped(t *testing.T) {
 	// Garbage entries should be ignored, not crash. Valid one still works.
 	m := newMockSource("host:/x", entity.GlobalScope())
-	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil,
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil,
 		[]string{"not-a-cidr", "127.0.0.0/8", "still-not-a-cidr"})
 
 	rr := httptest.NewRecorder()
@@ -603,7 +603,7 @@ func TestAuthInvalidCIDRsAreSkipped(t *testing.T) {
 // this just verifies the route exists and rejects bad input — the
 // happy-path integration is exercised by client_test's Reload tests.
 func TestComposeReloadInvalidInstance(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/compose/reload?instance=has%20space", nil))
 	if rr.Code != http.StatusBadRequest {
@@ -612,7 +612,7 @@ func TestComposeReloadInvalidInstance(t *testing.T) {
 }
 
 func TestComposeReloadUnknownInstance(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/compose/reload?instance=ghost", nil))
 	if rr.Code != http.StatusNotFound {
@@ -634,7 +634,7 @@ func TestBridgesRefreshReloadsYAML(t *testing.T) {
 	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetBridgesFile(path)
 
 	// First refresh picks up alpha.
@@ -672,7 +672,7 @@ func TestBridgesRefreshReloadsYAML(t *testing.T) {
 // ─── /partials/llama (top-level llama view) ──────────────────────────────
 
 func TestLlamaPageEmptyWhenNoServersConfigured(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama", nil))
 	if rr.Code != 200 {
@@ -704,7 +704,7 @@ func TestLlamaPageSingleModel(t *testing.T) {
 	upstream := httptest.NewServer(mux)
 	defer upstream.Close()
 
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetLlamaServers([]LlamaEntry{{Instance: "wsl", Process: "llama-server", Endpoint: upstream.URL}})
 
 	rr := httptest.NewRecorder()
@@ -762,7 +762,7 @@ func TestLlamaPageRouterMode(t *testing.T) {
 	upstream := httptest.NewServer(mux)
 	defer upstream.Close()
 
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetLlamaServers([]LlamaEntry{{Instance: "windows", Process: "llama-server", Endpoint: upstream.URL}})
 
 	rr := httptest.NewRecorder()
@@ -806,7 +806,7 @@ func TestLlamaPageRouterMode(t *testing.T) {
 func TestLlamaPageRendersHealthErrorWithoutCrash(t *testing.T) {
 	// Server unreachable — no goroutine should panic; the card still renders
 	// with the unreachable pill.
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetLlamaServers([]LlamaEntry{{Instance: "ghost", Process: "llama-server", Endpoint: "http://127.0.0.1:1"}})
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama", nil))
@@ -824,7 +824,7 @@ func TestBridgesRefreshSurfacesYAMLErrors(t *testing.T) {
 	if err := os.WriteFile(path, []byte("bridges:\n  - name: bad\n    tier: nonsense\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetBridgesFile(path)
 
 	rr := httptest.NewRecorder()
@@ -839,7 +839,7 @@ func TestBridgesRefreshSurfacesYAMLErrors(t *testing.T) {
 
 func TestAuthBypassIPv6Loopback(t *testing.T) {
 	m := newMockSource("host:/x", entity.GlobalScope())
-	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil,
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil,
 		[]string{"::1/128"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sources", nil)
@@ -852,7 +852,7 @@ func TestAuthBypassIPv6Loopback(t *testing.T) {
 }
 
 func TestLoginPostInvalidToken(t *testing.T) {
-	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	body := strings.NewReader("token=wrong&next=/")
 	req := httptest.NewRequest(http.MethodPost, "/login", body)
@@ -864,7 +864,7 @@ func TestLoginPostInvalidToken(t *testing.T) {
 }
 
 func TestLoginPostValidTokenSetsSession(t *testing.T) {
-	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil, nil)
 	// Login
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/login",
@@ -891,7 +891,7 @@ func TestLoginPostValidTokenSetsSession(t *testing.T) {
 }
 
 func TestLogoutClearsSession(t *testing.T) {
-	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil, nil)
 	// Authenticate
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/login",
@@ -928,7 +928,7 @@ func TestAllEntitiesParallelAndCached(t *testing.T) {
 	b := newMockSource("host:/b", entity.GlobalScope())
 	a.addEntity(entity.KindCommand, "ar", nil)
 	b.addEntity(entity.KindAgent, "br", nil)
-	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{a, b}, nil, "", nil, nil, nil, nil, nil, nil)
 
 	ents, err := srv.allEntities(context.Background())
 	if err != nil {
@@ -962,7 +962,7 @@ func TestAllEntitiesIgnoresFailingSource(t *testing.T) {
 	good := newMockSource("host:/g", entity.GlobalScope())
 	good.addEntity(entity.KindCommand, "run", nil)
 	bad := &errSource{mockSource: *newMockSource("host:/b", entity.GlobalScope())}
-	srv := New([]source.Source{good, bad}, nil, "", nil, nil, nil, nil, nil)
+	srv := New([]source.Source{good, bad}, nil, "", nil, nil, nil, nil, nil, nil)
 	ents, err := srv.allEntities(context.Background())
 	if err != nil {
 		t.Fatalf("allEntities should not propagate per-source errors: %v", err)
@@ -1176,7 +1176,7 @@ func TestHandleProcessLogsRendersErrorWhenInstanceUnknown(t *testing.T) {
 // interface to mock; until that lands, lock down the two precondition branches.
 
 func TestHandleContainerEventsStreamReturns503WithoutDocker(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil) // dc = nil
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil) // dc = nil
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/container/events-stream?id=abc", nil))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -1189,7 +1189,7 @@ func TestHandleContainerEventsStreamReturns503WithoutDocker(t *testing.T) {
 // so the M7 refactor (HTMX-ifying the container panel) does not silently
 // reverse it — a 400 surfaced before 503 would change client behavior.
 func TestHandleContainerEventsStreamPrioritizesDockerCheck(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/container/events-stream", nil))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -1203,7 +1203,7 @@ func TestHandleContainerEventsStreamPrioritizesDockerCheck(t *testing.T) {
 // returns 200 + empty body when docker is not configured. The client should
 // receive an empty #ov-ctr swap (panel goes blank, not broken).
 func TestHandleContainerControls_NoDocker(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil) // dc = nil
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil) // dc = nil
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/container-controls?project=/home/user/repo", nil))
 	if rr.Code != http.StatusOK {
@@ -1217,7 +1217,7 @@ func TestHandleContainerControls_NoDocker(t *testing.T) {
 // TestHandleContainerControls_MissingProject verifies that omitting ?project=
 // returns 200 + empty body regardless of docker availability.
 func TestHandleContainerControls_MissingProject(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/container-controls", nil))
 	if rr.Code != http.StatusOK {
@@ -1231,7 +1231,7 @@ func TestHandleContainerControls_MissingProject(t *testing.T) {
 // TestHandleContainerStart_NoDocker_Returns503 confirms the no-docker check
 // is preserved after M7 (start now renders a partial on success instead of 204).
 func TestHandleContainerStart_NoDocker_Returns503(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/start?id=abc&project=/repo", nil))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -1241,7 +1241,7 @@ func TestHandleContainerStart_NoDocker_Returns503(t *testing.T) {
 
 // TestHandleContainerStop_NoDocker_Returns503 confirms the same for stop.
 func TestHandleContainerStop_NoDocker_Returns503(t *testing.T) {
-	srv := New(nil, nil, "", nil, nil, nil, nil, nil)
+	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/container/stop?id=abc&project=/repo", nil))
 	if rr.Code != http.StatusServiceUnavailable {

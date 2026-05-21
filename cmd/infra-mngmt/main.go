@@ -22,6 +22,7 @@ import (
 	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/entity"
 	"github.com/eike-hass/infra-mngmt/internal/graph"
+	"github.com/eike-hass/infra-mngmt/internal/rates"
 	"github.com/eike-hass/infra-mngmt/internal/source"
 	"github.com/eike-hass/infra-mngmt/internal/web"
 )
@@ -579,7 +580,7 @@ func runVersion() {
 // logged but non-fatal: the server still runs with just the legacy
 // substring resolver. The resolved file paths are returned so the server
 // can hot-reload them via /*/refresh routes.
-func loadResolverInputs(configPath string, cfg *config.Config) ([]graph.BridgeInfo, []deps.Rule, string, []containers.Container, string) {
+func loadResolverInputs(configPath string, cfg *config.Config) ([]graph.BridgeInfo, []deps.Rule, string, []containers.Container, string, map[string]rates.Rate) {
 	bridgesPath := cfg.BridgesFile
 	if bridgesPath == "" {
 		bridgesPath = filepath.Join(filepath.Dir(configPath), "bridges.yaml")
@@ -591,6 +592,10 @@ func loadResolverInputs(configPath string, cfg *config.Config) ([]graph.BridgeIn
 	containersPath := cfg.ContainersFile
 	if containersPath == "" {
 		containersPath = filepath.Join(filepath.Dir(configPath), "containers.yaml")
+	}
+	ratesPath := cfg.ModelRatesFile
+	if ratesPath == "" {
+		ratesPath = filepath.Join(filepath.Dir(configPath), "model-rates.yaml")
 	}
 
 	var bridgesInfo []graph.BridgeInfo
@@ -627,7 +632,15 @@ func loadResolverInputs(configPath string, cfg *config.Config) ([]graph.BridgeIn
 		log.Printf("loaded %d container declaration(s) from %s", len(containerDecls), containersPath)
 	}
 
-	return bridgesInfo, depRules, bridgesPath, containerDecls, containersPath
+	var modelRates map[string]rates.Rate
+	if rf, err := rates.Load(ratesPath); err != nil {
+		log.Printf("warning: load model-rates %s: %v", ratesPath, err)
+	} else if len(rf.Models) > 0 {
+		modelRates = rf.Models
+		log.Printf("loaded %d model-rate(s) from %s", len(modelRates), ratesPath)
+	}
+
+	return bridgesInfo, depRules, bridgesPath, containerDecls, containersPath, modelRates
 }
 
 // snapshotPortproxy queries Windows for the current portproxy state. Returns
@@ -733,8 +746,8 @@ func runServer(args []string) {
 		log.Printf("warning: binding to %s — service is reachable from the network; ensure auth is enabled", cfg.Bind)
 	}
 
-	bridgesInfo, depRules, bridgesPath, containerDecls, containersPath := loadResolverInputs(*configPath, cfg)
-	srv := web.New(sources, compose, token, dc, bridgesInfo, depRules, containerDecls, cfg.TrustedNetworks)
+	bridgesInfo, depRules, bridgesPath, containerDecls, containersPath, modelRates := loadResolverInputs(*configPath, cfg)
+	srv := web.New(sources, compose, token, dc, bridgesInfo, depRules, containerDecls, modelRates, cfg.TrustedNetworks)
 	// Wire /api/sources/rescan: re-run discovery against the loaded config,
 	// reusing the existing docker client. Returns just the slice — the server
 	// merges it with the current source list by ID.

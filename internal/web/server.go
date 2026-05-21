@@ -22,6 +22,7 @@ import (
 	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/graph"
 	"github.com/eike-hass/infra-mngmt/internal/llama"
+	"github.com/eike-hass/infra-mngmt/internal/rates"
 	"github.com/eike-hass/infra-mngmt/internal/source"
 )
 
@@ -69,6 +70,7 @@ type Server struct {
 	containerDecls     []containers.Container // containers.yaml entries
 	containersFile     string                 // path to containers.yaml so /containers/refresh can reload
 	depRules           []deps.Rule            // dependencies.yaml rules
+	modelRates         map[string]rates.Rate  // model-rates.yaml; nil/empty → OD card renders "—" for every cost
 	docker             *docker.Client         // nil if Docker unavailable
 	llamaServers       []LlamaEntry           // declared in config.yaml; lookup keyed by (Instance,Process)
 	llamaClients       map[string]*llama.Client
@@ -86,7 +88,7 @@ type Server struct {
 	vaultFactory VaultClientFactory
 }
 
-func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *docker.Client, bridges []graph.BridgeInfo, depRules []deps.Rule, containerDecls []containers.Container, trustedCIDRs []string) *Server {
+func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *docker.Client, bridges []graph.BridgeInfo, depRules []deps.Rule, containerDecls []containers.Container, modelRates map[string]rates.Rate, trustedCIDRs []string) *Server {
 	s := &Server{
 		sources:         sources,
 		booters:         map[string]*compose.Bootstrapper{},
@@ -96,6 +98,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		bridges:         bridges,
 		containerDecls:  containerDecls,
 		depRules:        depRules,
+		modelRates:      modelRates,
 		trustedNetworks: parseTrustedCIDRs(trustedCIDRs),
 	}
 	for _, e := range composeCfg {
