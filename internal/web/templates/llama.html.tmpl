@@ -76,7 +76,10 @@
     <div class="llama-loaded">
       <div class="kicker llama-loaded-kicker">loaded model</div>
       <div class="llama-loaded-head">
-        <code class="llama-model-id" title="model id from /v1/models[].id — pass as ?model=&lt;urlencoded&gt; on /metrics and /slots&#10;{{.ID}}">{{.ID}}</code>
+        <span class="model-chip" style="--m:{{modelColor .ID}}" title="model id from /v1/models[].id — pass as ?model=&lt;urlencoded&gt; on /metrics and /slots&#10;{{.ID}}">
+          <span class="model-chip-dot" aria-hidden="true"></span>
+          <code class="llama-model-id">{{.ID}}</code>
+        </span>
         <span class="llama-model-status status-loaded pulse-dot" title="{{statusHelp .Status}}"><span class="llama-model-status-dot"></span>loaded</span>
         <span class="llama-loaded-spacer"></span>
         <button class="llama-model-btn unload"
@@ -121,7 +124,10 @@
           <span class="llama-pill bad" title="upstream /v1/models reports status.failed=true with exit_code={{$m.ExitCode}}. NOTE: the router uses the same flag for 'preset failed to launch' AND 'LRU-evicted child didn't shut down cleanly' — the exit code is the only discriminator available in the JSON.&#10;&#10;Code {{$m.ExitCode}}: {{exitCodeHelp $m.ExitCode}}"><span class="llama-pill-dot">●</span> failed exit {{$m.ExitCode}}</span>
         {{end}}
         <div class="llama-other-meta">
-          <span class="llama-other-name">{{$m.ID}}</span>
+          <span class="model-chip llama-other-chip{{if $m.Synthetic}} synthetic{{end}}" style="--m:{{modelColor $m.ID}}" title="{{$m.ID}}">
+            <span class="model-chip-dot" aria-hidden="true"></span>
+            <span class="llama-other-name">{{$m.ID}}</span>
+          </span>
           {{if $m.ModelPath}}<span class="llama-other-path" title="value of --model from /v1/models[].status.args">{{$m.ModelPath}}</span>{{end}}
         </div>
         {{if not $m.Synthetic}}
