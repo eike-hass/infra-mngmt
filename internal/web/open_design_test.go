@@ -57,13 +57,16 @@ func TestHandleOpenDesignTokenStatsRendersSummary(t *testing.T) {
 	}
 	body := w.Body.String()
 	for _, want := range []string{
-		"12", "345", // sessions, messages
-		"1000",  // input tokens
-		"200",   // output tokens
-		"50000", // cache_read
-		"87.3%", // cache hit pct
-		"ods-tokens-summary",
-		"ods-tokens-refresh",
+		"12",                // sessions
+		"345",               // messages
+		"1.0k",              // input tokens (fmtNum: 1000 → "1.0k")
+		"200",               // output tokens
+		"50k",               // cache_read (50000 → "50k")
+		"87.3%",             // cache hit pct (totals.cache_hit_pct passthrough)
+		`class="ods-body"`,  // new wrapper
+		`class="ods-stat"`,  // aggregate cell
+		`ods-stat-accent`,   // total cost cell
+		`id="ods-snapshot-`, // OOB snapshot slot
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
@@ -87,9 +90,9 @@ func TestHandleOpenDesignTokenStatsSidecarUnreachable(t *testing.T) {
 	}
 	body := w.Body.String()
 	for _, want := range []string{
-		"ods-tokens-error",
-		"unreachable",
-		"ods-tokens-refresh", // retry button must still render
+		"ods-body-error",
+		"ods-body-error-unreachable", // network failure kind
+		"cannot connect to sidecar",  // user-facing copy for network failures
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
@@ -110,8 +113,15 @@ func TestHandleOpenDesignTokenStatsSidecarNon200(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.handleOpenDesignTokenStats(w, req)
 
-	if !strings.Contains(w.Body.String(), "HTTP 500") {
-		t.Errorf("expected HTTP 500 mentioned in error, got: %s", w.Body.String())
+	body := w.Body.String()
+	for _, want := range []string{
+		"ods-body-error-http", // HTTP-error kind, distinct from network failure
+		"HTTP 500",            // status code surfaced
+		"boom",                // response body snippet surfaced so user sees why
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
 	}
 }
 
@@ -241,13 +251,15 @@ func TestServicesTemplateRendersProjectGroupAndCard(t *testing.T) {
 		`project-kind-label">compose`,
 		`/decl-container/stop?name=open-design`, // lifecycle button on header
 		`<tr class="project-member" data-project="open-design"`,
-		// OD card section: slim, no buttons, no per-service pills.
-		`id="open-designs-section"`,
-		`open-design-card-name">open-design`,
-		`http://localhost:7456`, // web URL link
+		// OD card section: per-project chrome + meta row.
+		`id="open-design-open-design"`,              // per-project wrapper
+		`<span class="svc-name">open design</span>`, // section header label
+		`class="ods-name`,                           // meta-row project name
+		`localhost:7456`,                            // web URL chip (scheme stripped)
 		`hx-get="/partials/open-design/token-stats?name=od-token-stats"`,
 		`hx-trigger="load"`,
-		`id="ods-pill-open-design"`, // rolled-up pill (also via OOB)
+		`id="ods-pill-open-design"`,        // rolled-up pill on the project chrome
+		`id="ods-snapshot-od-token-stats"`, // snapshot slot keyed off TokenStatsContainer (OOB target)
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q", want)

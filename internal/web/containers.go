@@ -2,8 +2,11 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sort"
@@ -14,7 +17,20 @@ import (
 	"github.com/eike-hass/infra-mngmt/internal/containers"
 	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/graph"
+	"github.com/eike-hass/infra-mngmt/internal/rates"
 )
+
+// readSnippet reads at most `limit` bytes from r and returns the result as a
+// single-line string (newlines collapsed to spaces) — used when surfacing a
+// sidecar's HTTP-error response body inline in the UI.
+func readSnippet(r io.Reader, limit int) string {
+	buf := make([]byte, limit)
+	n, _ := io.ReadFull(io.LimitReader(r, int64(limit)), buf)
+	s := strings.TrimSpace(string(buf[:n]))
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
+}
 
 // containerView is the template-friendly representation of one declared
 // container: declaration metadata + observed Docker state.
@@ -489,7 +505,11 @@ func min(a, b int) int {
 type openDesignTokenStatsView struct {
 	ServiceName string // for the retry URL
 	Stats       *openDesignTokenStats
-	Error       string
+	// Error is the user-facing failure message. ErrorKind tags the broad
+	// category so the template can route copy ("unreachable" vs "http" vs
+	// "json" vs "config").
+	Error     string
+	ErrorKind string
 }
 
 type openDesignTokenStats struct {
@@ -497,15 +517,53 @@ type openDesignTokenStats struct {
 	Messages     int
 	InputTokens  int64
 	OutputTokens int64
+	Reasoning    int64
 	CacheRead    int64
+	CacheWrite   int64
 	CacheHitPct  float64
+
+	// GeneratedAt is the snapshot timestamp, formatted "HH:MM:SS" (UTC) for
+	// the meta-row "snapshot · HH:MM:SS" line. Empty when the upstream
+	// payload didn't include generated_at or it failed to parse.
+	GeneratedAt string
+
+	// ByModel is the per-model rollup, sorted by total tokens descending so
+	// the heaviest spender is first. Drives the per-model chip strip below
+	// the aggregate row.
+	ByModel []openDesignModelStats
+
+	// TotalCost is the sum of ByModel[].Cost across models that have a rate
+	// configured. HasTotalCost is true when at least one model had a known
+	// rate. When false the aggregate-row cost cell renders "—".
+	TotalCost    float64
+	HasTotalCost bool
+}
+
+// openDesignModelStats is a per-model rollup used by the chip strip. The
+// `Color` field is a CSS variable string (e.g. "var(--kind-agent)") chosen
+// from the kind-* palette per `odModels`.
+type openDesignModelStats struct {
+	ID          string // raw model id, e.g. "claude-sonnet-4-5"
+	Short       string // display label, e.g. "sonnet 4.5"
+	Color       string // CSS variable for the chip + dot tint
+	Sessions    int
+	Messages    int
+	TokensIn    int64
+	TokensOut   int64
+	Reasoning   int64
+	CacheRead   int64
+	CacheWrite  int64
+	CacheHitPct float64
+	Cost        float64 // USD; 0 when HasCost=false
+	HasCost     bool    // false → chip renders "—" instead of a dollar value
 }
 
 // tokenStatsReport mirrors the JSON shape returned by od-token-stats's
-// /usage endpoint. Only the totals are decoded — per-session data isn't
-// rendered inline on the OD card.
+// /usage endpoint. We decode totals + the per-session array; sessions[]
+// is rolled up by model to feed the per-model chip strip.
 type tokenStatsReport struct {
-	Totals struct {
+	GeneratedAt string `json:"generated_at"`
+	Totals      struct {
 		Sessions    int     `json:"sessions"`
 		Messages    int     `json:"messages"`
 		CacheHitPct float64 `json:"cache_hit_pct"`
@@ -517,6 +575,140 @@ type tokenStatsReport struct {
 			CacheWrite int64 `json:"cache_write"`
 		} `json:"tokens"`
 	} `json:"totals"`
+	Sessions []struct {
+		Model       string  `json:"model"`
+		Messages    int     `json:"messages"`
+		CacheHitPct float64 `json:"cache_hit_pct"`
+		Tokens      struct {
+			Input      int64 `json:"input"`
+			Output     int64 `json:"output"`
+			Reasoning  int64 `json:"reasoning"`
+			CacheRead  int64 `json:"cache_read"`
+			CacheWrite int64 `json:"cache_write"`
+		} `json:"tokens"`
+	} `json:"sessions"`
+}
+
+// Per-model rates live in ~/.config/infra-mngmt/model-rates.yaml — see
+// the rates package. No fallbacks: a model id absent from that file gets
+// no cost (the OD chip renders `—`), surfacing the configuration gap.
+
+// odModelMeta is the display label + chip-accent color for one model.
+// Color is always derived from the model id (see odColorFor) so any new
+// model the sidecar reports gets a stable, distinct color without code
+// changes. Short label is curated for the well-known Anthropic/llama
+// families and auto-derived for everything else (see odShortFor).
+type odModelMeta struct {
+	Short string
+	Color string
+}
+
+// odShortLabels maps known model ids to their compact display label. The
+// chip strip needs short, scan-able names — `claude-sonnet-4-5` rendered as
+// `sonnet 4.5`. Unknown ids fall through to odShortFor's auto-derivation.
+var odShortLabels = map[string]string{
+	"claude-sonnet-4-5":   "sonnet 4.5",
+	"claude-haiku-4-5":    "haiku 4.5",
+	"claude-opus-4-1":     "opus 4.1",
+	"claude-sonnet-4":     "sonnet 4",
+	"claude-haiku-3-5":    "haiku 3.5",
+	"llama-3.1-70b-local": "llama 3.1 70b",
+}
+
+// odShortFor returns a short display label for a model id. Curated label
+// when known; otherwise strip the "claude-" prefix and replace dashes with
+// spaces so e.g. "claude-haiku-4-5-20251001" becomes "haiku 4 5 20251001".
+func odShortFor(id string) string {
+	if s, ok := odShortLabels[id]; ok {
+		return s
+	}
+	s := strings.TrimPrefix(id, "claude-")
+	s = strings.ReplaceAll(s, "-", " ")
+	return s
+}
+
+// odColorFor returns a stable OKLCH color for a model id. We keep the same
+// lightness + chroma the rest of the app uses for kind-* tokens
+// (68% L / 0.18 C) and only vary the hue — so every model chip lives in
+// the same visual family, just at a different position on the wheel. The
+// hue is derived from a SHA-256 hash of the id (FNV-1a was tried first but
+// mapped near-identical ids to near-identical hues: "claude-sonnet-4-5"
+// and "claude-sonnet-4" landed 2° apart). SHA's avalanche pushes such
+// pairs 80-140° apart while still being deterministic.
+func odColorFor(id string) string {
+	if id == "" {
+		return "var(--text2)"
+	}
+	sum := sha256.Sum256([]byte(id))
+	hue := int(binary.BigEndian.Uint32(sum[:4]) % 360)
+	return fmt.Sprintf("oklch(68%% 0.18 %d)", hue)
+}
+
+// odMetaFor returns the display metadata (short label + chip color) for a
+// model id. Both fields are derived deterministically, so any new model
+// reported by the sidecar gets a coherent, unique chip without code edits.
+func odMetaFor(id string) odModelMeta {
+	return odModelMeta{Short: odShortFor(id), Color: odColorFor(id)}
+}
+
+// odCostFor approximates dollar cost for a model given its token totals
+// and the operator's rate table. Returns (cost, true) when the model has
+// a rate; (0, false) otherwise. Cache-write tokens are intentionally
+// excluded — Anthropic bundles their pricing with the corresponding input
+// request and including them here would double-count.
+func odCostFor(modelID string, in, out, reasoning, cacheRead int64, ratesTable map[string]rates.Rate) (float64, bool) {
+	r, ok := ratesTable[modelID]
+	if !ok {
+		return 0, false
+	}
+	cost := (float64(in)*r.In +
+		float64(cacheRead)*r.CacheRead +
+		float64(out+reasoning)*r.Out) / 1_000_000
+	return cost, true
+}
+
+// rollupByModel groups the sessions array by model id, summing tokens and
+// computing a weighted cache-hit percentage (numerator = cache_read,
+// denominator = cache_read + input). Result is sorted by (input+output)
+// descending so the heaviest spender renders first.
+func rollupByModel(report *tokenStatsReport, ratesTable map[string]rates.Rate) []openDesignModelStats {
+	type agg struct {
+		stats          openDesignModelStats
+		hitNum, hitDen int64
+	}
+	by := map[string]*agg{}
+	for _, s := range report.Sessions {
+		a, ok := by[s.Model]
+		if !ok {
+			meta := odMetaFor(s.Model)
+			a = &agg{stats: openDesignModelStats{ID: s.Model, Short: meta.Short, Color: meta.Color}}
+			by[s.Model] = a
+		}
+		a.stats.Sessions++
+		a.stats.Messages += s.Messages
+		a.stats.TokensIn += s.Tokens.Input
+		a.stats.TokensOut += s.Tokens.Output
+		a.stats.Reasoning += s.Tokens.Reasoning
+		a.stats.CacheRead += s.Tokens.CacheRead
+		a.stats.CacheWrite += s.Tokens.CacheWrite
+		a.hitNum += s.Tokens.CacheRead
+		a.hitDen += s.Tokens.CacheRead + s.Tokens.Input
+	}
+	out := make([]openDesignModelStats, 0, len(by))
+	for _, a := range by {
+		if a.hitDen > 0 {
+			a.stats.CacheHitPct = float64(a.hitNum) / float64(a.hitDen) * 100
+		}
+		if cost, ok := odCostFor(a.stats.ID, a.stats.TokensIn, a.stats.TokensOut, a.stats.Reasoning, a.stats.CacheRead, ratesTable); ok {
+			a.stats.Cost = cost
+			a.stats.HasCost = true
+		}
+		out = append(out, a.stats)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return (out[i].TokensIn + out[i].TokensOut) > (out[j].TokensIn + out[j].TokensOut)
+	})
+	return out
 }
 
 // handleOpenDesignTokenStats fetches usage from a token-stats sidecar and
@@ -548,6 +740,7 @@ func (s *Server) handleOpenDesignTokenStats(w http.ResponseWriter, r *http.Reque
 
 	view := openDesignTokenStatsView{ServiceName: name}
 	if usageURL == "" {
+		view.ErrorKind = "config"
 		view.Error = fmt.Sprintf("no token-stats service declared for %q", name)
 		s.renderOpenDesignTokenStats(w, view)
 		return
@@ -558,22 +751,58 @@ func (s *Server) handleOpenDesignTokenStats(w http.ResponseWriter, r *http.Reque
 	req, _ := http.NewRequestWithContext(fetchCtx, http.MethodGet, strings.TrimRight(usageURL, "/")+"/usage", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		view.Error = "unreachable: " + err.Error()
+		// Real network failure (dial refused, timeout, DNS). The sidecar URL
+		// is operator-supplied so include it in the server log but keep the
+		// user-facing message short and unambiguous about cause.
+		log.Printf("od token-stats: GET %s/usage failed: %v", strings.TrimRight(usageURL, "/"), err)
+		view.ErrorKind = "unreachable"
+		view.Error = "cannot connect to sidecar"
 		s.renderOpenDesignTokenStats(w, view)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		view.Error = fmt.Sprintf("HTTP %d from %s", resp.StatusCode, usageURL)
+		// Sidecar IS reachable but errored. Capture a small chunk of the
+		// response body so the operator sees the cause (most token-stats
+		// 5xx are accompanied by a plaintext explanation). Cap at 200 bytes
+		// since the chip-row replaces a single line in the UI.
+		bodySnippet := readSnippet(resp.Body, 200)
+		view.ErrorKind = "http"
+		if bodySnippet != "" {
+			view.Error = fmt.Sprintf("sidecar returned HTTP %d: %s", resp.StatusCode, bodySnippet)
+		} else {
+			view.Error = fmt.Sprintf("sidecar returned HTTP %d", resp.StatusCode)
+		}
 		s.renderOpenDesignTokenStats(w, view)
 		return
 	}
 
 	var report tokenStatsReport
 	if err := json.NewDecoder(resp.Body).Decode(&report); err != nil {
-		view.Error = "bad JSON: " + err.Error()
+		view.ErrorKind = "json"
+		view.Error = "bad JSON from sidecar: " + err.Error()
 		s.renderOpenDesignTokenStats(w, view)
 		return
+	}
+
+	byModel := rollupByModel(&report, s.modelRates)
+	var totalCost float64
+	var hasTotalCost bool
+	for _, m := range byModel {
+		if m.HasCost {
+			totalCost += m.Cost
+			hasTotalCost = true
+		}
+	}
+
+	// generated_at is ISO; show local HH:MM:SS. Tolerate empty + bad formats.
+	var generatedAt string
+	if report.GeneratedAt != "" {
+		if ts, err := time.Parse(time.RFC3339, report.GeneratedAt); err == nil {
+			generatedAt = ts.Local().Format("15:04:05")
+		} else if ts, err := time.Parse(time.RFC3339Nano, report.GeneratedAt); err == nil {
+			generatedAt = ts.Local().Format("15:04:05")
+		}
 	}
 
 	view.Stats = &openDesignTokenStats{
@@ -581,8 +810,14 @@ func (s *Server) handleOpenDesignTokenStats(w http.ResponseWriter, r *http.Reque
 		Messages:     report.Totals.Messages,
 		InputTokens:  report.Totals.Tokens.Input,
 		OutputTokens: report.Totals.Tokens.Output,
+		Reasoning:    report.Totals.Tokens.Reasoning,
 		CacheRead:    report.Totals.Tokens.CacheRead,
+		CacheWrite:   report.Totals.Tokens.CacheWrite,
 		CacheHitPct:  report.Totals.CacheHitPct,
+		GeneratedAt:  generatedAt,
+		ByModel:      byModel,
+		TotalCost:    totalCost,
+		HasTotalCost: hasTotalCost,
 	}
 	s.renderOpenDesignTokenStats(w, view)
 }

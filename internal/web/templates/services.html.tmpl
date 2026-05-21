@@ -230,46 +230,64 @@
 </div>
 {{end}}
 {{if .OpenDesignProjects}}
-{{/* Open Design (kind: open-design) rich cards. The lifecycle buttons and
-     per-service status pills live in the project group rows above (inside
-     the containers table); this card holds only the OD-specific privileged
-     display: web URL link + HTMX-loaded token-stats summary. The section
-     is hx-preserve'd so the 8s services poll doesn't re-fetch the
-     token-stats summary on every tick; the rolled-up pill updates via OOB
-     swap below. */}}
-<div class="svc-instance open-designs" id="open-designs-section" hx-preserve>
-  <div class="svc-header">
-    <span class="svc-icon" title="Open Design compose projects">◇</span>
-    <span class="svc-name">open design</span>
-    <span class="svc-endpoint">privileged display (web link + token-stats)</span>
-    <div class="svc-actions">
-      <span class="svc-running-count">{{len .OpenDesignProjects}} configured</span>
-    </div>
-  </div>
-  <div class="open-design-cards">
-    {{range .OpenDesignProjects}}
-    <div class="open-design-card">
-      <div class="open-design-card-header">
-        <span class="open-design-card-name">{{.Name}}</span>
-        {{if .Description}}<span class="open-design-card-desc">{{.Description}}</span>{{end}}
-        {{if .WebURL}}<a class="open-design-card-link" href="{{.WebURL}}" target="_blank" rel="noopener" title="open the OD web UI">{{.WebURL}} →</a>{{end}}
-        <span class="status-pill {{.StateClass}}" id="ods-pill-{{.Name}}"><span class="dot"></span>{{.State}}</span>
-      </div>
-      {{if .TokenStatsContainer}}
-      <div class="ods-tokens"
-           hx-get="/partials/open-design/token-stats?name={{.TokenStatsContainer}}"
-           hx-trigger="load">
-        <div class="ods-tokens-loading">loading usage…</div>
-      </div>
-      {{end}}
-    </div>
-    {{end}}
-  </div>
-</div>
-{{/* OOB live-pill update for the rolled-up project pill. htmx patches by id
-     leaving the preserved card chrome and token-stats slot untouched. */}}
+{{/* Open Design (kind: open-design) section cards — one per OD compose
+     project. Lifecycle controls live in the containers table above; this
+     section is read-only: chrome (◇ open design header), meta row, and an
+     HTMX-loaded usage body (aggregate stats + per-model chip strip) per
+     the design-handoff spec. The card re-renders on the services panel's
+     8s poll so a stop/start in the containers table above is reflected
+     here too (down explainer ↔ live usage strip). The body's
+     hx-trigger="load" re-fires on each re-insertion, which polls the
+     sidecar at the same 8s cadence — fine for a local container. */}}
 {{range .OpenDesignProjects}}
-<span class="status-pill {{.StateClass}}" id="ods-pill-{{.Name}}" hx-swap-oob="true"><span class="dot"></span>{{.State}}</span>
+{{$live := eq .StateClass "running"}}
+<div class="svc-instance open-design{{if not $live}} open-design-down{{end}}" id="open-design-{{.Name}}">
+  <div class="svc-header">
+    <span class="svc-icon od-glyph" title="Open Design compose project">◇</span>
+    <span class="svc-name">open design</span>
+  </div>
+  {{/* Meta row — state-aware. Status pill, project name (dims when down),
+       description, web URL chip (muted + non-interactive when down),
+       snapshot timestamp slot (populated via OOB), refresh button. */}}
+  <div class="ods-meta">
+    <span class="status-pill {{.StateClass}}" id="ods-pill-{{.Name}}"><span class="dot"></span>{{.State}}</span>
+    <span class="ods-name{{if not $live}} ods-name-dim{{end}}">{{.Name}}</span>
+    {{if .Description}}<span class="ods-desc">{{.Description}}</span>{{end}}
+    {{if .WebURL}}
+    {{if $live}}
+    <a class="ods-web-chip" href="{{.WebURL}}" target="_blank" rel="noopener" title="{{.WebURL}}">{{stripScheme .WebURL}}<span class="ods-web-chip-arrow" aria-hidden="true">↗</span></a>
+    {{else}}
+    <span class="ods-web-chip ods-web-chip-muted" title="web ui unreachable — project is not running">{{stripScheme .WebURL}}<span class="ods-web-chip-arrow" aria-hidden="true">↗</span></span>
+    {{end}}
+    {{end}}
+    <span class="ods-meta-spacer"></span>
+    {{/* ID is keyed off TokenStatsContainer (the container/service name)
+         so the OOB swap from the token-stats partial finds it — the
+         partial doesn't know the project name. */}}
+    <span class="ods-snapshot" id="ods-snapshot-{{.TokenStatsContainer}}">snapshot · —</span>
+  </div>
+  {{if $live}}
+  {{if .TokenStatsContainer}}
+  <div class="ods-body" id="ods-body-{{.TokenStatsContainer}}"
+       hx-get="/partials/open-design/token-stats?name={{.TokenStatsContainer}}"
+       hx-trigger="load"
+       hx-swap="outerHTML">
+    <div class="ods-body-loading">loading usage…</div>
+  </div>
+  {{end}}
+  {{else}}
+  {{/* Project-down explainer (matches InstanceUnreachable styling). */}}
+  <div class="ods-down expand-enter">
+    <div class="ods-down-warn">
+      <span class="ods-down-warn-icon" aria-hidden="true">⚠</span>
+      <span>open-design compose project <span class="ods-down-name">{{.Name}}</span> isn't running</span>
+    </div>
+    <div class="ods-down-explain">
+      web ui + token-stats sidecar are both unreachable. lifecycle for this project lives in the <span class="ods-down-strong">containers</span> table above — start the stack there and usage data will return.
+    </div>
+  </div>
+  {{end}}
+</div>
 {{end}}
 {{end}}
 {{if .Vaults}}

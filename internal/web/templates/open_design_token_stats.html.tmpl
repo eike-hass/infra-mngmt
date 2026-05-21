@@ -1,31 +1,77 @@
 {{- /*
-  open-design token-stats inline summary, swapped into .ods-tokens on the
-  OD card via HTMX. Renders either Stats (success) or an Error line with a
-  retry trigger. No pricing/cost — token totals only, per the sidecar's
-  contract.
+  Open Design card usage body — replaces the .ods-tokens slot via HTMX on
+  card mount (hx-trigger="load"). Renders the aggregate-row stats + the
+  per-model chip strip per the design handoff at
+  external/handoff/design_handoff_open_design_card/.
+
+  The wrapper outputs three OOB swaps:
+    1. The body slot (#ods-body-{name}): aggregate row + chip strip on
+       success, or an error line on sidecar failure.
+    2. The snapshot timestamp slot (#ods-snapshot-{name}) in the meta row.
+    3. The refresh-button data-disabled attribute on the meta row's
+       <button id="ods-refresh-{name}">.
+
+  When the project is stopped, the OUTER services.html.tmpl renders the
+  down-state explainer inline and never fires this HTMX call.
 */ -}}
 {{if .Stats}}
-<div class="ods-tokens-summary">
-  <span class="ods-tokens-label">usage:</span>
-  <span class="ods-tokens-stat"><b>{{.Stats.Sessions}}</b> sessions</span>
-  <span class="ods-tokens-stat"><b>{{.Stats.Messages}}</b> msgs</span>
-  <span class="ods-tokens-stat">in <b>{{.Stats.InputTokens}}</b></span>
-  <span class="ods-tokens-stat">out <b>{{.Stats.OutputTokens}}</b></span>
-  <span class="ods-tokens-stat">cache_read <b>{{.Stats.CacheRead}}</b></span>
-  <span class="ods-tokens-stat">hit <b>{{printf "%.1f" .Stats.CacheHitPct}}%</b></span>
-  <button class="ods-tokens-refresh"
-          hx-get="/partials/open-design/token-stats?name={{.ServiceName}}"
-          hx-target="closest .ods-tokens"
-          hx-swap="innerHTML"
-          title="refresh usage">↻</button>
+<div class="ods-body" id="ods-body-{{.ServiceName}}">
+  <div class="ods-aggregate">
+    <div class="ods-stat">
+      <span class="kicker">sessions</span>
+      <span class="ods-stat-value">{{fmtNum .Stats.Sessions}}</span>
+    </div>
+    <div class="ods-stat">
+      <span class="kicker">messages</span>
+      <span class="ods-stat-value">{{fmtNum .Stats.Messages}}</span>
+    </div>
+    <div class="ods-stat">
+      <span class="kicker">tokens in</span>
+      <span class="ods-stat-value">{{fmtNum .Stats.InputTokens}}</span>
+      <span class="ods-stat-sub">+{{fmtNum .Stats.CacheRead}} cached</span>
+    </div>
+    <div class="ods-stat">
+      <span class="kicker">tokens out</span>
+      <span class="ods-stat-value">{{fmtNum .Stats.OutputTokens}}</span>
+      <span class="ods-stat-sub">+{{fmtNum .Stats.Reasoning}} reasoning</span>
+    </div>
+    <div class="ods-stat">
+      <span class="kicker">cache hit</span>
+      <span class="ods-stat-value ods-stat-good">{{fmtPct .Stats.CacheHitPct}}</span>
+    </div>
+    <span class="ods-aggregate-spacer"></span>
+    <div class="ods-stat ods-stat-cost">
+      <span class="kicker">≈ cost</span>
+      <span class="ods-stat-value ods-stat-accent">{{if .Stats.HasTotalCost}}{{fmtUSD .Stats.TotalCost}}{{else}}—{{end}}</span>
+    </div>
+  </div>
+  {{if .Stats.ByModel}}
+  <div class="ods-divider"></div>
+  <div class="ods-chips">
+    <span class="kicker ods-chips-label">by model</span>
+    {{range .Stats.ByModel}}
+    <div class="ods-chip" style="--m:{{safeCSS .Color}}"
+         title="{{.ID}}&#10;{{.Sessions}} sessions · {{.Messages}} messages&#10;{{fmtNum .TokensIn}} in · {{fmtNum .TokensOut}} out · {{fmtNum .CacheRead}} cached&#10;{{fmtPct .CacheHitPct}} cache hit">
+      <span class="ods-chip-dot"></span>
+      <span class="ods-chip-name">{{.Short}}</span>
+      <span class="ods-chip-out">{{fmtNum .TokensOut}} out</span>
+      <span class="ods-chip-cost{{if not .HasCost}} ods-chip-cost-none{{end}}">{{if .HasCost}}{{fmtUSD .Cost}}{{else}}—{{end}}</span>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
 </div>
+{{/* OOB swaps for the snapshot timestamp + refresh-button enabled state. */}}
+<span class="ods-snapshot" id="ods-snapshot-{{.ServiceName}}" hx-swap-oob="true">snapshot · {{if .Stats.GeneratedAt}}{{.Stats.GeneratedAt}}{{else}}—{{end}}</span>
 {{else}}
-<div class="ods-tokens-error">
-  <span>token-stats unreachable: {{.Error}}</span>
-  <button class="ods-tokens-refresh"
-          hx-get="/partials/open-design/token-stats?name={{.ServiceName}}"
-          hx-target="closest .ods-tokens"
-          hx-swap="innerHTML"
-          title="retry">↻</button>
+{{/* Error copy depends on ErrorKind so the message reflects the actual
+     failure mode. "unreachable" is reserved for network failures; HTTP
+     errors are labelled "sidecar error" and carry a body snippet. The
+     services panel polls every 8s so the body re-fetches on its own once
+     the sidecar recovers — no manual retry button. */}}
+<div class="ods-body ods-body-error ods-body-error-{{if .ErrorKind}}{{.ErrorKind}}{{else}}other{{end}}" id="ods-body-{{.ServiceName}}">
+  <span class="ods-error-icon" aria-hidden="true">⚠</span>
+  <span class="ods-error-text">{{.Error}}</span>
 </div>
+<span class="ods-snapshot" id="ods-snapshot-{{.ServiceName}}" hx-swap-oob="true">snapshot · —</span>
 {{end}}

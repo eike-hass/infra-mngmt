@@ -399,6 +399,94 @@ var tmplFuncs = template.FuncMap{
 	"chevSVG": func() template.HTML {
 		return template.HTML(`<svg viewBox="0 0 10 10" fill="currentColor" aria-hidden="true"><path d="M2 4 L5 7 L8 4 Z"/></svg>`)
 	},
+	// fmtNum: 1.23M / 12k / integer — matches app-open-design.jsx fmtNum.
+	// Accepts any integer type so callers can pass `int` or `int64` without
+	// per-template casts.
+	"fmtNum": func(v any) string {
+		var n int64
+		switch x := v.(type) {
+		case int:
+			n = int64(x)
+		case int32:
+			n = int64(x)
+		case int64:
+			n = x
+		case float64:
+			n = int64(x)
+		default:
+			return fmt.Sprintf("%v", v)
+		}
+		if n >= 1_000_000 {
+			if n >= 10_000_000 {
+				return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+			}
+			return fmt.Sprintf("%.2fM", float64(n)/1_000_000)
+		}
+		if n >= 1_000 {
+			if n >= 10_000 {
+				return fmt.Sprintf("%dk", n/1_000)
+			}
+			return fmt.Sprintf("%.1fk", float64(n)/1_000)
+		}
+		return fmt.Sprintf("%d", n)
+	},
+	// fmtUSD: $1,234 / $12.4 / $1.23 — matches app-open-design.jsx fmtUSD.
+	"fmtUSD": func(n float64) string {
+		if n >= 100 {
+			return fmt.Sprintf("$%s", commaInt(int64(n+0.5)))
+		}
+		if n >= 10 {
+			return fmt.Sprintf("$%.1f", n)
+		}
+		return fmt.Sprintf("$%.2f", n)
+	},
+	// fmtPct: one decimal — matches fmtPct in the prototype.
+	"fmtPct": func(n float64) string {
+		return fmt.Sprintf("%.1f%%", n)
+	},
+	// stripScheme renders a URL with the http(s):// prefix removed — used for
+	// the OD card's web URL chip ("localhost:7456" instead of the full URL).
+	"stripScheme": func(u string) string {
+		for _, p := range []string{"https://", "http://"} {
+			if strings.HasPrefix(u, p) {
+				return u[len(p):]
+			}
+		}
+		return u
+	},
+	// safeCSS marks a string as trusted CSS so html/template doesn't rewrite
+	// values like `oklch(68% 0.18 263)` to `ZgotmplZ` when they're inlined
+	// in a `style=` attribute. Callers MUST only pass strings they've
+	// constructed themselves — never user input.
+	"safeCSS": func(s string) template.CSS { return template.CSS(s) },
+	// modelColor derives a stable OKLCH color from any model id string
+	// (Anthropic id, HF path, llama.cpp model name, …). Used to color the
+	// shared `.model-chip` component in both the OD card and the llama
+	// view — same model id → same hue across views. See odColorFor.
+	"modelColor": func(id string) template.CSS { return template.CSS(odColorFor(id)) },
+}
+
+// commaInt formats an int64 with thousands separators ("1,234,567").
+func commaInt(n int64) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var b strings.Builder
+	first := len(s) % 3
+	if first > 0 {
+		b.WriteString(s[:first])
+		if len(s) > first {
+			b.WriteByte(',')
+		}
+	}
+	for i := first; i < len(s); i += 3 {
+		b.WriteString(s[i : i+3])
+		if i+3 < len(s) {
+			b.WriteByte(',')
+		}
+	}
+	return b.String()
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
