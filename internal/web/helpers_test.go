@@ -1,7 +1,10 @@
 package web
 
 import (
+	"html/template"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/eike-hass/infra-mngmt/internal/bridge"
@@ -241,5 +244,225 @@ func TestHealthClass(t *testing.T) {
 		if got := healthClass(in); got != want {
 			t.Errorf("healthClass(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// ── FuncMap helpers introduced for the Open Design card ────────────────────
+//
+// Per the architecture-doc rule (§4.2): every entry in `tmplFuncs` gets a
+// unit test covering its happy path + the empty/zero input. These helpers
+// were shipped without tests and are being backfilled. The helpers are
+// looked up by name from the live tmplFuncs map so the test fails loudly
+// if a helper is renamed or removed.
+
+// callFuncMap is a tiny helper to invoke a tmplFuncs entry by name with a
+// single argument. Returns the result as `any` so callers can type-assert
+// to whatever the helper actually returns.
+func callFuncMap(t *testing.T, name string, arg any) any {
+	t.Helper()
+	fn, ok := tmplFuncs[name]
+	if !ok {
+		t.Fatalf("tmplFuncs[%q] missing", name)
+	}
+	fv := reflect.ValueOf(fn)
+	if fv.Kind() != reflect.Func {
+		t.Fatalf("tmplFuncs[%q] is not a function (kind=%s)", name, fv.Kind())
+	}
+	var in []reflect.Value
+	if arg != nil || fv.Type().NumIn() == 1 {
+		if arg == nil {
+			in = []reflect.Value{reflect.New(fv.Type().In(0)).Elem()}
+		} else {
+			in = []reflect.Value{reflect.ValueOf(arg)}
+		}
+	}
+	out := fv.Call(in)
+	if len(out) != 1 {
+		t.Fatalf("tmplFuncs[%q] returned %d values, want 1", name, len(out))
+	}
+	return out[0].Interface()
+}
+
+func TestFmtNum(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{0, "0"},
+		{1, "1"},
+		{999, "999"},
+		{1000, "1.0k"},
+		{1234, "1.2k"},
+		{9999, "10.0k"}, // boundary: still < 10k
+		{10000, "10k"},  // boundary: switches to integer-k format
+		{12345, "12k"},
+		{999_999, "999k"}, // just below the M boundary, still in k territory
+		{1_000_000, "1.00M"},
+		{1_234_567, "1.23M"},
+		{9_999_999, "10.00M"}, // boundary: still < 10M
+		{10_000_000, "10.0M"}, // boundary: switches to 1-decimal-M format
+		{12_345_678, "12.3M"},
+		{int64(50_000), "50k"},
+		{int32(2_500), "2.5k"},
+		{float64(1234), "1.2k"}, // float64 also accepted
+		{"abc", "abc"},          // unknown type → falls through to %v
+	}
+	for _, c := range cases {
+		got := callFuncMap(t, "fmtNum", c.in).(string)
+		if got != c.want {
+			t.Errorf("fmtNum(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestFmtUSD(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{0, "$0.00"},
+		{0.01, "$0.01"},
+		{1.23, "$1.23"},
+		{9.99, "$9.99"}, // boundary: still < 10
+		{10.0, "$10.0"}, // boundary: switches to 1-decimal
+		{12.4, "$12.4"},
+		{99.9, "$99.9"},
+		{100.0, "$100"},    // boundary: switches to integer + thousand-sep
+		{999.4, "$999"},    // truncated by the +0.5 rounding (.4 → floor)
+		{1234.5, "$1,235"}, // .5 → rounds up via int64(n+0.5)
+		{1_200_000.0, "$1,200,000"},
+	}
+	for _, c := range cases {
+		got := callFuncMap(t, "fmtUSD", c.in).(string)
+		if got != c.want {
+			t.Errorf("fmtUSD(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestFmtPct(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{0, "0.0%"},
+		{0.1, "0.1%"},
+		{50, "50.0%"},
+		{62.4, "62.4%"},
+		{99.95, "100.0%"}, // rounds at one decimal
+		{100, "100.0%"},
+	}
+	for _, c := range cases {
+		got := callFuncMap(t, "fmtPct", c.in).(string)
+		if got != c.want {
+			t.Errorf("fmtPct(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestStripScheme(t *testing.T) {
+	cases := map[string]string{
+		"http://localhost:7456":          "localhost:7456",
+		"https://example.com/foo":        "example.com/foo",
+		"http://172.17.0.1:8080/v1/path": "172.17.0.1:8080/v1/path",
+		"localhost:7456":                 "localhost:7456", // no scheme → passthrough
+		"":                               "",
+		"ftp://hopefully-not":            "ftp://hopefully-not", // unknown scheme → passthrough
+	}
+	for in, want := range cases {
+		got := callFuncMap(t, "stripScheme", in).(string)
+		if got != want {
+			t.Errorf("stripScheme(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCommaInt(t *testing.T) {
+	cases := map[int64]string{
+		0:           "0",
+		1:           "1",
+		999:         "999",
+		1000:        "1,000",
+		1234:        "1,234",
+		12345:       "12,345",
+		1_234_567:   "1,234,567",
+		12_345_678:  "12,345,678",
+		123_456_789: "123,456,789",
+	}
+	for in, want := range cases {
+		if got := commaInt(in); got != want {
+			t.Errorf("commaInt(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCardDelayMs(t *testing.T) {
+	cases := map[int]int{
+		0:   0,
+		1:   15,
+		10:  150,
+		29:  435,
+		30:  450, // cap
+		31:  450, // capped
+		100: 450, // capped
+	}
+	for in, want := range cases {
+		got := callFuncMap(t, "cardDelayMs", in).(int)
+		if got != want {
+			t.Errorf("cardDelayMs(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+func TestChevSVG(t *testing.T) {
+	// Returns template.HTML containing the triangle SVG. The path is the
+	// design-handoff spec — must include `<svg`, the path `M2 4 L5 7 L8 4 Z`,
+	// `fill="currentColor"`, and `aria-hidden="true"`.
+	got := string(callFuncMap(t, "chevSVG", nil).(template.HTML))
+	for _, want := range []string{
+		"<svg",
+		`viewBox="0 0 10 10"`,
+		`fill="currentColor"`,
+		`aria-hidden="true"`,
+		`M2 4 L5 7 L8 4 Z`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("chevSVG missing %q in output: %s", want, got)
+		}
+	}
+}
+
+func TestSafeCSS(t *testing.T) {
+	// safeCSS wraps a string as template.CSS without modification — used so
+	// trusted OKLCH strings inside `style=` attributes don't get autoescaped
+	// to ZgotmplZ. The contract is exact passthrough.
+	in := "oklch(68% 0.18 263)"
+	got := callFuncMap(t, "safeCSS", in).(template.CSS)
+	if string(got) != in {
+		t.Errorf("safeCSS(%q) = %q, want exact passthrough", in, string(got))
+	}
+	// Empty input → empty template.CSS (no panic).
+	empty := callFuncMap(t, "safeCSS", "").(template.CSS)
+	if string(empty) != "" {
+		t.Errorf("safeCSS(\"\") = %q, want empty string", string(empty))
+	}
+}
+
+func TestModelColor(t *testing.T) {
+	// modelColor is a thin wrapper over odColorFor that returns template.CSS.
+	// Determinism + non-empty are the only contract — odColorFor has its
+	// own dedicated test for the hue-distribution claim.
+	a := string(callFuncMap(t, "modelColor", "claude-sonnet-4-5").(template.CSS))
+	b := string(callFuncMap(t, "modelColor", "claude-sonnet-4-5").(template.CSS))
+	if a != b {
+		t.Errorf("modelColor is non-deterministic: %q vs %q", a, b)
+	}
+	if !strings.HasPrefix(a, "oklch(68% 0.18 ") {
+		t.Errorf("modelColor produced unexpected format: %q", a)
+	}
+	// Empty model id → fallback color, not panic.
+	empty := string(callFuncMap(t, "modelColor", "").(template.CSS))
+	if empty == "" {
+		t.Errorf("modelColor(\"\") returned empty; expected fallback color string")
 	}
 }
