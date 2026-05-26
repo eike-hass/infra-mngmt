@@ -859,6 +859,9 @@ tr.project-member .proc-name{color:var(--text2)}
 .ods-web-chip:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
 .ods-web-chip-arrow{font-size:9px}
 .ods-web-chip-muted{color:var(--text3);background:transparent;border-color:var(--border2);pointer-events:none}
+.ods-version-chip{display:inline-flex;align-items:center;font-size:10px;color:var(--text2);background:transparent;border:1px solid var(--border2);border-radius:10px;padding:1px 6px;flex-shrink:0;font-family:var(--font)}
+.ods-version-chip-loading{color:var(--text3);font-style:italic}
+.ods-version-chip-error{color:var(--text3);border-style:dashed}
 .ods-meta-spacer{flex:1;min-width:0}
 .ods-snapshot{color:var(--text3);font-size:9px;font-family:var(--font);flex-shrink:0}
 .ods-refresh{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:1px 7px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:11px;line-height:1;height:20px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -893,6 +896,11 @@ tr.project-member .proc-name{color:var(--text2)}
 .ods-chip-out{font-size:10px;color:var(--text2);font-family:var(--font)}
 .ods-chip-cost{font-size:10px;color:var(--accent);font-weight:600;font-family:var(--font)}
 .ods-chip-cost-none{color:var(--text3)}
+/* Free / self-hosted model priced via its `equivalent_of` paid sibling —
+   muted accent + italic + "≈" prefix in the template so the operator can
+   distinguish actual spend from a what-if approximation at a glance. */
+.ods-chip-cost-equiv{color:color-mix(in srgb,var(--accent) 55%,var(--text3));font-style:italic;font-weight:500}
+.ods-stat-value-equiv{font-style:italic;font-weight:500;opacity:.85}
 
 /* Error body — sidecar unreachable but compose project is up. */
 .ods-body-error{padding:10px 14px;display:flex;align-items:center;gap:8px;color:var(--orange);font-size:11px}

@@ -1,0 +1,13 @@
+{{- /*
+  Version chip on the Open Design card meta row. Lazy-loaded via HTMX on
+  card mount (hx-trigger="load") and OOB-swapped in place. Shows the
+  daemon version reported by GET /api/version, suffixed with the channel
+  when it's not the default stable build. On failure renders a muted
+  "v?" with the error reason in the title tooltip so the slot stays
+  occupied.
+*/ -}}
+{{if .Version}}
+<span class="ods-version-chip" title="OD daemon /api/version · channel: {{if .Channel}}{{.Channel}}{{else}}—{{end}}">v{{.Version}}{{if and .Channel (ne .Channel "stable")}} · {{.Channel}}{{end}}</span>
+{{else}}
+<span class="ods-version-chip ods-version-chip-error" title="version unavailable: {{if .Error}}{{.Error}}{{else}}unknown{{end}}">v?</span>
+{{end}}

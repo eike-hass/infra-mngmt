@@ -236,9 +236,11 @@
      HTMX-loaded usage body (aggregate stats + per-model chip strip) per
      the design-handoff spec. The card re-renders on the services panel's
      8s poll so a stop/start in the containers table above is reflected
-     here too (down explainer ↔ live usage strip). The body's
-     hx-trigger="load" re-fires on each re-insertion, which polls the
-     sidecar at the same 8s cadence — fine for a local container. */}}
+     here too (down explainer ↔ live usage strip). The body, version
+     chip, and snapshot timestamp inside the card all carry
+     hx-preserve="true" so they survive the parent's outerHTML swap
+     without flickering back to their loading-state placeholders; each
+     refreshes itself on its own internal cadence. */}}
 {{range .OpenDesignProjects}}
 {{$live := eq .StateClass "running"}}
 <div class="svc-instance open-design{{if not $live}} open-design-down{{end}}" id="open-design-{{.Name}}">
@@ -256,6 +258,16 @@
     {{if .WebURL}}
     {{if $live}}
     <a class="ods-web-chip" href="{{.WebURL}}" target="_blank" rel="noopener" title="{{.WebURL}}">{{stripScheme .WebURL}}<span class="ods-web-chip-arrow" aria-hidden="true">↗</span></a>
+    {{/* Daemon version, lazy-loaded once per card mount and refreshed on
+         a 60s self-poll. hx-preserve="true" keeps the loaded chip across
+         the parent services-panel's 8s outerHTML swap, avoiding a
+         visible flicker back to "v…" every refresh. */}}
+    <span class="ods-version-chip ods-version-chip-loading"
+          id="ods-version-{{.Name}}"
+          hx-preserve="true"
+          hx-get="/partials/open-design/version?name={{.Name}}"
+          hx-trigger="load, every 60s"
+          hx-swap="outerHTML">v…</span>
     {{else}}
     <span class="ods-web-chip ods-web-chip-muted" title="web ui unreachable — project is not running">{{stripScheme .WebURL}}<span class="ods-web-chip-arrow" aria-hidden="true">↗</span></span>
     {{end}}
@@ -263,14 +275,23 @@
     <span class="ods-meta-spacer"></span>
     {{/* ID is keyed off TokenStatsContainer (the container/service name)
          so the OOB swap from the token-stats partial finds it — the
-         partial doesn't know the project name. */}}
-    <span class="ods-snapshot" id="ods-snapshot-{{.TokenStatsContainer}}">snapshot · —</span>
+         partial doesn't know the project name. hx-preserve keeps the
+         loaded timestamp text across the parent's 8s outerHTML swap so
+         it doesn't flicker back to "snapshot · —". */}}
+    <span class="ods-snapshot" id="ods-snapshot-{{.TokenStatsContainer}}" hx-preserve="true">snapshot · —</span>
   </div>
   {{if $live}}
   {{if .TokenStatsContainer}}
+  {{/* Self-polls every 8s; hx-preserve keeps the loaded body in place
+       across the parent services-panel's outerHTML swap so usage data
+       doesn't flicker back to "loading usage…" twice a minute. When the
+       project goes down the parent re-renders WITHOUT this element
+       (replaced by the down explainer below), so hx-preserve doesn't
+       interfere with state transitions. */}}
   <div class="ods-body" id="ods-body-{{.TokenStatsContainer}}"
+       hx-preserve="true"
        hx-get="/partials/open-design/token-stats?name={{.TokenStatsContainer}}"
-       hx-trigger="load"
+       hx-trigger="load, every 8s"
        hx-swap="outerHTML">
     <div class="ods-body-loading">loading usage…</div>
   </div>
@@ -292,9 +313,10 @@
 {{end}}
 {{if .Vaults}}
 {{/* The vaults section re-renders on every services-panel poll (every 8s),
-     mirroring the llama-view pattern. The body's hx-trigger="load" re-fires
-     each time the row is inserted, polling /partials/vault/panel at the
-     same cadence — fine for a local mcp-fs control plane. */}}
+     mirroring the llama-view pattern. Each vault row's body carries
+     hx-preserve="true" so it survives the parent's outerHTML swap without
+     flickering back to "loading vault…"; the body self-polls
+     /partials/vault/panel every 8s on its own timer. */}}
 <div class="svc-instance vaults" id="vaults-section">
   <div class="svc-header">
     <span class="svc-icon" title="filesystem MCP vaults">⊟</span>
@@ -324,9 +346,14 @@
           {{if $v.Description}}<div class="vault-row-desc">{{$v.Description}}</div>{{end}}
         </div>
       </summary>
+      {{/* Self-polls every 8s; hx-preserve keeps the loaded panel in
+           place across the parent services-panel's outerHTML swap so
+           the allowlist + tree don't flicker back to "loading vault…"
+           on every refresh. */}}
       <div class="vault-row-body" id="vault-{{$v.Name}}-mount"
+           hx-preserve="true"
            hx-get="/partials/vault/panel?name={{$v.Name}}"
-           hx-trigger="load">
+           hx-trigger="load, every 8s">
         <div class="vault-loading">loading vault…</div>
       </div>
     </details>

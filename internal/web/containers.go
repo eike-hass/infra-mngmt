@@ -537,6 +537,14 @@ type openDesignTokenStats struct {
 	// rate. When false the aggregate-row cost cell renders "—".
 	TotalCost    float64
 	HasTotalCost bool
+
+	// TotalIsPartiallyEquivalent flags that at least one ByModel entry
+	// contributed an `equivalent_of`-derived cost to TotalCost (i.e. the
+	// model is free / self-hosted and the figure represents what the same
+	// workload would have cost on the comparable paid endpoint). The
+	// aggregate-row cell prefixes "≈" when true so the user knows the
+	// total mixes actual spend with paid equivalents.
+	TotalIsPartiallyEquivalent bool
 }
 
 // openDesignModelStats is a per-model rollup used by the chip strip. The
@@ -556,6 +564,12 @@ type openDesignModelStats struct {
 	CacheHitPct float64
 	Cost        float64 // USD; 0 when HasCost=false
 	HasCost     bool    // false → chip renders "—" instead of a dollar value
+	// IsEquivalent flags that Cost came from the rate's `equivalent_of`
+	// target (a paid model the operator marked as comparable) rather than
+	// the model's own actual rate. Triggered when actual rate is zero but
+	// an equivalent is configured — the chip then renders "≈ $X.XX" so
+	// the user sees what a free / self-hosted workload would have cost.
+	IsEquivalent bool
 }
 
 // tokenStatsReport mirrors the JSON shape returned by od-token-stats's
@@ -652,19 +666,38 @@ func odMetaFor(id string) odModelMeta {
 }
 
 // odCostFor approximates dollar cost for a model given its token totals
-// and the operator's rate table. Returns (cost, true) when the model has
-// a rate; (0, false) otherwise. Cache-write tokens are intentionally
-// excluded — Anthropic bundles their pricing with the corresponding input
-// request and including them here would double-count.
-func odCostFor(modelID string, in, out, reasoning, cacheRead int64, ratesTable map[string]rates.Rate) (float64, bool) {
+// and the operator's rate table. Returns:
+//
+//   - (cost, true, false) when the model has actual non-zero rates.
+//   - (equivalent_cost, true, true) when the model's actual rates are all
+//     zero AND it has an equivalent_of mapping. The equivalent rate is the
+//     paid model the operator marked as comparable; the OD card surfaces
+//     the figure with a `≈` prefix so the user sees what the workload
+//     would cost on a hosted endpoint.
+//   - (0, true, false) when actual rates are zero and there's no
+//     equivalent (literal "free" model).
+//   - (0, false, false) when the model id isn't in the table at all.
+//
+// Cache-write tokens are intentionally excluded — Anthropic bundles their
+// pricing with the corresponding input request and including them here
+// would double-count.
+func odCostFor(modelID string, in, out, reasoning, cacheRead int64, ratesTable map[string]rates.Rate) (cost float64, hasCost, isEquivalent bool) {
 	r, ok := ratesTable[modelID]
 	if !ok {
-		return 0, false
+		return 0, false, false
 	}
-	cost := (float64(in)*r.In +
+	actual := (float64(in)*r.In +
 		float64(cacheRead)*r.CacheRead +
 		float64(out+reasoning)*r.Out) / 1_000_000
-	return cost, true
+	if actual > 0 || !r.HasEquivalent {
+		return actual, true, false
+	}
+	// Actual cost is zero but the operator marked a paid equivalent —
+	// surface that figure so free-model rollups remain informative.
+	equiv := (float64(in)*r.EquivalentIn +
+		float64(cacheRead)*r.EquivalentCacheRead +
+		float64(out+reasoning)*r.EquivalentOut) / 1_000_000
+	return equiv, true, true
 }
 
 // rollupByModel groups the sessions array by model id, summing tokens and
@@ -699,9 +732,10 @@ func rollupByModel(report *tokenStatsReport, ratesTable map[string]rates.Rate) [
 		if a.hitDen > 0 {
 			a.stats.CacheHitPct = float64(a.hitNum) / float64(a.hitDen) * 100
 		}
-		if cost, ok := odCostFor(a.stats.ID, a.stats.TokensIn, a.stats.TokensOut, a.stats.Reasoning, a.stats.CacheRead, ratesTable); ok {
+		if cost, ok, isEquiv := odCostFor(a.stats.ID, a.stats.TokensIn, a.stats.TokensOut, a.stats.Reasoning, a.stats.CacheRead, ratesTable); ok {
 			a.stats.Cost = cost
 			a.stats.HasCost = true
+			a.stats.IsEquivalent = isEquiv
 		}
 		out = append(out, a.stats)
 	}
@@ -788,10 +822,14 @@ func (s *Server) handleOpenDesignTokenStats(w http.ResponseWriter, r *http.Reque
 	byModel := rollupByModel(&report, s.modelRates)
 	var totalCost float64
 	var hasTotalCost bool
+	var totalIsPartiallyEquivalent bool
 	for _, m := range byModel {
 		if m.HasCost {
 			totalCost += m.Cost
 			hasTotalCost = true
+			if m.IsEquivalent {
+				totalIsPartiallyEquivalent = true
+			}
 		}
 	}
 
@@ -806,24 +844,107 @@ func (s *Server) handleOpenDesignTokenStats(w http.ResponseWriter, r *http.Reque
 	}
 
 	view.Stats = &openDesignTokenStats{
-		Sessions:     report.Totals.Sessions,
-		Messages:     report.Totals.Messages,
-		InputTokens:  report.Totals.Tokens.Input,
-		OutputTokens: report.Totals.Tokens.Output,
-		Reasoning:    report.Totals.Tokens.Reasoning,
-		CacheRead:    report.Totals.Tokens.CacheRead,
-		CacheWrite:   report.Totals.Tokens.CacheWrite,
-		CacheHitPct:  report.Totals.CacheHitPct,
-		GeneratedAt:  generatedAt,
-		ByModel:      byModel,
-		TotalCost:    totalCost,
-		HasTotalCost: hasTotalCost,
+		Sessions:                   report.Totals.Sessions,
+		Messages:                   report.Totals.Messages,
+		InputTokens:                report.Totals.Tokens.Input,
+		OutputTokens:               report.Totals.Tokens.Output,
+		Reasoning:                  report.Totals.Tokens.Reasoning,
+		CacheRead:                  report.Totals.Tokens.CacheRead,
+		CacheWrite:                 report.Totals.Tokens.CacheWrite,
+		CacheHitPct:                report.Totals.CacheHitPct,
+		GeneratedAt:                generatedAt,
+		ByModel:                    byModel,
+		TotalCost:                  totalCost,
+		HasTotalCost:               hasTotalCost,
+		TotalIsPartiallyEquivalent: totalIsPartiallyEquivalent,
 	}
 	s.renderOpenDesignTokenStats(w, view)
 }
 
 func (s *Server) renderOpenDesignTokenStats(w http.ResponseWriter, view openDesignTokenStatsView) {
 	tmpl := parseTemplate("ods", "templates/open_design_token_stats.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = tmpl.Execute(w, view)
+}
+
+// openDesignVersionView is the data model for the version chip on an Open
+// Design card. Either Version is set (success) or Error is set (fetch
+// failed); the template renders one or the other.
+type openDesignVersionView struct {
+	Name    string // OD project name (key for HTMX target)
+	Version string // e.g. "0.8.0"
+	Channel string // e.g. "development", "stable"
+	Error   string // user-facing failure message
+}
+
+// handleOpenDesignVersion fetches GET /api/version from the OD project's
+// web URL and renders the version-chip partial. Request: GET ?name=<od
+// project name>. The OD daemon exempts /api/version from the bearer-token
+// gate (apps/daemon/src/server.ts §3.K1) so this works regardless of
+// OD_BIND_HOST / OD_API_TOKEN config on the OD side.
+func (s *Server) handleOpenDesignVersion(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "missing name", http.StatusBadRequest)
+		return
+	}
+
+	view := openDesignVersionView{Name: name}
+
+	var webURL string
+	for _, c := range s.containerDecls {
+		if c.Kind != "open-design" || c.Name != name {
+			continue
+		}
+		for _, svc := range c.Services {
+			if svc.Role == "web" && svc.URL != "" {
+				webURL = svc.URL
+				break
+			}
+		}
+		break
+	}
+	if webURL == "" {
+		view.Error = "no web service declared"
+		s.renderOpenDesignVersion(w, view)
+		return
+	}
+
+	fetchCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(fetchCtx, http.MethodGet, strings.TrimRight(webURL, "/")+"/api/version", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("od version: GET %s/api/version failed: %v", strings.TrimRight(webURL, "/"), err)
+		view.Error = "unreachable"
+		s.renderOpenDesignVersion(w, view)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		view.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		s.renderOpenDesignVersion(w, view)
+		return
+	}
+
+	var payload struct {
+		Version struct {
+			Version string `json:"version"`
+			Channel string `json:"channel"`
+		} `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		view.Error = "bad JSON"
+		s.renderOpenDesignVersion(w, view)
+		return
+	}
+	view.Version = payload.Version.Version
+	view.Channel = payload.Version.Channel
+	s.renderOpenDesignVersion(w, view)
+}
+
+func (s *Server) renderOpenDesignVersion(w http.ResponseWriter, view openDesignVersionView) {
+	tmpl := parseTemplate("odv", "templates/open_design_version.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.Execute(w, view)
 }

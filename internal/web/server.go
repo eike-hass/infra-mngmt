@@ -196,6 +196,9 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		// the token-stats service (resolved against declarations to find the
 		// configured usage_url).
 		r.Get("/partials/open-design/token-stats", s.handleOpenDesignTokenStats)
+		// OD daemon version badge, lazy-loaded from the OD card meta row.
+		// ?name= is the OD project name (containers.yaml entry).
+		r.Get("/partials/open-design/version", s.handleOpenDesignVersion)
 		r.Get("/partials/logs", s.handleProcessLogs)     // ?instance=&process=
 		r.Get("/partials/llama", s.handleLlamaAll)       // standalone "llama" view body
 		r.Post("/api/llama/drain", s.handleLlamaDrain)   // ?instance=&process=  destructive: cancel all in-flight + queued tasks

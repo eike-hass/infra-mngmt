@@ -77,6 +77,73 @@ func TestHandleOpenDesignTokenStatsRendersSummary(t *testing.T) {
 	}
 }
 
+// TestHandleOpenDesignTokenStatsRendersEquivalentForFreeModel locks in the
+// rendering contract for the equivalent_of feature: when a free model
+// (actual rate zero) has a resolved equivalent rate, the per-model chip
+// shows `≈ $X.XX` with the ods-chip-cost-equiv class, and the aggregate
+// cost cell switches to "≈ equiv. cost" with the ods-stat-value-equiv
+// class. Paid models continue to render as before.
+func TestHandleOpenDesignTokenStatsRendersEquivalentForFreeModel(t *testing.T) {
+	// Stub sidecar returning a session for a free model so rollupByModel
+	// produces a chip with the equivalent treatment.
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/usage" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"totals": {
+				"sessions": 1, "messages": 5, "cache_hit_pct": 0,
+				"tokens": {"input": 1000000, "output": 200000, "reasoning": 0, "cache_read": 0, "cache_write": 0}
+			},
+			"sessions": [
+				{
+					"model": "opencode/big-pickle", "messages": 5,
+					"tokens": {"input": 1000000, "output": 200000, "reasoning": 0, "cache_read": 0, "cache_write": 0}
+				}
+			]
+		}`))
+	}))
+	defer stub.Close()
+
+	s := &Server{
+		containerDecls: []containers.Container{odDecl(stub.URL)},
+		modelRates: map[string]rates.Rate{
+			"opencode/big-pickle": {
+				In: 0, Out: 0, CacheRead: 0,
+				EquivalentOf: "GLM-4.7", HasEquivalent: true,
+				EquivalentIn: 0.55, EquivalentOut: 2.20, EquivalentCacheRead: 0.055,
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/partials/open-design/token-stats?name=od-token-stats", nil)
+	w := httptest.NewRecorder()
+	s.handleOpenDesignTokenStats(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		"ods-chip-cost-equiv",  // per-model chip equivalent class
+		"≈",                    // visible disambiguator prefix
+		"ods-stat-value-equiv", // aggregate cell flagged as equivalent
+		"≈ equiv. cost",        // aggregate kicker reflects equiv mode
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+	// Sanity: the actual `≈ cost` kicker (for purely-paid totals) should
+	// NOT appear when at least one model contributed equivalent dollars.
+	if strings.Contains(body, ">≈ cost<") {
+		t.Errorf("body has the non-equiv '≈ cost' kicker but the rollup is partially equivalent\n--- body ---\n%s", body)
+	}
+}
+
 func TestHandleOpenDesignTokenStatsSidecarUnreachable(t *testing.T) {
 	// Point usage_url at a closed port so Dial fails fast.
 	s := &Server{containerDecls: []containers.Container{
@@ -154,6 +221,133 @@ func TestHandleOpenDesignTokenStatsUnknownName(t *testing.T) {
 	}
 	body := w.Body.String()
 	if !strings.Contains(body, "no token-stats service declared") {
+		t.Errorf("expected unknown-name error in body, got: %s", body)
+	}
+}
+
+// odDeclWithWebURL builds an open-design declaration whose role=web service
+// points at an arbitrary URL — used by the version-chip tests so they can
+// aim at an httptest server.
+func odDeclWithWebURL(name, webURL string) containers.Container {
+	return containers.Container{
+		Name: name,
+		Kind: "open-design",
+		Services: []containers.ServiceEntry{
+			{Container: "open-design", Role: "web", URL: webURL},
+		},
+	}
+}
+
+func TestHandleOpenDesignVersionRendersBadge(t *testing.T) {
+	// Stub OD daemon returning the /api/version shape we observed on 0.8.0.
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/version" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":{"version":"0.8.0","channel":"development","packaged":false,"platform":"linux","arch":"x64"}}`))
+	}))
+	defer stub.Close()
+
+	s := &Server{containerDecls: []containers.Container{odDeclWithWebURL("open-design", stub.URL)}}
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/partials/open-design/version?name=open-design", nil)
+	w := httptest.NewRecorder()
+	s.handleOpenDesignVersion(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		`class="ods-version-chip"`, // success variant, no error class
+		"v0.8.0",                   // version
+		"development",              // channel suffix appended for non-stable
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+	// Stable channel should NOT be appended (we'd render "v1.0.0" alone).
+	// Validate that logic with a separate request.
+}
+
+func TestHandleOpenDesignVersionStableChannelOmittedSuffix(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":{"version":"1.0.0","channel":"stable"}}`))
+	}))
+	defer stub.Close()
+
+	s := &Server{containerDecls: []containers.Container{odDeclWithWebURL("open-design", stub.URL)}}
+	req := httptest.NewRequest(http.MethodGet,
+		"/partials/open-design/version?name=open-design", nil)
+	w := httptest.NewRecorder()
+	s.handleOpenDesignVersion(w, req)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "v1.0.0") {
+		t.Errorf("body missing v1.0.0: %s", body)
+	}
+	if strings.Contains(body, "· stable") {
+		t.Errorf("stable channel suffix should be omitted, got: %s", body)
+	}
+}
+
+func TestHandleOpenDesignVersionDaemonUnreachable(t *testing.T) {
+	// Point webURL at a closed port so Dial fails fast.
+	s := &Server{containerDecls: []containers.Container{
+		odDeclWithWebURL("open-design", "http://127.0.0.1:1"),
+	}}
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/partials/open-design/version?name=open-design", nil)
+	w := httptest.NewRecorder()
+	s.handleOpenDesignVersion(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 (error partial), got %d", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		"ods-version-chip-error", // error variant CSS class
+		"v?",                     // placeholder glyph
+		"unreachable",            // reason surfaced in title tooltip
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+}
+
+func TestHandleOpenDesignVersionMissingName(t *testing.T) {
+	s := &Server{}
+	req := httptest.NewRequest(http.MethodGet,
+		"/partials/open-design/version", nil)
+	w := httptest.NewRecorder()
+	s.handleOpenDesignVersion(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing name, got %d", w.Code)
+	}
+}
+
+func TestHandleOpenDesignVersionUnknownProject(t *testing.T) {
+	// Declaration list has an OD project, but query asks for a different one.
+	s := &Server{containerDecls: []containers.Container{odDeclWithWebURL("open-design", "http://x")}}
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/partials/open-design/version?name=ghost", nil)
+	w := httptest.NewRecorder()
+	s.handleOpenDesignVersion(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 (error partial), got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "no web service declared") {
 		t.Errorf("expected unknown-name error in body, got: %s", body)
 	}
 }
@@ -418,14 +612,17 @@ func TestRollupByModelEmptySessions(t *testing.T) {
 }
 
 func TestOdCostFor(t *testing.T) {
-	rates := map[string]rates.Rate{
+	ratesTable := map[string]rates.Rate{
 		"claude-sonnet-4-5": {In: 3, Out: 15, CacheRead: 0.30},
 	}
 
 	// Known model, normal token mix.
-	cost, ok := odCostFor("claude-sonnet-4-5", 1_000_000, 200_000, 50_000, 3_000_000, rates)
+	cost, ok, isEquiv := odCostFor("claude-sonnet-4-5", 1_000_000, 200_000, 50_000, 3_000_000, ratesTable)
 	if !ok {
 		t.Fatalf("odCostFor returned ok=false for a configured model")
+	}
+	if isEquiv {
+		t.Errorf("odCostFor reported isEquivalent=true for a real paid model; expected false")
 	}
 	// (1M × 3 + 3M × 0.3 + (200k + 50k) × 15) / 1M = 3.0 + 0.9 + 3.75 = $7.65
 	if cost < 7.64 || cost > 7.66 {
@@ -433,18 +630,87 @@ func TestOdCostFor(t *testing.T) {
 	}
 
 	// Unknown model — no fallback.
-	_, ok = odCostFor("unknown-model", 1000, 200, 0, 0, rates)
+	_, ok, _ = odCostFor("unknown-model", 1000, 200, 0, 0, ratesTable)
 	if ok {
-		t.Errorf("odCostFor returned ok=true for an unknown model; expected (0, false)")
+		t.Errorf("odCostFor returned ok=true for an unknown model; expected (0, false, false)")
 	}
 
 	// Empty token totals on a known model — cost should be zero, not error.
-	cost, ok = odCostFor("claude-sonnet-4-5", 0, 0, 0, 0, rates)
-	if !ok {
-		t.Errorf("odCostFor returned ok=false for zero tokens; expected (0, true)")
+	cost, ok, isEquiv = odCostFor("claude-sonnet-4-5", 0, 0, 0, 0, ratesTable)
+	if !ok || isEquiv {
+		t.Errorf("odCostFor returned (ok=%v, isEquiv=%v) for zero tokens; expected (true, false)", ok, isEquiv)
 	}
 	if cost != 0 {
 		t.Errorf("odCostFor returned %f for zero tokens, want 0", cost)
+	}
+}
+
+// TestOdCostForEquivalent covers the free-model-with-paid-equivalent path:
+// when a model's actual rate is zero AND it carries a resolved
+// `equivalent_of` entry, odCostFor computes the cost using the equivalent
+// rate and flags isEquivalent=true so the UI can render `≈ $X.XX` rather
+// than `$0`. Real spend on a non-zero actual rate continues to win even
+// if equivalent_of is also set.
+func TestOdCostForEquivalent(t *testing.T) {
+	// `opencode/big-pickle` is free but the operator marked GLM-4.7 as
+	// the comparable paid model — those rates are inlined into the Rate
+	// by rates.Load(); here we set them directly to simulate that state.
+	ratesTable := map[string]rates.Rate{
+		"opencode/big-pickle": {
+			In: 0, Out: 0, CacheRead: 0,
+			EquivalentOf: "GLM-4.7", HasEquivalent: true,
+			EquivalentIn: 0.55, EquivalentOut: 2.20, EquivalentCacheRead: 0.055,
+		},
+		"claude-sonnet-4-5": {In: 3, Out: 15, CacheRead: 0.30},
+	}
+
+	// Free model with non-trivial tokens — should surface equivalent cost.
+	cost, ok, isEquiv := odCostFor("opencode/big-pickle", 1_000_000, 200_000, 0, 0, ratesTable)
+	if !ok {
+		t.Fatalf("odCostFor returned ok=false; expected ok=true for a model with equivalent_of")
+	}
+	if !isEquiv {
+		t.Errorf("odCostFor returned isEquivalent=false; expected true when actual rate is zero and equivalent_of is set")
+	}
+	// (1M × 0.55 + 200k × 2.20) / 1M = 0.55 + 0.44 = $0.99
+	if cost < 0.98 || cost > 1.00 {
+		t.Errorf("odCostFor equivalent cost = %.4f, want ~0.99", cost)
+	}
+
+	// Free model with zero tokens — still ok+equivalent, cost is zero.
+	cost, ok, isEquiv = odCostFor("opencode/big-pickle", 0, 0, 0, 0, ratesTable)
+	if !ok || !isEquiv || cost != 0 {
+		t.Errorf("zero-token equivalent path: got (cost=%v, ok=%v, isEquiv=%v); want (0, true, true)", cost, ok, isEquiv)
+	}
+
+	// Paid model unaffected — actual rate wins regardless of any
+	// hypothetical equivalent_of (which it doesn't have here anyway).
+	_, ok, isEquiv = odCostFor("claude-sonnet-4-5", 1_000, 1_000, 0, 0, ratesTable)
+	if !ok || isEquiv {
+		t.Errorf("paid model: got (ok=%v, isEquiv=%v); want (true, false)", ok, isEquiv)
+	}
+}
+
+// TestOdCostForActualWinsOverEquivalent: if a model HAS non-zero actual
+// rates AND also a resolved equivalent_of (unusual but possible — operator
+// might keep equivalent_of as documentation while pricing flips paid), the
+// actual rate must win. equivalent_of is only a fallback for the
+// genuinely-free case.
+func TestOdCostForActualWinsOverEquivalent(t *testing.T) {
+	ratesTable := map[string]rates.Rate{
+		"flips-to-paid": {
+			In: 0.10, Out: 0.50, CacheRead: 0.01,
+			EquivalentOf: "expensive-sibling", HasEquivalent: true,
+			EquivalentIn: 5, EquivalentOut: 25, EquivalentCacheRead: 0.50,
+		},
+	}
+	cost, ok, isEquiv := odCostFor("flips-to-paid", 1_000_000, 0, 0, 0, ratesTable)
+	if !ok || isEquiv {
+		t.Fatalf("got (ok=%v, isEquiv=%v); want (true, false) when actual rate is non-zero", ok, isEquiv)
+	}
+	// 1M × 0.10 = $0.10. NOT $5 (which would be the equivalent rate).
+	if cost < 0.09 || cost > 0.11 {
+		t.Errorf("expected ~$0.10 from actual rate, got %.4f", cost)
 	}
 }
 

@@ -41,8 +41,12 @@
     </div>
     <span class="ods-aggregate-spacer"></span>
     <div class="ods-stat ods-stat-cost">
-      <span class="kicker">≈ cost</span>
-      <span class="ods-stat-value ods-stat-accent">{{if .Stats.HasTotalCost}}{{fmtUSD .Stats.TotalCost}}{{else}}—{{end}}</span>
+      {{/* When TotalCost is partially or fully composed of equivalent_of
+           figures (free / self-hosted models priced as their paid
+           comparable), prefix the kicker with "≈" so the aggregate is
+           visibly an approximation, not actual spend. */}}
+      <span class="kicker">{{if .Stats.TotalIsPartiallyEquivalent}}≈ equiv. cost{{else}}≈ cost{{end}}</span>
+      <span class="ods-stat-value ods-stat-accent{{if .Stats.TotalIsPartiallyEquivalent}} ods-stat-value-equiv{{end}}">{{if .Stats.HasTotalCost}}{{fmtUSD .Stats.TotalCost}}{{else}}—{{end}}</span>
     </div>
   </div>
   {{if .Stats.ByModel}}
@@ -51,11 +55,11 @@
     <span class="kicker ods-chips-label">by model</span>
     {{range .Stats.ByModel}}
     <div class="ods-chip" style="--m:{{safeCSS .Color}}"
-         title="{{.ID}}&#10;{{.Sessions}} sessions · {{.Messages}} messages&#10;{{fmtNum .TokensIn}} in · {{fmtNum .TokensOut}} out · {{fmtNum .CacheRead}} cached&#10;{{fmtPct .CacheHitPct}} cache hit">
+         title="{{.ID}}&#10;{{.Sessions}} sessions · {{.Messages}} messages&#10;{{fmtNum .TokensIn}} in · {{fmtNum .TokensOut}} out · {{fmtNum .CacheRead}} cached&#10;{{fmtPct .CacheHitPct}} cache hit{{if .IsEquivalent}}&#10;cost = paid-equivalent rate (free / self-hosted model){{end}}">
       <span class="ods-chip-dot"></span>
       <span class="ods-chip-name">{{.Short}}</span>
       <span class="ods-chip-out">{{fmtNum .TokensOut}} out</span>
-      <span class="ods-chip-cost{{if not .HasCost}} ods-chip-cost-none{{end}}">{{if .HasCost}}{{fmtUSD .Cost}}{{else}}—{{end}}</span>
+      <span class="ods-chip-cost{{if not .HasCost}} ods-chip-cost-none{{end}}{{if .IsEquivalent}} ods-chip-cost-equiv{{end}}">{{if .HasCost}}{{if .IsEquivalent}}≈{{end}}{{fmtUSD .Cost}}{{else}}—{{end}}</span>
     </div>
     {{end}}
   </div>
