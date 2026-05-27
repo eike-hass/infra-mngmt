@@ -191,6 +191,17 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Post("/api/vault/allow", s.handleVaultAllow)       // ?name=&path=
 		r.Post("/api/vault/disallow", s.handleVaultDisallow) // ?name=&path=
 
+		// Services-panel section endpoints. The shell lives at
+		// /partials/services and is fetched once on view-reveal; each
+		// section inside self-polls its own endpoint. See
+		// docs/frontend-architecture.md §7.10 for the per-section
+		// polling strategy.
+		r.Get("/partials/services/bridges", s.handleServicesBridges)            // action-only (no poll)
+		r.Get("/partials/services/containers", s.handleServicesContainers)      // every 8s
+		r.Get("/partials/services/open-design", s.handleServicesOpenDesignCard) // ?name=  every 8s
+		r.Get("/partials/services/vaults", s.handleServicesVaults)              // every 8s
+		r.Get("/partials/services/instances", s.handleServicesInstance)         // ?name=  every 8s
+
 		// Open Design (open-design) inline token-stats summary, lazy-loaded
 		// from the OD card via HTMX. ?name= is the docker container name of
 		// the token-stats service (resolved against declarations to find the
@@ -200,7 +211,8 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		// ?name= is the OD project name (containers.yaml entry).
 		r.Get("/partials/open-design/version", s.handleOpenDesignVersion)
 		r.Get("/partials/logs", s.handleProcessLogs)     // ?instance=&process=
-		r.Get("/partials/llama", s.handleLlamaAll)       // standalone "llama" view body
+		r.Get("/partials/llama", s.handleLlamaAll)       // shell — one placeholder per declared server
+		r.Get("/partials/llama/card", s.handleLlamaCard) // ?instance=&process=  every 10s per card
 		r.Post("/api/llama/drain", s.handleLlamaDrain)   // ?instance=&process=  destructive: cancel all in-flight + queued tasks
 		r.Post("/api/llama/load", s.handleLlamaLoad)     // ?instance=&process=&model=  router-mode: load preset (LRU may evict another)
 		r.Post("/api/llama/unload", s.handleLlamaUnload) // ?instance=&process=&model=  router-mode: evict preset, frees VRAM

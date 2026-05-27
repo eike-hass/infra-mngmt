@@ -1,11 +1,83 @@
+{{/* services.html.tmpl — shell + per-section blocks.
 
-<div class="svc-grid"
-     id="services-inner"
-     hx-get="/partials/services"
-     hx-trigger="every 8s"
-     hx-swap="outerHTML">
-{{if .Bridges}}
-<div class="svc-instance bridges">
+The shell renders once on view-reveal and contains only static structure
+plus per-section placeholders. Each section self-polls its own endpoint:
+
+  /partials/services            → "shell"           (this file, once on reveal)
+  /partials/services/bridges    → "bridges-section" (no poll; action-only)
+  /partials/services/containers → "containers-section" (every 8s)
+  /partials/services/open-design?name=X → "open-design-card" (every 8s, per project)
+  /partials/services/vaults     → "vaults-section"  (every 8s)
+  /partials/services/instances?name=X → "instance-section" (every 8s, per compose instance)
+
+No outer-panel poll, no structural ETag, no JS ETag tracker — flicker
+control falls out of the architecture instead of a workaround. See
+docs/frontend-architecture.md §7.10.
+
+Action buttons keep targeting #services-inner with outerHTML for cross-
+section refreshes — actions are user-initiated and rare, so the brief
+"loading…" flash on each section while they re-fetch is acceptable.
+*/}}
+
+{{define "shell"}}
+<div class="svc-grid" id="services-inner">
+  {{if .HasBridges}}
+  {{/* Bridges section has no periodic poll — state changes only via
+       action buttons (apply, reload, per-bridge stop/start). hx-trigger="load"
+       fetches once when the shell mounts; subsequent updates come from
+       action button responses targeting #services-inner. */}}
+  <div id="bridges-section" class="svc-instance svc-section-loading"
+       hx-get="/partials/services/bridges"
+       hx-trigger="load"
+       hx-swap="outerHTML">
+    <p class="svc-section-placeholder">loading bridges…</p>
+  </div>
+  {{end}}
+
+  {{if .HasContainers}}
+  <div id="containers-section" class="svc-instance svc-section-loading"
+       hx-get="/partials/services/containers"
+       hx-trigger="load, every 8s"
+       hx-swap="outerHTML">
+    <p class="svc-section-placeholder">loading containers…</p>
+  </div>
+  {{end}}
+
+  {{range .OpenDesignNames}}
+  <div id="open-design-{{.}}" class="svc-instance svc-section-loading"
+       hx-get="/partials/services/open-design?name={{.}}"
+       hx-trigger="load, every 8s"
+       hx-swap="outerHTML">
+    <p class="svc-section-placeholder">loading open design…</p>
+  </div>
+  {{end}}
+
+  {{if .HasVaults}}
+  <div id="vaults-section" class="svc-instance svc-section-loading"
+       hx-get="/partials/services/vaults"
+       hx-trigger="load, every 8s"
+       hx-swap="outerHTML">
+    <p class="svc-section-placeholder">loading vaults…</p>
+  </div>
+  {{end}}
+
+  {{if .InstanceNames}}
+  {{range .InstanceNames}}
+  <div id="instance-{{.}}" class="svc-instance svc-section-loading"
+       hx-get="/partials/services/instances?name={{.}}"
+       hx-trigger="load, every 8s"
+       hx-swap="outerHTML">
+    <p class="svc-section-placeholder">loading process-compose · {{.}}…</p>
+  </div>
+  {{end}}
+  {{else}}
+  <p style="color:var(--text3);font-style:italic">no process-compose instances configured — add them to config.yaml</p>
+  {{end}}
+</div>
+{{end}}
+
+{{define "bridges-section"}}
+<div id="bridges-section" class="svc-instance bridges">
   <div class="svc-header">
     <span class="svc-icon" title="network bridges">⇄</span>
     <span class="svc-name">network bridges</span>
@@ -107,8 +179,12 @@
   </table>
 </div>
 {{end}}
-{{if or .Containers .ContainerProjects}}
-<div class="svc-instance containers">
+
+{{define "containers-section"}}
+<div id="containers-section" class="svc-instance containers"
+     hx-get="/partials/services/containers"
+     hx-trigger="every 8s"
+     hx-swap="outerHTML">
   <div class="svc-header">
     <span class="svc-icon" title="docker containers">⬢</span>
     <span class="svc-name">containers</span>
@@ -131,11 +207,6 @@
       <th class="col-name">name</th><th class="col-state">state</th><th>status</th><th>cpu</th><th>mem</th><th>id</th><th class="col-actions"></th>
     </tr></thead>
     <tbody>
-    {{/* Compose-project groups first (prototype: app-services-v3.jsx
-         ContainersTable). One header row per ContainerProject with rolled-up
-         state + project lifecycle controls, then one row per service
-         container. Service rows have no per-row action button — the group
-         header owns the lifecycle. */}}
     {{range .ContainerProjects}}
     {{$projName := .Name}}
     <tr class="project-header" data-project="{{.Name}}">
@@ -178,8 +249,6 @@
     </tr>
     {{end}}
     {{end}}{{/* end range .ContainerProjects */}}
-    {{/* Standalone divider — only when BOTH compose stacks and standalone
-         containers are present (prototype: line 293 in app-services-v3.jsx). */}}
     {{if and .ContainerProjects .Containers}}
     <tr class="standalone-divider">
       <td colspan="7"><span class="kicker">standalone · {{len .Containers}} container{{if ne (len .Containers) 1}}s{{end}}</span></td>
@@ -229,79 +298,67 @@
   </table>
 </div>
 {{end}}
-{{if .OpenDesignProjects}}
-{{/* Open Design (kind: open-design) section cards — one per OD compose
-     project. Lifecycle controls live in the containers table above; this
-     section is read-only: chrome (◇ open design header), meta row, and an
-     HTMX-loaded usage body (aggregate stats + per-model chip strip) per
-     the design-handoff spec. The card re-renders on the services panel's
-     8s poll so a stop/start in the containers table above is reflected
-     here too (down explainer ↔ live usage strip). The body, version
-     chip, and snapshot timestamp inside the card all carry
-     hx-preserve="true" so they survive the parent's outerHTML swap
-     without flickering back to their loading-state placeholders; each
-     refreshes itself on its own internal cadence. */}}
-{{range .OpenDesignProjects}}
-{{$live := eq .StateClass "running"}}
-<div class="svc-instance open-design{{if not $live}} open-design-down{{end}}" id="open-design-{{.Name}}">
+
+{{define "open-design-card"}}
+{{$live := eq .Card.StateClass "running"}}
+<div id="open-design-{{.Card.Name}}"
+     class="svc-instance open-design{{if not $live}} open-design-down{{end}}"
+     hx-get="/partials/services/open-design?name={{.Card.Name}}"
+     hx-trigger="every 8s"
+     hx-swap="outerHTML">
   <div class="svc-header">
     <span class="svc-icon od-glyph" title="Open Design compose project">◇</span>
     <span class="svc-name">open design</span>
   </div>
   {{/* Meta row — state-aware. Status pill, project name (dims when down),
        description, web URL chip (muted + non-interactive when down),
-       snapshot timestamp slot (populated via OOB), refresh button. */}}
+       snapshot timestamp slot (populated via OOB). */}}
   <div class="ods-meta">
-    <span class="status-pill {{.StateClass}}" id="ods-pill-{{.Name}}"><span class="dot"></span>{{.State}}</span>
-    <span class="ods-name{{if not $live}} ods-name-dim{{end}}">{{.Name}}</span>
-    {{if .Description}}<span class="ods-desc">{{.Description}}</span>{{end}}
-    {{if .WebURL}}
+    <span class="status-pill {{.Card.StateClass}}" id="ods-pill-{{.Card.Name}}"><span class="dot"></span>{{.Card.State}}</span>
+    <span class="ods-name{{if not $live}} ods-name-dim{{end}}">{{.Card.Name}}</span>
+    {{if .Card.Description}}<span class="ods-desc">{{.Card.Description}}</span>{{end}}
+    {{if .Card.WebURL}}
     {{if $live}}
-    <a class="ods-web-chip" href="{{.WebURL}}" target="_blank" rel="noopener" title="{{.WebURL}}">{{stripScheme .WebURL}}<span class="ods-web-chip-arrow" aria-hidden="true">↗</span></a>
-    {{/* Daemon version, lazy-loaded once per card mount and refreshed on
-         a 60s self-poll. hx-preserve="true" keeps the loaded chip across
-         the parent services-panel's 8s outerHTML swap, avoiding a
-         visible flicker back to "v…" every refresh. */}}
+    <a class="ods-web-chip" href="{{.Card.WebURL}}" target="_blank" rel="noopener" title="{{.Card.WebURL}}">{{stripScheme .Card.WebURL}}<span class="ods-web-chip-arrow" aria-hidden="true">↗</span></a>
+    {{/* Daemon version chip — self-polls every 60s. hx-preserve keeps the
+         loaded chip across this card's 8s outerHTML swap so the version
+         doesn't blink back to "v…" on every refresh. */}}
     <span class="ods-version-chip ods-version-chip-loading"
-          id="ods-version-{{.Name}}"
+          id="ods-version-{{.Card.Name}}"
           hx-preserve="true"
-          hx-get="/partials/open-design/version?name={{.Name}}"
+          hx-get="/partials/open-design/version?name={{.Card.Name}}"
           hx-trigger="load, every 60s"
           hx-swap="outerHTML">v…</span>
     {{else}}
-    <span class="ods-web-chip ods-web-chip-muted" title="web ui unreachable — project is not running">{{stripScheme .WebURL}}<span class="ods-web-chip-arrow" aria-hidden="true">↗</span></span>
+    <span class="ods-web-chip ods-web-chip-muted" title="web ui unreachable — project is not running">{{stripScheme .Card.WebURL}}<span class="ods-web-chip-arrow" aria-hidden="true">↗</span></span>
     {{end}}
     {{end}}
     <span class="ods-meta-spacer"></span>
-    {{/* ID is keyed off TokenStatsContainer (the container/service name)
-         so the OOB swap from the token-stats partial finds it — the
-         partial doesn't know the project name. hx-preserve keeps the
-         loaded timestamp text across the parent's 8s outerHTML swap so
-         it doesn't flicker back to "snapshot · —". */}}
-    <span class="ods-snapshot" id="ods-snapshot-{{.TokenStatsContainer}}" hx-preserve="true">snapshot · —</span>
+    {{/* ID keyed off TokenStatsContainer so the OOB swap from the token-
+         stats partial finds it. hx-preserve keeps the loaded timestamp
+         across this card's outerHTML swap; OOB swaps still update
+         preserved elements in htmx 2.x (explicit-id replace, not swap-
+         target traversal). */}}
+    <span class="ods-snapshot" id="ods-snapshot-{{.Card.TokenStatsContainer}}" hx-preserve="true">snapshot · —</span>
   </div>
   {{if $live}}
-  {{if .TokenStatsContainer}}
-  {{/* Self-polls every 8s; hx-preserve keeps the loaded body in place
-       across the parent services-panel's outerHTML swap so usage data
-       doesn't flicker back to "loading usage…" twice a minute. When the
-       project goes down the parent re-renders WITHOUT this element
-       (replaced by the down explainer below), so hx-preserve doesn't
-       interfere with state transitions. */}}
-  <div class="ods-body" id="ods-body-{{.TokenStatsContainer}}"
+  {{if .Card.TokenStatsContainer}}
+  {{/* Usage body self-polls every 8s; hx-preserve keeps it across this
+       card's own outerHTML swap so usage data doesn't flicker back to
+       "loading usage…" each card-refresh. */}}
+  <div class="ods-body" id="ods-body-{{.Card.TokenStatsContainer}}"
        hx-preserve="true"
-       hx-get="/partials/open-design/token-stats?name={{.TokenStatsContainer}}"
+       hx-get="/partials/open-design/token-stats?name={{.Card.TokenStatsContainer}}"
        hx-trigger="load, every 8s"
        hx-swap="outerHTML">
     <div class="ods-body-loading">loading usage…</div>
   </div>
   {{end}}
   {{else}}
-  {{/* Project-down explainer (matches InstanceUnreachable styling). */}}
-  <div class="ods-down expand-enter">
+  <div class="ods-down">
     <div class="ods-down-warn">
       <span class="ods-down-warn-icon" aria-hidden="true">⚠</span>
-      <span>open-design compose project <span class="ods-down-name">{{.Name}}</span> isn't running</span>
+      <span>open-design compose project <span class="ods-down-name">{{.Card.Name}}</span> isn't running</span>
     </div>
     <div class="ods-down-explain">
       web ui + token-stats sidecar are both unreachable. lifecycle for this project lives in the <span class="ods-down-strong">containers</span> table above — start the stack there and usage data will return.
@@ -310,14 +367,12 @@
   {{end}}
 </div>
 {{end}}
-{{end}}
-{{if .Vaults}}
-{{/* The vaults section re-renders on every services-panel poll (every 8s),
-     mirroring the llama-view pattern. Each vault row's body carries
-     hx-preserve="true" so it survives the parent's outerHTML swap without
-     flickering back to "loading vault…"; the body self-polls
-     /partials/vault/panel every 8s on its own timer. */}}
-<div class="svc-instance vaults" id="vaults-section">
+
+{{define "vaults-section"}}
+<div id="vaults-section" class="svc-instance vaults"
+     hx-get="/partials/services/vaults"
+     hx-trigger="every 8s"
+     hx-swap="outerHTML">
   <div class="svc-header">
     <span class="svc-icon" title="filesystem MCP vaults">⊟</span>
     <span class="svc-name">vaults</span>
@@ -346,59 +401,81 @@
           {{if $v.Description}}<div class="vault-row-desc">{{$v.Description}}</div>{{end}}
         </div>
       </summary>
-      {{/* Self-polls every 8s; hx-preserve keeps the loaded panel in
-           place across the parent services-panel's outerHTML swap so
-           the allowlist + tree don't flicker back to "loading vault…"
-           on every refresh. */}}
+      {{/* Vault row body — self-polls /partials/vault/panel every 8s
+           with hx-preserve so the loaded panel survives this vault
+           section's own 8s outerHTML swap. When AllowedCount is -1
+           (vault known unreachable at render time) we INLINE the
+           unreachable panel so F5 page loads don't flash "loading
+           vault…" — drop the `load` from hx-trigger for that case.
+
+           IMPORTANT: inline HTML below must stay in sync with the
+           unreachable branch of vault_panel.html.tmpl. */}}
       <div class="vault-row-body" id="vault-{{$v.Name}}-mount"
            hx-preserve="true"
            hx-get="/partials/vault/panel?name={{$v.Name}}"
-           hx-trigger="load, every 8s">
+           hx-trigger="{{if lt $v.AllowedCount 0}}every 8s{{else}}load, every 8s{{end}}">
+        {{if lt $v.AllowedCount 0}}
+        <div class="vault-panel vault-panel-down" id="vault-{{$v.Name}}-panel">
+          <div class="svc-unreachable expand-enter">
+            <div class="svc-unreachable-warn">
+              <span class="svc-unreachable-warn-icon" aria-hidden="true">⚠</span>
+              <span>vault <span class="svc-unreachable-name">{{$v.Name}}</span> isn't reachable</span>
+            </div>
+            <div class="svc-unreachable-explain">
+              the mcp-fs control plane didn't respond — allowlist + tree can't be read until it's back. lifecycle for this vault's container lives in the <span class="svc-unreachable-strong">containers</span> table above. the services panel polls every 8s; this card refreshes once it's reachable again.
+            </div>
+          </div>
+        </div>
+        {{else}}
         <div class="vault-loading">loading vault…</div>
+        {{end}}
       </div>
     </details>
     {{end}}
   </div>
 </div>
 {{end}}
-{{if not .Instances}}
-  <p style="color:var(--text3);font-style:italic">no process-compose instances configured — add them to config.yaml</p>
-{{else}}
-{{range $iv := .Instances}}
-<div class="svc-instance processes" data-instance="{{$iv.Name}}">
+
+{{define "instance-section"}}
+{{with .Instance}}
+<div id="instance-{{.Name}}" class="svc-instance processes" data-instance="{{.Name}}"
+     hx-get="/partials/services/instances?name={{.Name}}"
+     hx-trigger="every 8s"
+     hx-swap="outerHTML">
   <div class="svc-header">
     <span class="svc-icon" title="process-compose instance">⚙</span>
-    <span class="svc-name">process-compose · {{$iv.Name}}</span>
-    <span class="online-dot {{if $iv.Online}}online{{else}}offline{{end}}"
-          title="process-compose {{if $iv.Online}}reachable{{else}}unreachable{{end}}"></span>
-    <span class="svc-endpoint">{{$iv.Endpoint}}</span>
+    <span class="svc-name">process-compose · {{.Name}}</span>
+    <span class="online-dot {{if .Online}}online{{else}}offline{{end}}"
+          title="process-compose {{if .Online}}reachable{{else}}unreachable{{end}}"></span>
+    <span class="svc-endpoint">{{.Endpoint}}</span>
     <div class="svc-actions">
-      {{if $iv.Online}}
-      <span class="svc-running-count">{{runningCount $iv.Processes}}/{{len $iv.Processes}} running</span>
+      {{if .Online}}
+      <span class="svc-running-count">{{runningCount .Processes}}/{{len .Processes}} running</span>
       <button class="svc-boot-btn show-internals-btn"
               data-toggle="show-internals"
               title="show internal bridge-* processes for debugging">show internals</button>
       <button class="svc-boot-btn restart"
-              hx-post="/compose/reload?instance={{$iv.Name}}"
+              hx-post="/compose/reload?instance={{.Name}}"
               hx-target="#services-inner"
               hx-swap="outerHTML"
               title="re-read compose YAML and reconcile (drops removed entries on recent process-compose versions)">reload</button>
-      {{else if $iv.CanBoot}}
+      {{else if .CanBoot}}
       <button class="svc-boot-btn start"
-              hx-post="/compose/start?instance={{$iv.Name}}"
+              hx-post="/compose/start?instance={{.Name}}"
               hx-target="#services-inner"
               hx-swap="outerHTML"
               title="start process-compose">start</button>
       {{end}}
     </div>
   </div>
-  {{if $iv.Online}}
+  {{if .Online}}
   <table class="process-table">
     <thead><tr>
       <th class="col-name">name</th><th class="col-state">status</th><th class="col-pid">pid</th><th>restarts</th><th>cpu</th><th>mem</th><th>age</th><th class="col-actions"></th>
     </tr></thead>
     <tbody>
-    {{range $iv.Processes}}
+    {{$instName := .Name}}
+    {{range .Processes}}
     <tr{{if isInternalProcess .}} class="proc-internal"{{end}}>
       <td class="col-name">
         <div class="proc-name">{{.Name}}</div>
@@ -406,9 +483,6 @@
       </td>
       <td class="col-state">
         <span class="status-pill {{statusClass .Status}}"><span class="dot"></span>{{.Status}}</span>
-        {{/* Health pill is redundant when status=Running + health=Ready
-             (the common happy path). Show it only when it adds info:
-             probe configured AND (not ready OR not running). */}}
         {{if and .HasHealthProbe (or (ne .Health "Ready") (not .IsRunning))}}<span class="health-pill {{healthClass .Health}}" title="readiness: {{.Health}}">{{.Health}}</span>{{end}}
         {{if and (not .IsRunning) (ne .ExitCode 0)}}<span class="exit-code" title="exit code">{{.ExitCode}}</span>{{end}}
       </td>
@@ -431,26 +505,26 @@
         <div class="proc-actions">
           {{if canStop .Status}}
           <button class="proc-btn stop"
-                  hx-post="/process/stop?instance={{$iv.Name}}&process={{.Name}}"
+                  hx-post="/process/stop?instance={{$instName}}&process={{.Name}}"
                   hx-target="#services-inner" hx-swap="outerHTML"
                   title="halt the process and stop the restart loop">stop</button>
           {{end}}
           {{if canStart .Status}}
           <button class="proc-btn start"
-                  hx-post="/process/start?instance={{$iv.Name}}&process={{.Name}}"
+                  hx-post="/process/start?instance={{$instName}}&process={{.Name}}"
                   hx-target="#services-inner" hx-swap="outerHTML">start</button>
           {{end}}
           {{if .IsRunning}}
           <button class="proc-btn restart"
-                  hx-post="/process/restart?instance={{$iv.Name}}&process={{.Name}}"
+                  hx-post="/process/restart?instance={{$instName}}&process={{.Name}}"
                   hx-target="#services-inner" hx-swap="outerHTML">restart</button>
           {{end}}
           <button class="proc-btn logs"
-                  hx-get="/partials/logs?instance={{$iv.Name}}&process={{.Name}}"
-                  hx-target="#logs-{{$iv.Name}}-{{.Name}}"
+                  hx-get="/partials/logs?instance={{$instName}}&process={{.Name}}"
+                  hx-target="#logs-{{$instName}}-{{.Name}}"
                   hx-swap="innerHTML">logs</button>
         </div>
-        <div id="logs-{{$iv.Name}}-{{.Name}}"></div>
+        <div id="logs-{{$instName}}-{{.Name}}"></div>
       </td>
     </tr>
     {{end}}
@@ -460,10 +534,10 @@
   <div class="svc-offline">
     <span class="svc-offline-icon">⚠ unreachable</span>
     <div class="svc-offline-title">process-compose not reachable</div>
-    <div class="svc-offline-endpoint">{{$iv.Endpoint}}</div>
-    {{if $iv.CanBoot}}
+    <div class="svc-offline-endpoint">{{.Endpoint}}</div>
+    {{if .CanBoot}}
     <button class="svc-boot-btn start"
-            hx-post="/compose/start?instance={{$iv.Name}}"
+            hx-post="/compose/start?instance={{.Name}}"
             hx-target="#services-inner"
             hx-swap="outerHTML">start process-compose</button>
     {{else}}
@@ -474,4 +548,3 @@
 </div>
 {{end}}
 {{end}}
-</div>

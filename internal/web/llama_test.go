@@ -198,3 +198,8 @@ func TestHandleLlamaDrainCancelsActiveSlot(t *testing.T) {
 		t.Errorf("response missing llama-card selector; body=%s", w.Body.String()[:min(200, w.Body.Len())])
 	}
 }
+
+// Note: structural-ETag tests removed when the llama view moved to
+// per-card polling (docs/frontend-architecture.md §7.10). The 304
+// fast-path no longer exists; each card swaps itself outerHTML on its
+// own 10s timer.

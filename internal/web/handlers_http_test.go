@@ -637,14 +637,19 @@ func TestBridgesRefreshReloadsYAML(t *testing.T) {
 	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetBridgesFile(path)
 
-	// First refresh picks up alpha.
+	// First refresh picks up alpha. /bridges/refresh now returns the shell
+	// (per §7.10 per-section poll architecture); the bridges content
+	// itself lives at /partials/services/bridges, which the shell's
+	// placeholder triggers via hx-trigger="load" in the browser flow.
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/bridges/refresh", nil))
 	if rr.Code != 200 {
 		t.Fatalf("first refresh: got %d, body: %s", rr.Code, rr.Body.String())
 	}
+	rr = httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/services/bridges", nil))
 	if !strings.Contains(rr.Body.String(), "alpha") {
-		t.Errorf("rendered services partial should mention alpha:\n%s", rr.Body.String())
+		t.Errorf("rendered bridges section should mention alpha:\n%s", rr.Body.String())
 	}
 
 	// Edit YAML to add beta, refresh again.
@@ -663,6 +668,8 @@ func TestBridgesRefreshReloadsYAML(t *testing.T) {
 	if rr.Code != 200 {
 		t.Fatalf("second refresh: got %d, body: %s", rr.Code, rr.Body.String())
 	}
+	rr = httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/services/bridges", nil))
 	body := rr.Body.String()
 	if !strings.Contains(body, "alpha") || !strings.Contains(body, "beta") {
 		t.Errorf("after edit, refresh should pick up the new entry:\n%s", body)
@@ -707,8 +714,10 @@ func TestLlamaPageSingleModel(t *testing.T) {
 	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetLlamaServers([]LlamaEntry{{Instance: "wsl", Process: "llama-server", Endpoint: upstream.URL}})
 
+	// Per-card endpoint — the shell at /partials/llama just lists
+	// placeholders; the actual probe + rendering happens in /partials/llama/card.
 	rr := httptest.NewRecorder()
-	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama", nil))
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama/card?instance=wsl&process=llama-server", nil))
 	if rr.Code != 200 {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
@@ -766,7 +775,7 @@ func TestLlamaPageRouterMode(t *testing.T) {
 	srv.SetLlamaServers([]LlamaEntry{{Instance: "windows", Process: "llama-server", Endpoint: upstream.URL}})
 
 	rr := httptest.NewRecorder()
-	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama", nil))
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama/card?instance=windows&process=llama-server", nil))
 	if rr.Code != 200 {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
@@ -809,7 +818,7 @@ func TestLlamaPageRendersHealthErrorWithoutCrash(t *testing.T) {
 	srv := New(nil, nil, "", nil, nil, nil, nil, nil, nil)
 	srv.SetLlamaServers([]LlamaEntry{{Instance: "ghost", Process: "llama-server", Endpoint: "http://127.0.0.1:1"}})
 	rr := httptest.NewRecorder()
-	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama", nil))
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/llama/card?instance=ghost&process=llama-server", nil))
 	if rr.Code != 200 {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
@@ -1306,3 +1315,10 @@ func TestBuildContainerControlsView_StoppedDevcontainer(t *testing.T) {
 
 // TODO(docker-mock): add TestHandleContainerStart_ReturnsControlsHTMLOnSuccess
 // TODO(docker-mock): add TestHandleContainerStop_ReturnsControlsHTMLOnSuccess
+
+// Note: structural-ETag tests removed when the services panel moved to
+// per-section polling (docs/frontend-architecture.md §7.10). The 304
+// fast-path no longer exists; each section's wrapper is replaced
+// outerHTML in place every 8s, and the static parts of the panel
+// (bridges, OD chrome, vault chrome) live in dedicated endpoints that
+// rarely re-render.

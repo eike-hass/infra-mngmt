@@ -1,17 +1,40 @@
 
-{{if not .Servers}}
+{{/* llama.html.tmpl — shell + per-card blocks. The shell renders once on
+     view-reveal; each card self-polls /partials/llama/card every 10s. See
+     docs/frontend-architecture.md §7.10 for the per-section poll strategy. */}}
+
+{{define "llama-shell"}}
+{{if not .Keys}}
 <div class="llama-page-empty">
   no <code>llama_servers</code> declared in config.yaml — add at least one entry to populate this view
 </div>
 {{else}}
 <div class="llama-grid">
-{{range .Servers}}
+{{range .Keys}}
+<article class="llama-card svc-section-loading"
+         id="llama-card-{{.Instance}}-{{.Process}}"
+         hx-get="/partials/llama/card?instance={{.Instance}}&process={{.Process}}"
+         hx-trigger="load, every 10s"
+         hx-swap="outerHTML">
+  <p class="svc-section-placeholder">loading {{.Process}}…</p>
+</article>
+{{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "llama-card"}}
 {{$inst := .Instance}}
 {{$proc := .Process}}
 {{$dead := ne .HealthErr ""}}
 {{$rollup := llamaServerRollup .}}
 {{$split := llamaModelsByLoadState .Models}}
-<article class="llama-card{{if $dead}} dead{{end}}" aria-label="llama server {{.Process}}">
+<article class="llama-card{{if $dead}} dead{{end}}"
+         id="llama-card-{{.Instance}}-{{.Process}}"
+         hx-get="/partials/llama/card?instance={{.Instance}}&process={{.Process}}"
+         hx-trigger="every 10s"
+         hx-swap="outerHTML"
+         aria-label="llama server {{.Process}}">
   {{/* ── Header — two-line meta: status + name/instance/router on line 1,
        endpoint · build on line 2; right side carries the live rollup.
        Acts as a disclosure toggle — click/Enter/Space collapses the card body. ── */}}
@@ -207,8 +230,6 @@
   </details>
   </div>{{/* end llama-card-body */}}
 </article>
-{{end}}
-</div>
 {{end}}
 
 {{define "llama-metrics-row"}}

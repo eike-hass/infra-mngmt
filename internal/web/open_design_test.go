@@ -431,39 +431,60 @@ func TestServicesTemplateRendersProjectGroupAndCard(t *testing.T) {
 			{Name: "od-token-stats", State: "running", StateClass: "running", Status: "Up 2m"},
 		},
 	}
-	data := servicesPageData{
-		ContainerProjects:  []containerProjectView{project},
-		OpenDesignProjects: []containerProjectView{project},
-	}
 	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		t.Fatalf("template.Execute: %v", err)
+
+	// Containers-section: should render the project group row + member
+	// rows for the OD project (lifecycle controls live here).
+	containersData := servicesPageData{ContainerProjects: []containerProjectView{project}}
+	var containersBuf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&containersBuf, "containers-section", containersData); err != nil {
+		t.Fatalf("template.ExecuteTemplate containers-section: %v", err)
 	}
-	out := buf.String()
+	containers := containersBuf.String()
 	for _, want := range []string{
-		// Containers section: project group with header + member rows.
 		`<tr class="project-header" data-project="open-design"`,
-		`project-disclosure`, // SVG chevron in the disclosure header
+		`project-disclosure`,
 		`project-kind-label">compose`,
-		`/decl-container/stop?name=open-design`, // lifecycle button on header
+		`/decl-container/stop?name=open-design`,
 		`<tr class="project-member" data-project="open-design"`,
-		// OD card section: per-project chrome + meta row.
-		`id="open-design-open-design"`,              // per-project wrapper
-		`<span class="svc-name">open design</span>`, // section header label
-		`class="ods-name`,                           // meta-row project name
-		`localhost:7456`,                            // web URL chip (scheme stripped)
-		`hx-get="/partials/open-design/token-stats?name=od-token-stats"`,
-		`hx-trigger="load"`,
-		`id="ods-pill-open-design"`,        // rolled-up pill on the project chrome
-		`id="ods-snapshot-od-token-stats"`, // snapshot slot keyed off TokenStatsContainer (OOB target)
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output missing %q", want)
+		if !strings.Contains(containers, want) {
+			t.Errorf("containers-section missing %q\n--- output ---\n%s", want, containers)
 		}
 	}
-	// Negative check: the card should NOT carry lifecycle buttons anymore.
-	if strings.Contains(out, `open-design-card-actions`) {
+
+	// Open-design-card: should render the per-project card chrome + the
+	// hx-preserve'd inner slots that self-poll.
+	cardData := struct{ Card containerProjectView }{Card: project}
+	var cardBuf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&cardBuf, "open-design-card", cardData); err != nil {
+		t.Fatalf("template.ExecuteTemplate open-design-card: %v", err)
+	}
+	card := cardBuf.String()
+	for _, want := range []string{
+		`id="open-design-open-design"`,
+		`<span class="svc-name">open design</span>`,
+		`class="ods-name`,
+		`localhost:7456`,
+		`hx-get="/partials/open-design/token-stats?name=od-token-stats"`,
+		// Inner data slots carry hx-preserve so they survive this card's
+		// own 8s outerHTML swap.
+		`hx-preserve="true"`,
+		`hx-trigger="load, every 8s"`,
+		`id="ods-pill-open-design"`,
+		`id="ods-snapshot-od-token-stats"`,
+		// Card wrapper itself self-polls every 8s (no `load` — placeholder
+		// in the shell does the initial fetch).
+		`hx-get="/partials/services/open-design?name=open-design"`,
+		`hx-trigger="every 8s"`,
+	} {
+		if !strings.Contains(card, want) {
+			t.Errorf("open-design-card missing %q\n--- output ---\n%s", want, card)
+		}
+	}
+	// Negative check: the card must not carry lifecycle buttons (those
+	// live on the containers-section project group header).
+	if strings.Contains(card, `open-design-card-actions`) {
 		t.Errorf("card should not render lifecycle buttons (moved to project group header)")
 	}
 }

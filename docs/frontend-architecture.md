@@ -303,7 +303,9 @@ if (!r.ok) showToast({ kind: 'error', body: await r.text() });
 
 ### 7.4 Polling
 
-`hx-trigger="every 8s"` on a `<div>` whose content is the partial is acceptable for slow-changing aggregates (services panel, llama page). **(rule)** Polling intervals: 5 s minimum, 30 s preferred for non-critical surfaces. Anything faster must use SSE.
+`hx-trigger="every 8s"` on a `<div>` whose content is the partial is acceptable for slow-changing aggregates. **(rule)** Polling intervals: 5 s minimum, 30 s preferred for non-critical surfaces. Anything faster must use SSE.
+
+For composite panels (multiple sections, mixed update frequencies), don't poll the whole panel — use the per-section pattern in §7.10.
 
 ### 7.5 Forbidden
 
@@ -341,6 +343,83 @@ Default to showing more, not less. The user came because their terminal/htop/`do
 
 We don't show optimistic state. The button greys out via `hx-disabled-elt="this"` during the round-trip, then the server's response renders the actual new state. This trades a brief frozen UI for a flicker-back if the action fails — worth the latency on a local-network tool. Don't add optimistic patches without a strong reason; the full state always lives on the server, the client never holds "this is starting" in JS.
 
+### 7.10 Polling without flicker
+
+The naive way to keep a composite panel live is to poll the whole thing every Ns with an `outerHTML` swap. This flickers visibly: every cycle the whole DOM is replaced, lazy-loaded children briefly disappear, CSS-animated cells re-animate.
+
+The right pattern is **don't poll the composite**. Render a static shell once on view-reveal, and let each section self-poll its own endpoint. The services panel and llama view both follow this — see `handleServicesPartial` / `handleServicesContainers` / `handleServicesBridges` / etc. in [handlers.go](../internal/web/handlers.go) and `handleLlamaAll` / `handleLlamaCard` in [llama.go](../internal/web/llama.go).
+
+**The pattern in five rules:**
+
+**1. The composite endpoint renders a static shell.** No `hx-trigger="every Ns"` on the outer wrapper. Each section inside is a `<div>` placeholder with its own `hx-get="/partials/X" hx-trigger="load, every 8s" hx-swap="outerHTML"`.
+
+```html
+<!-- /partials/services renders this once on view-reveal -->
+<div class="svc-grid" id="services-inner">
+  {{if .HasContainers}}
+  <div id="containers-section" class="svc-instance svc-section-loading"
+       hx-get="/partials/services/containers"
+       hx-trigger="load, every 8s"
+       hx-swap="outerHTML">
+    <p class="svc-section-placeholder">loading containers…</p>
+  </div>
+  {{end}}
+  <!-- … more section placeholders … -->
+</div>
+```
+
+**2. Each section endpoint returns its own wrapper with the same `hx-trigger`.** That keeps the polling alive across self-swaps. Don't put the trigger only on the shell placeholder — after the first swap, the new content replaces the trigger element with its own, so the wrapper must re-declare it.
+
+```html
+<!-- /partials/services/containers response -->
+<div id="containers-section" class="svc-instance containers"
+     hx-get="/partials/services/containers"
+     hx-trigger="every 8s"
+     hx-swap="outerHTML">
+  …content…
+</div>
+```
+
+**3. Lazy-loaded inner slots inside a section use `hx-preserve`.** Sub-elements that fetch their own data (OD usage body, version chip, snapshot timestamp, vault row body) carry `hx-preserve="true"` + a stable id so they survive the section's outerHTML swap. The section may re-render every 8 s, but its preserved children keep their loaded state — no flicker back to "loading…" twice a minute.
+
+```html
+<!-- inside open-design-card response -->
+<div class="ods-body" id="ods-body-{{.Name}}"
+     hx-preserve="true"
+     hx-get="/partials/open-design/token-stats?name={{.Name}}"
+     hx-trigger="load, every 8s"
+     hx-swap="outerHTML">
+  <div class="ods-body-loading">loading usage…</div>
+</div>
+```
+
+**4. Reserve space + inline known states.** Set `min-height` on lazy-loaded elements that matches the loaded content (e.g., `.vault-row[open] > .vault-row-body { min-height: 120px }`) so the initial fetch doesn't grow the row. When the server already knows the final state at render time, render the final HTML inline instead of a loading placeholder — e.g., when the vault is unreachable on F5, the unreachable panel renders inline so the user never sees "loading vault…" flash.
+
+**(rule)** An inline pre-render MUST be byte-identical to what the partial endpoint later returns (including cosmetic classes like `expand-enter`). When the first inner self-poll replaces the inline content, identical HTML produces an invisible swap. Add a comment cross-referencing the partial so they stay in sync.
+
+**5. Action buttons target the right scope.** A button that only affects one section (`/bridge/apply?name=X` updating bridges only) can target `#bridges-section` directly. Buttons whose effect crosses sections (`/containers/refresh` re-reading containers.yaml, which can affect both the containers table and any composite cards) target `#services-inner` and the handler returns the shell — each section's placeholder then re-fetches. Brief "loading…" placeholders during the action are acceptable because actions are user-initiated and rare.
+
+### 7.11 Per-section polling gotchas
+
+- **Don't reach for ETag + 304 to "fix flicker on a polled composite."** It looks tempting (304 = skip the swap = no DOM churn) but is a misuse of HTTP caching that fights the browser. The browser auto-revalidates ETagged responses with `If-None-Match` on F5; htmx with `responseHandling[304] = swap:false` will then leave the page blank because the initial `revealed once` trigger gets 304 instead of body. Working around this requires `Cache-Control: no-store` + a JS-side ETag tracker — at which point you've reinvented the polling architecture in JS instead of just splitting the endpoint. The correct fix is per-section polling.
+- **`hx-trigger="every Ns"` fires the first tick at T = N, not T = 0.** If you want immediate-then-periodic refresh, use `load, every Ns`. If the server pre-renders the content (inline known state), use just `every Ns` to suppress the redundant immediate fetch.
+- **`hx-preserve` moves elements through a hidden "preserve-pantry" during swaps** (htmx 2.x). Modern Chrome uses native `moveBefore()` so the move is seamless; older browsers may detach and reattach, which fires `connectedCallback`, restarts CSS animations, and can briefly collapse height. The `min-height` reservation absorbs this. Firefox uses the same fallback path as older Chrome, so test there explicitly.
+- **OOB swaps still update preserved elements.** `hx-preserve="true"` keeps an element across regular swaps but does NOT block `hx-swap-oob="true"` updates targeting the same id. Useful when an inner partial needs to push fresh data into a chip in the otherwise-stable outer chrome (e.g., the OD snapshot timestamp updated from the token-stats partial response).
+- **Default htmx swap is `innerHTML`, not `outerHTML`.** CSS selectors like `.parent > .child` only match when the child is a *direct* child. If your CSS was written assuming an outerHTML swap (where the wrapper gets replaced) but the actual swap is innerHTML (where the response is nested inside the wrapper), the selectors won't match. Extend with `:has()` to cover both DOM shapes — see the `.vault-row > .vault-panel.vault-panel-down, .vault-row > .vault-row-body:has(> .vault-panel.vault-panel-down)` rule in [app.css](../internal/web/static/css/app.css).
+- **The browser's `<details>` open/closed state is reset by an outerHTML swap** that recreates the element. Sort the polled output so a stable `<details>` element keeps its open state across polls.
+
+### 7.12 When polling is NOT the right answer
+
+Per-section polling works well for surfaces where:
+- The data is cheap to compute server-side (single docker call, single yaml read).
+- The natural update interval is 5–30 s.
+- The user doesn't need real-time latency.
+
+When those break down, reach for SSE instead (see §7.2). Specifically:
+- Updates faster than 5 s → SSE.
+- Updates that are event-driven (docker events, log lines) → SSE.
+- Surfaces where "stale by Ns" is a real correctness issue → SSE.
+
 ---
 
 ## 8. Routing
@@ -370,8 +449,17 @@ The three top-level views (`entities`, `services`, `llama`) are sibling `<div>`s
 | Entity list | Manual refresh + HTMX swap on demand | n/a |
 | Container panel header counts | Polling | 8 s |
 | Container engine events / state | SSE | event-driven |
-| Services panel | HTMX polling on the panel partial | 8 s |
-| Llama panel | HTMX polling | 10 s |
+| Services panel — shell | HTMX once-only (`revealed once`) | n/a |
+| Services panel — containers section | HTMX per-section polling | 8 s |
+| Services panel — open-design card (per project) | HTMX per-section polling | 8 s |
+| Services panel — vaults section | HTMX per-section polling | 8 s |
+| Services panel — instance card (per compose instance) | HTMX per-section polling | 8 s |
+| Services panel — bridges section | HTMX action-triggered only | n/a |
+| Services panel — OD token-stats body (per project) | HTMX self-poll with `hx-preserve` | 8 s |
+| Services panel — OD version chip (per project) | HTMX self-poll with `hx-preserve` | 60 s |
+| Services panel — vault row body (per vault) | HTMX self-poll with `hx-preserve` | 8 s |
+| Llama panel — shell | HTMX once-only (`revealed once`) | n/a |
+| Llama panel — server card (per server) | HTMX per-card polling | 10 s |
 | Build chip (server version vs. page version) | Polling | 30 s |
 | Process logs | SSE | event-driven |
 
@@ -506,8 +594,9 @@ We do not have a JS test framework, and we will not add one until a page module 
 
 ### 14.3 Rules
 
-- **(rule)** A new template gets a render test that constructs the view struct and exercises `template.Execute` with both a populated and an empty case.
+- **(rule)** A new template gets a render test that constructs the view struct and exercises `template.Execute` (or `ExecuteTemplate` for named `{{define}}` blocks) with both a populated and an empty case.
 - **(rule)** A new partial endpoint gets a handler test that asserts on at least one stable selector in the response (`strings.Contains(body, \`id="entity-list"\`)`).
+- **(rule)** Multi-section panels (composite shells per §7.10) get one test per section template plus a cross-cutting `renderServicesSections`-style helper for assertions that span sections.
 - **(rule)** A new SSE endpoint gets an e2e test that opens the stream, asserts on one event, and asserts the connection closes on `done`.
 
 ---
@@ -572,6 +661,10 @@ M1–M5 + M7 are pure structural wins. M6 is the only step explicitly skipped.
 - A polling loop tighter than 5 s.
 - Bypassing `html/template` auto-escape with `template.HTML(s)` for any `s` derived from user/file input.
 - Adding a JS dependency from npm or a CDN.
+- Writing a CSS selector that assumes the htmx swap target is the response root (`.parent > .child`) without verifying the actual `hx-swap` style. Default is `innerHTML`, which nests the response inside the target. See §7.11.
+- Polling a composite panel with one outer endpoint, then trying to fix the resulting flicker with ETag/304/JS workarounds. The correct fix is per-section polling — see §7.10.
+- A new polled surface that re-renders multiple unrelated sections in one response. Split it.
+- Relying on process-compose (or any upstream API) for a stable row order. Sort server-side before rendering, or the open/closed state of any `<details>` in the section will jump around.
 
 ---
 

@@ -8,6 +8,35 @@ import (
 	"github.com/eike-hass/infra-mngmt/internal/compose"
 )
 
+// renderServicesSections renders every section template into one buffer
+// using the given data. Used by tests that assert on cross-cutting concerns
+// (shared col-name / col-actions classes, button label harmonization,
+// icon coverage across cards) — concerns that the old monolithic template
+// surfaced in one execute, but now live in separate section templates.
+func renderServicesSections(t *testing.T, data servicesPageData) string {
+	t.Helper()
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
+	var buf bytes.Buffer
+	for _, section := range []string{"bridges-section", "containers-section", "vaults-section"} {
+		if err := tmpl.ExecuteTemplate(&buf, section, data); err != nil {
+			t.Fatalf("ExecuteTemplate %s: %v", section, err)
+		}
+	}
+	for _, iv := range data.Instances {
+		instData := struct{ Instance instanceView }{Instance: iv}
+		if err := tmpl.ExecuteTemplate(&buf, "instance-section", instData); err != nil {
+			t.Fatalf("ExecuteTemplate instance-section: %v", err)
+		}
+	}
+	for _, p := range data.OpenDesignProjects {
+		cardData := struct{ Card containerProjectView }{Card: p}
+		if err := tmpl.ExecuteTemplate(&buf, "open-design-card", cardData); err != nil {
+			t.Fatalf("ExecuteTemplate open-design-card: %v", err)
+		}
+	}
+	return buf.String()
+}
+
 func TestServicesTemplateRendersOfflineCard(t *testing.T) {
 	views := []instanceView{
 		{
@@ -25,20 +54,13 @@ func TestServicesTemplateRendersOfflineCard(t *testing.T) {
 		},
 	}
 
-	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, servicesPageData{Instances: views}); err != nil {
-		t.Fatalf("template.Execute error: %v", err)
-	}
-	out := buf.String()
+	out := renderServicesSections(t, servicesPageData{Instances: views})
 	if !strings.Contains(out, "windows") {
 		t.Errorf("output does not contain 'windows':\n%s", out)
 	}
 	if !strings.Contains(out, "offline") {
 		t.Errorf("output does not contain 'offline':\n%s", out)
 	}
-	t.Logf("rendered %d bytes", len(out))
-	t.Logf("output:\n%s", out)
 }
 
 // TestServicesTemplateRendersAPIBadges verifies that the conditional UI bits
@@ -65,12 +87,7 @@ func TestServicesTemplateRendersAPIBadges(t *testing.T) {
 			{Name: "worker", Namespace: "default", Status: "Error", IsRunning: false, ExitCode: 137, SystemTime: "2s"},
 		},
 	}}
-	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, servicesPageData{Instances: views}); err != nil {
-		t.Fatalf("template.Execute error: %v", err)
-	}
-	out := buf.String()
+	out := renderServicesSections(t, servicesPageData{Instances: views})
 	for _, want := range []string{
 		`health-pill`, `>Not Ready<`, // health badge for the unhealthy probe-backed process
 		`exit-code`, `>137<`, // exit code badge for worker
@@ -113,12 +130,7 @@ func TestServicesTemplateRendersBridges(t *testing.T) {
 			},
 		},
 	}
-	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		t.Fatalf("template.Execute error: %v", err)
-	}
-	out := buf.String()
+	out := renderServicesSections(t, data)
 	for _, want := range []string{
 		"network bridges",
 		"producer-pal",
@@ -150,12 +162,7 @@ func TestServicesTemplateCardIconsAndPidColumn(t *testing.T) {
 			Processes: []compose.ProcessState{{Name: "p1", Status: "Running", IsRunning: true, Pid: 91760}},
 		}},
 	}
-	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		t.Fatalf("template.Execute: %v", err)
-	}
-	out := buf.String()
+	out := renderServicesSections(t, data)
 	for _, want := range []string{
 		`class="svc-icon" title="network bridges">⇄<`,
 		`class="svc-icon" title="docker containers">⬢<`,
@@ -187,12 +194,7 @@ func TestServicesTemplateNameColumnConstrained(t *testing.T) {
 			Processes: []compose.ProcessState{{Name: "p1", Status: "Running", IsRunning: true, Pid: 1}},
 		}},
 	}
-	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		t.Fatalf("template.Execute: %v", err)
-	}
-	out := buf.String()
+	out := renderServicesSections(t, data)
 	// 3 tables × (1 th + 1 td) = 6 col-name occurrences.
 	if got := strings.Count(out, `class="col-name"`); got < 6 {
 		t.Errorf("expected at least 6 col-name usages (1 th + 1 td per table), got %d", got)
@@ -236,12 +238,7 @@ func TestServicesTemplateActionColumnRightAligned(t *testing.T) {
 			Processes: []compose.ProcessState{{Name: "p1", Status: "Running", IsRunning: true, Pid: 1}},
 		}},
 	}
-	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		t.Fatalf("template.Execute: %v", err)
-	}
-	out := buf.String()
+	out := renderServicesSections(t, data)
 
 	// Three tables × (header + body cell) = 6 col-actions hits expected.
 	got := strings.Count(out, `class="col-actions"`)
@@ -257,16 +254,23 @@ func TestServicesTemplateActionColumnRightAligned(t *testing.T) {
 }
 
 func TestServicesTemplateOmitsBridgeSectionWhenEmpty(t *testing.T) {
-	data := servicesPageData{
-		Instances: []instanceView{{Name: "wsl", Endpoint: "x", Online: true}},
-	}
+	// Shell-level smoke test: when HasBridges is false the shell omits the
+	// #bridges-section placeholder entirely, so the "network bridges"
+	// chrome label never reaches the DOM. (Each section's body is fetched
+	// from its own endpoint; absence of a placeholder means the section
+	// never loads.)
+	data := servicesShellData{InstanceNames: []string{"wsl"}}
 	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "shell", data); err != nil {
 		t.Fatalf("template.Execute: %v", err)
 	}
-	if strings.Contains(buf.String(), "network bridges") {
-		t.Errorf("bridges section should be hidden when no bridges declared")
+	out := buf.String()
+	if strings.Contains(out, `id="bridges-section"`) {
+		t.Errorf("shell should omit bridges-section placeholder when HasBridges is false; got:\n%s", out)
+	}
+	if strings.Contains(out, "network bridges") {
+		t.Errorf("'network bridges' chrome must not appear in the shell (it lives in bridges-section)")
 	}
 }
 
@@ -298,7 +302,7 @@ func TestServicesTemplateRendersDockerHealthLED(t *testing.T) {
 			}
 			tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 			var buf bytes.Buffer
-			if err := tmpl.Execute(&buf, data); err != nil {
+			if err := tmpl.ExecuteTemplate(&buf, "containers-section", data); err != nil {
 				t.Fatalf("template.Execute: %v", err)
 			}
 			out := buf.String()
@@ -323,7 +327,7 @@ func TestServicesTemplateRendersContainerRunningCount(t *testing.T) {
 	}
 	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "containers-section", data); err != nil {
 		t.Fatalf("template.Execute: %v", err)
 	}
 	out := buf.String()
@@ -339,7 +343,7 @@ func TestServicesTemplateOmitsDockerLEDWhenUnconfigured(t *testing.T) {
 	}
 	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "containers-section", data); err != nil {
 		t.Fatalf("template.Execute: %v", err)
 	}
 	out := buf.String()

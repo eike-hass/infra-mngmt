@@ -1480,6 +1480,16 @@ func (s *Server) buildInstanceViews(ctx context.Context) []instanceView {
 		if iv.Online {
 			procs, err := c.Processes(ctx)
 			if err == nil {
+				// Sort (namespace, name) so the rendered table is stable
+				// across polls — process-compose's API returns
+				// non-deterministic order, which would otherwise reshuffle
+				// rows every 8s and defeat the structural ETag.
+				sort.Slice(procs, func(i, j int) bool {
+					if procs[i].Namespace != procs[j].Namespace {
+						return procs[i].Namespace < procs[j].Namespace
+					}
+					return procs[i].Name < procs[j].Name
+				})
 				iv.Processes = procs
 			}
 		}
@@ -1497,27 +1507,154 @@ func IsInternalProcess(p compose.ProcessState) bool {
 	return p.Namespace == "bridges" && strings.HasPrefix(p.Name, "bridge-")
 }
 
+// servicesShellData carries the lightweight presence flags + ordered name
+// lists the shell template uses to decide which section placeholders to
+// render. No live probes — just config-derived membership. Each section
+// then self-polls its own endpoint. See docs/frontend-architecture.md §7.10.
+type servicesShellData struct {
+	HasBridges      bool
+	HasContainers   bool
+	HasVaults       bool
+	OpenDesignNames []string // one shell placeholder per OD project
+	InstanceNames   []string // one shell placeholder per process-compose instance
+}
+
+// handleServicesPartial renders the static services-panel shell. Each
+// section placeholder inside self-polls its own endpoint (see the
+// /partials/services/* routes registered in server.go).
 func (s *Server) handleServicesPartial(w http.ResponseWriter, r *http.Request) {
-	containers := s.rebuildContainerViews(r.Context())
-	projects := s.buildContainerProjectGroups(r.Context())
-	var openDesigns []containerProjectView
-	for _, p := range projects {
-		if p.Kind == "open-design" {
-			openDesigns = append(openDesigns, p)
+	d := servicesShellData{}
+	s.bridgesMu.RLock()
+	d.HasBridges = len(s.bridges) > 0
+	s.bridgesMu.RUnlock()
+	d.HasContainers = len(s.containerDecls) > 0
+	for _, c := range s.containerDecls {
+		switch c.Kind {
+		case "open-design":
+			if len(c.Services) > 0 {
+				d.OpenDesignNames = append(d.OpenDesignNames, c.Name)
+			}
+		case "mcp-fs":
+			d.HasVaults = true
 		}
 	}
+	for _, c := range s.compose {
+		d.InstanceNames = append(d.InstanceNames, c.Name())
+	}
+	sort.Strings(d.OpenDesignNames)
+	sort.Strings(d.InstanceNames)
+
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "shell", d); err != nil {
+		log.Printf("services shell: render: %v", err)
+	}
+}
+
+// handleServicesBridges renders the bridges section. No periodic poll
+// (action-only); the response wrapper carries no hx-trigger so the content
+// stays put until a user-driven action targets #services-inner or
+// #bridges-section.
+func (s *Server) handleServicesBridges(w http.ResponseWriter, r *http.Request) {
+	data := servicesPageData{Bridges: s.rebuildBridgeViews(r.Context())}
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "bridges-section", data); err != nil {
+		log.Printf("services bridges: render: %v", err)
+	}
+}
+
+// handleServicesContainers renders the containers section: composite
+// project rows + standalone container rows in one table. Self-polls every
+// 8s via the hx-trigger inside the response wrapper.
+func (s *Server) handleServicesContainers(w http.ResponseWriter, r *http.Request) {
+	containers := s.rebuildContainerViews(r.Context())
+	projects := s.buildContainerProjectGroups(r.Context())
 	data := servicesPageData{
-		Instances:          s.buildInstanceViews(r.Context()),
-		Bridges:            s.rebuildBridgeViews(r.Context()),
-		Containers:         containers,
-		ContainerProjects:  projects,
-		OpenDesignProjects: openDesigns,
-		Vaults:             s.buildVaultCardViews(r.Context(), containers),
-		Docker:             s.dockerHealth(r.Context()),
+		Containers:        containers,
+		ContainerProjects: projects,
+		Docker:            s.dockerHealth(r.Context()),
 	}
 	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, data)
+	if err := tmpl.ExecuteTemplate(w, "containers-section", data); err != nil {
+		log.Printf("services containers: render: %v", err)
+	}
+}
+
+// handleServicesOpenDesignCard renders a SINGLE Open Design card by name.
+// Each card has its own placeholder in the shell and self-polls every 8s.
+// Inner slots (token-stats body, version chip, snapshot) carry
+// hx-preserve so they survive this card's outerHTML swaps.
+func (s *Server) handleServicesOpenDesignCard(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "missing name", http.StatusBadRequest)
+		return
+	}
+	projects := s.buildContainerProjectGroups(r.Context())
+	var card *containerProjectView
+	for i := range projects {
+		if projects[i].Kind == "open-design" && projects[i].Name == name {
+			card = &projects[i]
+			break
+		}
+	}
+	if card == nil {
+		http.Error(w, "no such open-design project", http.StatusNotFound)
+		return
+	}
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "open-design-card", struct {
+		Card containerProjectView
+	}{Card: *card}); err != nil {
+		log.Printf("services open-design card %q: render: %v", name, err)
+	}
+}
+
+// handleServicesVaults renders the vaults section. Self-polls every 8s.
+// Inner vault-row-body slots self-poll /partials/vault/panel on their own
+// 8s cadence with hx-preserve to keep the loaded panel across this
+// section's outerHTML swaps.
+func (s *Server) handleServicesVaults(w http.ResponseWriter, r *http.Request) {
+	containers := s.rebuildContainerViews(r.Context())
+	data := servicesPageData{Vaults: s.buildVaultCardViews(r.Context(), containers)}
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "vaults-section", data); err != nil {
+		log.Printf("services vaults: render: %v", err)
+	}
+}
+
+// handleServicesInstance renders a SINGLE process-compose instance card by
+// name. Each instance has its own placeholder in the shell and self-polls
+// every 8s.
+func (s *Server) handleServicesInstance(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "missing name", http.StatusBadRequest)
+		return
+	}
+	all := s.buildInstanceViews(r.Context())
+	var inst *instanceView
+	for i := range all {
+		if all[i].Name == name {
+			inst = &all[i]
+			break
+		}
+	}
+	if inst == nil {
+		http.Error(w, "no such process-compose instance", http.StatusNotFound)
+		return
+	}
+	tmpl := parseTemplate("svc", "templates/services.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "instance-section", struct {
+		Instance instanceView
+	}{Instance: *inst}); err != nil {
+		log.Printf("services instance %q: render: %v", name, err)
+	}
 }
 
 // buildVaultCardViews extracts vault-specific cards from the container

@@ -98,10 +98,6 @@ type llamaServerView struct {
 	LogsErr string
 }
 
-type llamaPageData struct {
-	Servers []llamaServerView
-}
-
 // handleLlamaDrain destructively clears the slot queue on a configured
 // llama-server: aborts whatever's in flight and pops any deferred tasks
 // until /slots reports nothing processing. Used to recover from runaway
@@ -220,34 +216,73 @@ func (s *Server) handleLlamaLifecycle(w http.ResponseWriter, r *http.Request, ac
 	s.handleLlamaAll(w, r)
 }
 
-// handleLlamaAll renders the standalone "llama" view body — one card per
-// configured llama-server. Auto-refreshes every 5s via HTMX.
+// llamaShellData is the lightweight (Instance, Process) listing the shell
+// template uses to render placeholder cards. No live probes; each card
+// then self-polls /partials/llama/card every 10s.
+type llamaShellData struct {
+	Keys []llamaCardKey
+}
+
+// llamaCardKey identifies one llama-server card in the shell. Distinct
+// from llamaKey (a string used as a map index for llamaClients) because
+// the shell template needs the two parts separately.
+type llamaCardKey struct {
+	Instance string
+	Process  string
+}
+
+// handleLlamaAll renders the static llama view shell — one placeholder
+// card per declared llama-server. Each placeholder self-polls
+// /partials/llama/card on a 10s cadence. See
+// docs/frontend-architecture.md §7.10 for the per-section poll strategy.
 func (s *Server) handleLlamaAll(w http.ResponseWriter, r *http.Request) {
-	servers := s.llamaServers
-	if len(servers) == 0 {
-		s.renderLlamaPage(w, llamaPageData{})
+	keys := make([]llamaCardKey, 0, len(s.llamaServers))
+	for _, e := range s.llamaServers {
+		keys = append(keys, llamaCardKey{Instance: e.Instance, Process: e.Process})
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Instance != keys[j].Instance {
+			return keys[i].Instance < keys[j].Instance
+		}
+		return keys[i].Process < keys[j].Process
+	})
+
+	tmpl := parseTemplate("llama", "templates/llama.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "llama-shell", llamaShellData{Keys: keys}); err != nil {
+		log.Printf("llama shell: render: %v", err)
+	}
+}
+
+// handleLlamaCard renders a SINGLE llama server card by (instance,
+// process). Each card has its own placeholder in the shell and
+// self-polls every 10s; the response wrapper carries the same hx-trigger
+// so polling continues across swaps.
+func (s *Server) handleLlamaCard(w http.ResponseWriter, r *http.Request) {
+	inst := r.URL.Query().Get("instance")
+	proc := r.URL.Query().Get("process")
+	if inst == "" || proc == "" {
+		http.Error(w, "missing instance/process", http.StatusBadRequest)
 		return
 	}
-
-	out := make([]llamaServerView, len(servers))
-	var wg sync.WaitGroup
-	for i, e := range servers {
-		i, e := i, e
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			out[i] = s.probeLlamaServer(r.Context(), e)
-		}()
-	}
-	wg.Wait()
-
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Instance != out[j].Instance {
-			return out[i].Instance < out[j].Instance
+	var entry *LlamaEntry
+	for i := range s.llamaServers {
+		if s.llamaServers[i].Instance == inst && s.llamaServers[i].Process == proc {
+			entry = &s.llamaServers[i]
+			break
 		}
-		return out[i].Process < out[j].Process
-	})
-	s.renderLlamaPage(w, llamaPageData{Servers: out})
+	}
+	if entry == nil {
+		http.Error(w, "no such llama server", http.StatusNotFound)
+		return
+	}
+	view := s.probeLlamaServer(r.Context(), *entry)
+
+	tmpl := parseTemplate("llama", "templates/llama.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "llama-card", view); err != nil {
+		log.Printf("llama card %s/%s: render: %v", inst, proc, err)
+	}
 }
 
 // probeLlamaServer fans out the four canonical probes (health, props, models,
@@ -459,14 +494,6 @@ func modelStatusRank(status string) int {
 		return 3
 	default:
 		return 4
-	}
-}
-
-func (s *Server) renderLlamaPage(w http.ResponseWriter, data llamaPageData) {
-	tmpl := parseTemplate("llama", "templates/llama.html.tmpl")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("llama page render: %v", err)
 	}
 }
 

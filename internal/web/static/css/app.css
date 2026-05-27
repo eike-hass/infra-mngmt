@@ -589,14 +589,32 @@ body.show-internals tr.proc-internal{display:table-row}
    38px left aligns the body column with the meta column in the summary
    (14px summary pad + 10px chevron + 10px gap + nudge). */
 .vault-row-body,.vault-row > .vault-panel{padding:10px 14px 14px 38px;background:var(--card-bg-2);border-top:1px solid var(--border);font-size:11px}
-/* Unreachable state: HTMX's `hx-trigger="load"` on the body wrapper
-   replaces the wrapper itself with the response (the .vault-panel div sits
-   as a direct child of <details class="vault-row">). The existing
-   `.vault-row > .vault-panel` rule above applies its 10/14/14/38 padding +
-   1px border-top + card-bg-2 background, which leaves a card-bg band and
-   a dark line above the red wash. Override with a more-specific selector
-   so the .svc-unreachable's tint reaches the card edges. */
-.vault-row > .vault-panel.vault-panel-down{padding:0;background:transparent;border-top:none}
+/* Unreachable state: the .svc-unreachable's red wash should reach the
+   card edges. The panel can land in either of two DOM shapes:
+     1. `<vault-row><vault-row-body><vault-panel.vault-panel-down>` — the
+        innerHTML default when the partial response is swapped into the
+        body wrapper. The wrapper's 10/14/14/38 padding + card-bg-2
+        background + 1px border-top would otherwise frame the wash.
+     2. `<vault-row><vault-panel.vault-panel-down>` — direct child of
+        the row, e.g. if a swap replaces the wrapper outright.
+   Apply the override at BOTH levels so the visual is identical
+   regardless of how the panel was inserted (initial inline render vs
+   partial-response swap). Firefox 121+ / Chrome 105+ support :has(). */
+.vault-row > .vault-panel.vault-panel-down,
+.vault-row > .vault-row-body:has(> .vault-panel.vault-panel-down){
+  padding:0;background:transparent;border-top:none;
+}
+/* Reserve enough vertical space for the vault body so the row's height
+   doesn't jump when its lazy-loaded content swaps in. Covers all three
+   states: loading placeholder (~30px), reachable panel (allowlist +
+   tree, ~140px), unreachable panel (warn + explainer, ~100px). 120px
+   absorbs the load-time transition without leaving a visible gap in
+   either state.
+
+   Without this the row's lazy-loaded content causes a >70px jump on
+   initial page load, and subsequent inner self-polls + parent
+   outerHTML swaps can also briefly shift surrounding layout. */
+.vault-row[open] > .vault-row-body{min-height:120px}
 .vault-section{margin-bottom:10px}
 .vault-section-label{margin-bottom:4px}
 .vault-loading{color:var(--text3);font-style:italic;padding:4px 0;font-size:11px}
@@ -870,7 +888,7 @@ tr.project-member .proc-name{color:var(--text2)}
 .ods-refresh:disabled:hover{border-color:var(--border2);color:var(--text3)}
 
 /* Usage body — aggregate row + chip strip (HTMX-loaded). */
-.ods-body{display:flex;flex-direction:column;gap:10px;padding:12px 18px}
+.ods-body{display:flex;flex-direction:column;gap:10px;padding:12px 18px;min-height:96px}
 .ods-body-loading{color:var(--text3);font-style:italic;font-size:11px}
 .ods-aggregate{display:flex;align-items:flex-start;gap:22px;flex-wrap:wrap}
 .ods-stat{display:flex;flex-direction:column;gap:2px;min-width:0;align-items:flex-start}
