@@ -27,11 +27,14 @@ After every meaningful batch of edits (one logical section worth, e.g. "all llam
 2. `make build` — produces `dist/infra-mngmt`.
 3. Deploy by POSTing to the wsl-tier deploy endpoint. `/process/start` is auth-protected, so headless clients must send the bearer token (the host token file is bind-mounted at `/wsl-config/token`). Auth is satisfied by any one of: `Authorization: Bearer <token>`, a trusted-network CIDR, or an `im_session` cookie — only the first is available to this agent.
    ```bash
+   # Derive the host gateway — the Compose-based devcontainer is on its own
+   # Docker network, so it is NOT the default-bridge 172.17.0.1.
+   GW=$(ip route | awk '/default/{print $3; exit}')
    curl -fsS -H "Authorization: Bearer $(cat /wsl-config/token)" \
-     -X POST "http://172.17.0.1:7842/process/start?instance=wsl&process=infra-mngmt-deploy"
+     -X POST "http://$GW:7842/process/start?instance=wsl&process=infra-mngmt-deploy"
    sleep 8
    # /api/version is public (no auth); poll until build_epoch changes:
-   curl -fsS "http://172.17.0.1:7842/api/version" | jq .build_epoch
+   curl -fsS "http://$GW:7842/api/version" | jq .build_epoch
    ```
    The originating POST may die mid-deploy as the server replaces its binary; the bearer token is stateless and survives the restart. Confirm success only via the new `build_epoch` from `/api/version`.
 
