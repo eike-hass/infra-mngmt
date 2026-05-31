@@ -14,12 +14,12 @@ The goal is **thoroughness, not minimal token use**. Past iterations failed by s
 Already in place:
 
 - `make proto` — Python `http.server` on `0.0.0.0:7843` inside the devcontainer, serving `$PROTO_DIR` (default `external/handoff/infra-mngmt/project` — bind-mounted, survives container restarts).
-- `.devcontainer/docker-compose.yml` — the `ports: ["7843:7843"]` mapping publishes the port up to the WSL host on all interfaces; ident-browser reaches it via the docker-bridge gateway at `172.17.0.1:7843`.
+- `.devcontainer/docker-compose.yml` — the `ports: ["7843:7843"]` mapping publishes the proto-server up to the WSL host; ident-browser (a host process) reaches it at `localhost:7843`.
 - `.gitignore` — `*-handoff.zip` and `/external/handoff/` are excluded; handoffs are ephemeral.
 
 **URLs (reachable from the devcontainer and from ident-browser):**
-- Live: `http://172.17.0.1:7842/`
-- Prototype: `http://172.17.0.1:7843/index.html` (once `make proto` is running)
+- Live: `http://localhost:7842/`
+- Prototype: `http://localhost:7843/index.html` (once `make proto` is running)
 
 ## Workflow
 
@@ -28,7 +28,7 @@ Already in place:
    mkdir -p external/handoff
    unzip -o "<bundle>.zip" -d external/handoff/    # or any path; pass via PROTO_DIR
    make proto &                                    # serves external/handoff/infra-mngmt/project by default
-   curl -sI http://127.0.0.1:7843/index.html | head -1   # in-container smoke test, expect 200 OK; ident-browser uses 172.17.0.1:7843
+   curl -sI http://127.0.0.1:7843/index.html | head -1   # in-container smoke test, expect 200 OK; ident-browser (on the host) uses localhost:7843
    ```
 
    The `external/handoff/` tree is gitignored, so the prototype isn't committed but persists across devcontainer restarts (don't use `/tmp` for this — it's wiped at restart and the bundle won't necessarily be available).

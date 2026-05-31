@@ -615,7 +615,7 @@ For any change that adds or modifies UI:
    - HTTP-test the handler.
    - Render-test the template.
    - For a multi-step flow, add an `e2eEnv` test.
-9. **Verify in `ident-browser`** at `172.17.0.1:7842` — `make check` does not catch runtime JS errors.
+9. **Verify in `ident-browser`** at `localhost:7842` — `make check` does not catch runtime JS errors.
 10. **Run `make check`**. Pre-commit gate.
 
 ---

@@ -104,11 +104,11 @@ vendor-codemirror:
 ##        alongside the live app. Foreground; Ctrl-C to stop (or background
 ##        with `make proto &`). Override the path:
 ##          make proto PROTO_DIR=/path/to/prototype
-##        Reachable from ident-browser at http://172.17.0.1:$(PROTO_PORT)/
+##        Reachable from ident-browser (a host process) at http://localhost:$(PROTO_PORT)/
 ##        via the `ports` publish in .devcontainer/docker-compose.yml.
 proto:
 	@test -d "$(PROTO_DIR)" || { echo "no prototype at $(PROTO_DIR) — extract the handoff there or set PROTO_DIR=<path>"; exit 1; }
-	@echo "serving $(PROTO_DIR) at http://172.17.0.1:$(PROTO_PORT)/index.html"
+	@echo "serving $(PROTO_DIR) at http://localhost:$(PROTO_PORT)/index.html"
 	@cd "$(PROTO_DIR)" && python3 -m http.server $(PROTO_PORT) --bind 0.0.0.0
 
 ## clean: remove build artifacts and lint cache
