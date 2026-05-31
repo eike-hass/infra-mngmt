@@ -28,7 +28,7 @@ Already in place:
    mkdir -p external/handoff
    unzip -o "<bundle>.zip" -d external/handoff/    # or any path; pass via PROTO_DIR
    make proto &                                    # serves external/handoff/infra-mngmt/project by default
-   curl -sI http://127.0.0.1:7843/index.html | head -1   # expect 200 OK
+   curl -sI http://127.0.0.1:7843/index.html | head -1   # in-container smoke test, expect 200 OK; ident-browser uses 172.17.0.1:7843
    ```
 
    The `external/handoff/` tree is gitignored, so the prototype isn't committed but persists across devcontainer restarts (don't use `/tmp` for this — it's wiped at restart and the bundle won't necessarily be available).

@@ -30,20 +30,20 @@ Tests live next to the code they cover:
 
 | Package | Test files | Covers |
 |---|---|---|
-| `cmd/infra-mngmt/` | `main_test.go` | Subcommand dispatch, addr/version/bridges CLI surface |
+| `cmd/infra-mngmt/` | `main_test.go`, `bridges_test.go` | Subcommand dispatch, addr/version/bridges CLI surface; WSL process-compose discovery and fragment write/reload |
 | `config/` | `config_test.go` | YAML primary + JSON fallback Load/Save, token gen, `wsl-windows` endpoint resolution |
 | `internal/entity/` | `types_test.go` | `Scope`, `Kind` helpers |
 | `internal/source/` | `hostfs_test.go`, `dockervol_test.go` | Source implementations and path↔entity mapping |
-| `internal/docker/` | `client_test.go` | Path normalization, frame parsing, `toManaged` label/mount logic, `cpuPercent`/`memUsage` for stats |
+| `internal/docker/` | `client_test.go`, `compose_test.go` | Path normalization, frame parsing, `toManaged` label/mount logic, `cpuPercent`/`memUsage` for stats; Compose arg building, `up`/`down`/`ps` invocation + JSON-lines `parsePS` |
 | `internal/compose/` | `client_test.go` | REST client driven by `httptest.Server` (start uses POST, stop uses PATCH; reload posts to `/project/configuration`) |
-| `internal/bridge/` | `apply_test.go`, `load_test.go`, `state_test.go`, `runner_test.go`, `types_test.go` | bridges.yaml schema, PowerShell payload generation, portproxy state parsing |
+| `internal/bridge/` | `apply_test.go`, `composegen_test.go`, `load_test.go`, `runner_test.go`, `state_test.go`, `types_test.go` | bridges.yaml schema, PowerShell payload generation, portproxy state parsing, process-compose fragment rendering (`RenderComposeFragment`/`MarshalComposeFragment`/`WriteFragment`/`BridgeProcessName`) |
 | `internal/containers/` | `load_test.go`, `types_test.go` | containers.yaml schema + load |
 | `internal/deps/` | `load_test.go`, `match_test.go`, `types_test.go` | dependencies.yaml schema, scope-pattern rule matching |
 | `internal/graph/` | `refs_test.go` | dependencies-driven resolution + legacy substring fallback, bridge/container state rollup |
 | `internal/rates/` | `rates_test.go`, `testutil_test.go` | model-rates.yaml load (missing file → empty map, valid YAML, bad YAML) |
 | `internal/llama/` | `client_test.go` | llama.cpp REST client (health, props, /v1/models, /metrics, /slots probe + parse) |
 | `internal/vault/` | `client_test.go` | mcp-fs vault control-plane client (allowlist, tree, grant/revoke) |
-| `internal/web/` | `helpers_test.go`, `handlers_http_test.go`, `template_test.go`, `template_render_test.go`, `e2e_test.go`, `status_test.go`, `open_design_test.go`, `frontend_guidelines_test.go` | Helper funcs, HTTP routing/auth, template render, end-to-end flows, OD card aggregation + rendering, frontend-rules enforcement |
+| `internal/web/` | `helpers_test.go`, `handlers_http_test.go`, `template_test.go`, `template_render_test.go`, `e2e_test.go`, `status_test.go`, `open_design_test.go`, `frontend_guidelines_test.go`, `bridges_wsl_test.go`, `llama_test.go`, `promote_test.go`, `vault_test.go` | Helper funcs, HTTP routing/auth, template render, end-to-end flows, OD card aggregation + rendering, frontend-rules enforcement, bridge WSL composegen views, llama view, promote flow, vault panel |
 
 ## Patterns
 

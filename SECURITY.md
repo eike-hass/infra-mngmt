@@ -19,7 +19,7 @@ A bearer token is generated automatically on first run and stored at `~/.config/
 
 Protected routes accept the token two ways. **Browsers** present it once at `/login` and receive a session cookie (`im_session`, `HttpOnly` + `SameSite=Strict`). **Headless clients** (deploy scripts, smoke tests) send `Authorization: Bearer <token>` directly — stateless, so it survives the process restart a redeploy triggers, where an in-memory session cookie would not. A present-but-wrong bearer token returns `401` rather than an HTML login redirect a script can't follow. Both paths compare the token with `crypto/subtle.ConstantTimeCompare` to prevent timing attacks. A few routes are intentionally public: `/login`, `/logout`, `/static/*`, `/favicon.svg`, `/sw.js`, and `/api/version` (build identity only — non-sensitive, so deploy scripts can confirm a restart without auth).
 
-Session IDs are 16 random bytes encoded as hex. Sessions are stored only in memory (lost on restart, requiring re-login).
+Session IDs are 16 random bytes encoded as hex. Sessions are stored only in memory (lost on restart, requiring re-login) with a 24-hour absolute TTL; expired sessions are evicted lazily on the next auth check (no background sweep).
 
 To disable authentication (local-only, trusted environment), remove `token_file` from `config.yaml`. **Do not do this if the service is reachable from other machines.** A safer middle ground is `trusted_networks:` — CIDRs whose source IPs bypass auth without disabling it wholesale. **Use this for loopback only** (`127.0.0.0/8`, `::1/128`) — the local browser, since Windows→WSL is loopback-forwarded. **Do not trust the whole Docker bridge (`172.17.0.0/16`)**: that bypasses auth for *every* container on the bridge, including the untrusted workspaces this tool is built to inspect — a sandbox-to-host privilege escalation, since the bypassed routes drive UAC-elevated Windows firewall changes, process control, and vault-allowlist edits. Containers that need to reach the API (the devcontainer deploy flow) should send the bearer token instead.
 
@@ -28,6 +28,10 @@ To disable authentication (local-only, trusted environment), remove `token_file`
 The default bind address is `127.0.0.1:7842` (loopback only). A startup warning is logged when binding to any other address.
 
 If you need LAN access, bind to `0.0.0.0:7842` **and** keep authentication enabled. Use a reverse proxy with TLS if the service is accessible outside a trusted LAN segment.
+
+### Request timeouts
+
+The HTTP server caps slow/idle connections: 5s read-header, 15s read, 60s idle. Entity write bodies are capped at 4 MiB (over-limit requests get `413`). On `SIGINT`/`SIGTERM` the server stops accepting connections and drains in-flight requests gracefully before exiting.
 
 ### Input validation
 
@@ -74,6 +78,8 @@ ExecStart=/usr/local/bin/process-compose up \
 ```
 
 #### Windows-side process-compose
+
+**Enable process-compose token auth (`--token-file`, see below) first — it is the primary security boundary.** The firewall rules here are a secondary perimeter that narrows *who* can reach the port; token auth controls *whether* a reacher is authorized. Don't rely on the firewall alone.
 
 Bind to `0.0.0.0` (required for WSL2 reachability) and use Windows Firewall to restrict source. Default Windows inbound policy is deny, so a single scoped Allow rule is sufficient — no Block rule needed (and a Block rule would in fact override any Allow unless `-OverrideBlockRules $true` is set).
 
@@ -186,6 +192,9 @@ If this is a concern, run infra-mngmt without Docker socket access; it will log 
 | Process name input validation | ✅ |
 | Default bind to loopback | ✅ |
 | Warning on non-loopback bind | ✅ |
+| Server timeouts (5s read-header, 15s read, 60s idle) + graceful shutdown | ✅ |
+| Request body cap: 4 MiB on entity writes (`413` over limit) | ✅ |
+| Session TTL: 24h, lazily evicted | ✅ |
 | WSL2 process-compose bound to loopback | manual — see above |
 | Windows process-compose firewalled | manual — see above |
 | process-compose token auth | manual — see above |

@@ -11,11 +11,11 @@ Unified Claude Code config viewer + process manager for Windows + WSL2 + devcont
 
 ## Architecture
 
-The central abstraction is `EntitySource` — every source of `.claude/` state implements one interface regardless of where data lives:
+The central abstraction is `Source` — every source of `.claude/` state implements one interface regardless of where data lives:
 
 ```go
-type EntitySource interface {
-    ID() string   // e.g. "host:/home/user/.claude", "vol:claude-code-config", "ctr:abc123"
+type Source interface {
+    ID() string   // e.g. "host:~/.claude", "vol:claude-code-config", "ctr:abc123"
     Scope() Scope // Global | Project(repoPath)
     Entities(ctx context.Context) ([]Entity, error)
     Read(ctx context.Context, kind Kind, name string) ([]byte, error)
@@ -24,11 +24,12 @@ type EntitySource interface {
 }
 ```
 
-Three implementations:
+Two implementations:
 
 - `HostFSSource` — direct filesystem read/write
 - `DockerVolumeSource` — throwaway sidecar container for read/write; no Watch
-- `ContainerAgentSource` — HTTP to optional in-container agent; full Watch support (future)
+
+Planned: `ContainerAgentSource` — HTTP to an optional in-container agent with full Watch support (not yet implemented).
 
 Process management is delegated to [process-compose](https://github.com/F1bonacc1/process-compose) instances running on each tier (Windows host, WSL, optionally inside containers). The backend holds HTTP clients to their REST APIs and can start/stop process-compose itself when an endpoint is unreachable.
 
@@ -39,7 +40,7 @@ Process management is delegated to [process-compose](https://github.com/F1bonacc
 | Backend     | Go                                                | Goroutines for concurrent source watching; single static binary                                                                                                                    |
 | Docker API  | `github.com/docker/docker/client` (official SDK)  | Strong types, API version negotiation, `stdcopy.StdCopy` for log demux, native support for events/exec/cp                                                                          |
 | HTTP server | `net/http` + [chi](https://github.com/go-chi/chi) | Lightweight, idiomatic                                                                                                                                                             |
-| Frontend    | Go templates + HTMX                               | No JS build pipeline; server-side rendering. **See [docs/frontend-architecture.md](docs/frontend-architecture.md) — binding for any change under [internal/web/](internal/web/).** |
+| Frontend    | Go templates + HTMX                               | No JS build pipeline; server-side rendering. See [docs/frontend-architecture.md](docs/frontend-architecture.md).                                                                  |
 | Search      | fuse.js (vendored, `internal/web/static/vendor/`) | ⌘K across entities without a build step                                                                                                                                            |
 | Config      | `gopkg.in/yaml.v3`                                | YAML config at `~/.config/infra-mngmt/config.yaml` (loader still falls back to legacy `config.json` with a deprecation log)                                                        |
 
@@ -50,7 +51,7 @@ cmd/
   infra-mngmt/
     main.go              # CLI: server, addr, bridges, version subcommands
 internal/
-  source/                # EntitySource implementations (hostfs, dockervol)
+  source/                # Source implementations (hostfs, dockervol)
   entity/                # Entity model: Kind, Scope, Entity (with Attrs map)
   docker/                # Docker client: managed-container discovery, sidecar IO, ContainerStats
   compose/               # process-compose REST client (incl. bootstrap)
@@ -125,33 +126,35 @@ Stored at `~/.config/infra-mngmt/config.yaml`. Auto-created on first run with de
 
 ```yaml
 bind: 127.0.0.1:7842
-token_file: /home/user/.config/infra-mngmt/token
+token_file: ~/.config/infra-mngmt/token
 process_compose:
   - name: wsl
     endpoint: http://localhost:9998
     binary: /usr/local/bin/process-compose
-    compose_file: /home/user/.config/infra-mngmt/process-compose.yaml
-    token_file: /home/user/.config/infra-mngmt/process-compose.token
+    compose_file: ~/.config/infra-mngmt/process-compose.yaml
+    token_file: ~/.config/infra-mngmt/process-compose.token
   - name: windows
     endpoint: http://wsl-windows:9999
-    binary: /c/Users/user/AppData/Local/Programs/process-compose/process-compose.exe
-    compose_file: /c/Users/user/.config/infra-mngmt/process-compose.yaml
-    token_file: /c/Users/user/.config/infra-mngmt/process-compose.token
+    binary: /c/Users/<user>/AppData/Local/Programs/process-compose/process-compose.exe
+    compose_file: /c/Users/<user>/.config/infra-mngmt/process-compose.yaml
+    token_file: /c/Users/<user>/.config/infra-mngmt/process-compose.token
 trusted_networks: [127.0.0.0/8, ::1/128] # loopback only — NOT the Docker bridge; headless clients (devcontainer deploy) send Authorization: Bearer instead
 extra_paths: []
 ```
 
-`wsl-windows` in an endpoint is a sentinel resolved at startup to the Windows host IP from `/proc/net/route` (the WSL guest's default-route gateway — see `config/wsl.go`). Necessary for WSL2 NAT mode where the gateway IP changes on each restart. The older resolv.conf-based path is no longer used because Win11 + Hyper-V firewall makes the resolv.conf nameserver a local DNS proxy bound to WSL's loopback, not routable.
+Full annotated field reference: README §3.
+
+`wsl-windows` in an endpoint is a sentinel resolved at startup to the Windows host IP (the WSL guest's default-route gateway), needed because WSL2 NAT mode changes that IP on each restart — see README §4 and `config/wsl.go`.
 
 `bridges.yaml`, `dependencies.yaml`, `containers.yaml`, and `model-rates.yaml` live alongside `config.yaml` and are auto-discovered (or pointed at via `bridges_file`/`dependencies_file`/`containers_file`/`model_rates_file` in the main config). `model-rates.yaml` is optional — when absent, the OD card's `≈ cost` slot renders `—` for every model (no built-in fallback rates).
 
-For `tier: wsl, type: socat` bridges, infra-mngmt also generates `process-compose.bridges.yaml` (path configurable via `bridges_compose_file`) — a fragment the user's main `process-compose.yaml` includes via `extends:`. Generated entries live under namespace `bridges`. The Windows-host IP gets resolved by an inline backtick subshell (`` `ip route | awk '/^default/{print $3}'` ``) embedded in each socat command, evaluated by bash at every process (re)start — not via env_cmds, since PC's reload endpoint doesn't re-evaluate them on all versions. See README §4 and `.claude/skills/infra-mngmt-config/SKILL.md` for the schema and runtime model.
+For `tier: wsl, type: socat` bridges, infra-mngmt also generates `process-compose.bridges.yaml` (path configurable via `bridges_compose_file`) — a fragment the user's main `process-compose.yaml` includes via `extends:`, with entries under namespace `bridges`. See README §4 and `.claude/skills/infra-mngmt-config/SKILL.md` for the schema and runtime model.
 
 process-compose YAML files are **infrastructure config**, not Claude Code config — they do not belong in `.claude/` directories. Use `~/.config/infra-mngmt/` or any path the `compose_file` field points to.
 
 ## Key design decisions to preserve
 
-1. **EntitySource is the only seam** — route handlers never touch the filesystem or Docker directly; they call sources. This keeps adding new source types cheap.
+1. **Source is the only seam** — route handlers never touch the filesystem or Docker directly; they call sources. This keeps adding new source types cheap.
 
 2. **process-compose bootstrap** — the app must be able to _start_ process-compose, not just query it. Check endpoint reachability on startup; surface start button in UI if unreachable.
 
@@ -159,7 +162,7 @@ process-compose YAML files are **infrastructure config**, not Claude Code config
 
 4. **Devcontainer auto-discovery** — primary discovery uses the standard `devcontainer.local_folder` label set by VS Code/devcontainer CLI. `claude.managed=true` is the explicit opt-in fallback for non-devcontainer containers. Never use container naming conventions.
 
-5. **Web-first, Tauri later** — keep the UI purely server-rendered + HTMX. Tauri is an upgrade path, not a constraint. The frontend architecture, interaction model, and per-step checklist for adding UI live in [docs/frontend-architecture.md](docs/frontend-architecture.md) — read it before touching anything under [internal/web/](internal/web/).
+5. **Web-first, Tauri later** — keep the UI purely server-rendered + HTMX. Tauri is an upgrade path, not a constraint.
 
 6. **Docker SDK pinning** — `github.com/docker/docker v27.5.1+incompatible` with explicit `github.com/docker/go-connections v0.5.0` (newer versions remove `sockets.DialPipe` which v27 still references) and `github.com/pkg/errors v0.9.1+` (earlier versions lack `errors.As`/`Is`). The SDK pulls in OpenTelemetry as a transitive dep; the firewall now allows the Go infra domains so this is fine, but resist upgrading to v28+ until those breaking changes settle.
 

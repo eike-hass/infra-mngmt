@@ -25,13 +25,15 @@ After every meaningful batch of edits (one logical section worth, e.g. "all llam
 
 1. `make check` — must be green. Includes fmt-check, vet, lint, tests.
 2. `make build` — produces `dist/infra-mngmt`.
-3. Deploy by POSTing to the wsl-tier deploy endpoint:
+3. Deploy by POSTing to the wsl-tier deploy endpoint. `/process/start` is auth-protected, so headless clients must send the bearer token (the host token file is bind-mounted at `/wsl-config/token`). Auth is satisfied by any one of: `Authorization: Bearer <token>`, a trusted-network CIDR, or an `im_session` cookie — only the first is available to this agent.
    ```bash
-   curl -s -X POST "http://172.17.0.1:7842/process/start?instance=wsl&process=infra-mngmt-deploy" -o /dev/null -w "HTTP %{http_code}\n"
+   curl -fsS -H "Authorization: Bearer $(cat /wsl-config/token)" \
+     -X POST "http://172.17.0.1:7842/process/start?instance=wsl&process=infra-mngmt-deploy"
    sleep 8
-   curl -s http://172.17.0.1:7842/api/version
+   # /api/version is public (no auth); poll until build_epoch changes:
+   curl -fsS "http://172.17.0.1:7842/api/version" | jq .build_epoch
    ```
-   Expected: a new `build_epoch` matching the timestamp from `make build`. The HTTP code may be `000` (empty reply) because the deploy replaces the running binary mid-response — that's normal; only the `/api/version` check matters.
+   The originating POST may die mid-deploy as the server replaces its binary; the bearer token is stateless and survives the restart. Confirm success only via the new `build_epoch` from `/api/version`.
 
 Do not skip `make check`. Do not deploy without a successful build.
 
@@ -57,7 +59,7 @@ When refactors touch templated text or class names, tests asserting literal HTML
 - **Don't make card chrome invisible.** `--card-bg` on `--bg #0c0c0c` is nearly imperceptible without a visible border + drop shadow. Use both.
 - **Don't assume HTMX defaults.** `hx-trigger="load"` on a wrapper inside `<details>` sometimes replaces the wrapper itself instead of swapping its `innerHTML` — observed for vault rows. When in doubt, style **both** wrapper candidates: `.foo-mount, .foo-mount > .foo-panel { padding: ...; background: ...; }`. The layout then survives either swap shape.
 - **Don't paint different states the same color.** Pill `loaded` must differ from `sleeping` must differ from `failed`. Drive these from existing CSS state classes (`.status-loaded`, `.status-sleeping`, …), not inline styles.
-- **Don't ship the prototype mounted into the production binary.** Handoff files are ephemeral; they live at `/tmp/handoff/` (or wherever) and are served by `make proto`. Don't add them under `internal/web/static/`.
+- **Don't ship the prototype mounted into the production binary.** Handoff files live under `external/handoff/` (the gitignored bind-mounted path `make proto` serves) and are not part of the binary. Don't add them under `internal/web/static/`.
 - **Don't ignore broken tests.** Fix or rewrite — never delete.
 
 ## Reference

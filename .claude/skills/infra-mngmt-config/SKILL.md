@@ -22,20 +22,21 @@ A new service usually means **adding to (2)** plus an entry in (4). For ports bo
 
 ```yaml
 bind: 127.0.0.1:7842
-token_file: /home/user/.config/infra-mngmt/token
+token_file: ~/.config/infra-mngmt/token
 process_compose:
   - name: wsl
     endpoint: http://localhost:9998
     binary: /usr/local/bin/process-compose
-    compose_file: /home/user/.config/infra-mngmt/process-compose.yaml
-    token_file: /home/user/.config/infra-mngmt/process-compose.token
+    compose_file: ~/.config/infra-mngmt/process-compose.yaml
+    token_file: ~/.config/infra-mngmt/process-compose.token
   - name: windows
     endpoint: http://wsl-windows:9999
-    binary: /c/Users/user/AppData/Local/Programs/process-compose/process-compose.exe
-    compose_file: /c/Users/user/.config/infra-mngmt/process-compose.yaml
-    token_file: /c/Users/user/.config/infra-mngmt/process-compose.token
+    binary: /c/Users/<user>/AppData/Local/Programs/process-compose/process-compose.exe
+    compose_file: /c/Users/<user>/.config/infra-mngmt/process-compose.yaml
+    token_file: /c/Users/<user>/.config/infra-mngmt/process-compose.token
 bridges_file: ""        # optional; defaults to bridges.yaml alongside config.yaml
 dependencies_file: ""   # optional; defaults to dependencies.yaml alongside config.yaml
+trusted_networks: [127.0.0.0/8]   # CIDRs that bypass auth; loopback only
 extra_paths: []
 ```
 
@@ -45,6 +46,7 @@ Field rules:
 - `binary` — optional. When set, the UI shows a ▶ start button if the endpoint is unreachable.
 - `compose_file` — optional, passed to `binary` on bootstrap. Required if you want bootstrap to work.
 - `token` / `token_file` — process-compose API token. Use `token_file` for cleanliness; the same path can be passed to process-compose via `--token-file`. Leave both unset if auth is disabled. `token` (literal) takes precedence when both are set.
+- `trusted_networks` — optional list of CIDRs whose source IPs bypass bearer-token / session-cookie auth. Empty (default) means every request is authenticated when `token_file` is set; loopback is NOT trusted unless listed. Add `127.0.0.0/8` (and `::1/128`) for login-free local browser access. Do NOT add the Docker bridge CIDR `172.17.0.0/16` — it trusts every container on the bridge. Headless clients (deploy scripts, CI) should send `Authorization: Bearer <token>` instead of relying on a trusted CIDR.
 - `bridges_file` / `dependencies_file` — optional override paths; otherwise infra-mngmt auto-discovers `bridges.yaml` and `dependencies.yaml` alongside `config.yaml`.
 - `extra_paths` — additional project roots to scan; each must contain a `.claude/` subdir.
 

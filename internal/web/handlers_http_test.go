@@ -472,7 +472,7 @@ func TestBuildAttachedContainerURIEmptyWorkspaceDefaultsToRoot(t *testing.T) {
 }
 
 func TestBuildDevContainerURIRoundtrip(t *testing.T) {
-	hostPath := `\\wsl.localhost\Ubuntu-18.04\home\eike\Workspace\open-design`
+	hostPath := `\\wsl.localhost\Ubuntu\home\user\project`
 	got := buildDevContainerURI(hostPath, "/workspace")
 	if !strings.HasPrefix(got, "vscode-remote://dev-container+") {
 		t.Fatalf("missing canonical prefix: %q", got)

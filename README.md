@@ -112,8 +112,8 @@ The devcontainer firewall already allowlists the Go module proxy (`proxy.golang.
 
 ```bash
 mkdir -p ~/.local/bin
-# replace ~/Workspace/infra-mngmt with the actual path to your checkout
-cp ~/Workspace/infra-mngmt/dist/infra-mngmt ~/.local/bin/
+# replace <checkout> with the path to your infra-mngmt checkout
+cp <checkout>/dist/infra-mngmt ~/.local/bin/
 ```
 
 Verify:
@@ -140,23 +140,20 @@ process_compose:
   - name: wsl
     endpoint: http://localhost:9998
     binary: /usr/local/bin/process-compose
-    compose_file: /home/youruser/.config/infra-mngmt/process-compose.yaml
-    token_file: /home/youruser/.config/infra-mngmt/process-compose.token
+    compose_file: ~/.config/infra-mngmt/process-compose.yaml
+    token_file: ~/.config/infra-mngmt/process-compose.token
   - name: windows
     endpoint: http://wsl-windows:9999
-    binary: /c/Users/youruser/AppData/Local/Programs/process-compose/process-compose.exe
-    compose_file: /c/Users/youruser/.config/infra-mngmt/process-compose.yaml
-    token_file: /c/Users/youruser/.config/infra-mngmt/process-compose.token
+    binary: /c/Users/<user>/AppData/Local/Programs/process-compose/process-compose.exe
+    compose_file: /c/Users/<user>/.config/infra-mngmt/process-compose.yaml
+    token_file: /c/Users/<user>/.config/infra-mngmt/process-compose.token
 trusted_networks:
   - 127.0.0.0/8 # the local browser (Windows → WSL is loopback-forwarded) stays logged-in-free
   - ::1/128
-  # Do NOT add the whole Docker bridge (172.17.0.0/16) here: it trusts *every*
-  # container on the bridge — including the workspaces this tool inspects. The
-  # devcontainer's deploy flow authenticates with the bearer token instead
-  # (Authorization: Bearer $(cat token_file)) — see "Redeploy" below.
+  # Don't add the Docker bridge (172.17.0.0/16): it trusts every container on it — see SECURITY.md.
 extra_paths:
-  - /home/youruser/projects/project-a
-  - /home/youruser/projects/project-b
+  - ~/projects/project-a
+  - ~/projects/project-b
 ```
 
 Each `process_compose` entry can carry the API token for its instance one of two ways: `token` (literal) or `token_file` (path read at startup). The file form is preferred — it keeps the secret out of `config.yaml` and the same path can be passed to process-compose itself via `--token-file`, so both sides read one file. Sent on the wire as the `X-PC-Token-Key` header. Leave both unset if the instance has no auth. See [SECURITY.md](SECURITY.md) for the full setup.
@@ -176,6 +173,7 @@ Each `process_compose` entry can carry the API token for its instance one of two
 | `process_compose[].compose_file` | optional                                        | Path to the process-compose YAML passed to `binary` on bootstrap.                                                                                                                    |
 | `process_compose[].token`        | optional                                        | API token (literal) for this process-compose instance, sent as `X-PC-Token-Key`. Takes precedence over `token_file` when both are set.                                               |
 | `process_compose[].token_file`   | optional                                        | Path to a file containing the API token. Read at startup; same path can be passed to process-compose's own `--token-file`. Preferred over `token` for keeping secrets out of config. |
+| `llama_servers`                  | `[]`                                            | llama.cpp endpoints to probe for live stats (`/health`, `/props`, `/metrics`, `/slots`). Each entry: `instance` + `process` (matched against a process-compose process row so the llama button only renders where it can probe), `endpoint` (supports `wsl-windows`), and optional `api_key`/`api_key_file`. See `config.go` `LlamaServer`. |
 | `bridges_file`                   | `bridges.yaml` alongside config                 | Path to bridges.yaml.                                                                                                                                                                |
 | `bridges_compose_file`           | `process-compose.bridges.yaml` alongside config | Path to the generated process-compose fragment that runs `tier: wsl, type: socat` relays. The user's main process-compose.yaml is expected to reference it via `extends:` — see §4.  |
 | `dependencies_file`              | `dependencies.yaml` alongside config            | Path to dependencies.yaml.                                                                                                                                                           |
@@ -294,7 +292,7 @@ For containers **not** created by VS Code (bare `docker run`, CI containers, etc
 
 ```bash
 docker run --label claude.managed=true \
-           --label claude.project.root=/home/user/myproject \
+           --label claude.project.root=~/myproject \
            …
 ```
 
@@ -408,7 +406,7 @@ Start-Process -NoNewWindow -FilePath "wsl" -ArgumentList `
 Three Windows-specific points worth knowing:
 
 - **`--address 0.0.0.0`** is required because WSL2 reaches Windows over the virtual NIC, not loopback. Default `localhost` would make the listener invisible to WSL.
-- **`--token-file`** matches what's in `config.json`'s `token_file` for the `windows` entry — both sides read the same file.
+- **`--token-file`** matches what's in `config.yaml`'s `token_file` for the `windows` entry — both sides read the same file.
 - On Windows 11 with the **Hyper-V firewall** (you'll see the adapter name `vEthernet (WSL (Hyper-V firewall))`), regular `New-NetFirewallRule` rules don't apply to WSL traffic. You need `New-NetFirewallHyperVRule`. See [SECURITY.md](SECURITY.md#process-compose-hardening) for the exact command.
 
 > If you skipped systemd, replace the WSL2 `systemctl` line with explicit background commands:
@@ -446,7 +444,7 @@ Register-ScheduledTask `
 
 `-ExecutionPolicy Bypass` is required: the default `LocalMachine` policy is `Restricted` (or `RemoteSigned` post-domain-join), under which an unsigned `.ps1` exits 1 silently when invoked via Task Scheduler. Symptom: task fires on time but `Get-ScheduledTaskInfo` shows `LastTaskResult: 1` and nothing comes up.
 
-This triggers at logon for the current user, runs hidden, and retries twice if WSL2 hasn't initialised yet. `-RunLevel Highest` is intentionally omitted — the script binds `127.0.0.1:9919` in your own profile and needs no elevation; requesting `Highest` only adds a silent-failure mode on accounts where Task Scheduler can't auto-elevate.
+This triggers at logon for the current user, runs hidden, and retries twice if WSL2 hasn't initialised yet. `-RunLevel Highest` is intentionally omitted — the script runs in your own user profile and binds only local ports, so it needs no elevation; requesting `Highest` only adds a silent-failure mode on accounts where Task Scheduler can't auto-elevate.
 
 Verify the registration actually works:
 

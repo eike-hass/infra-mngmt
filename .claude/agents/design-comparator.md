@@ -14,6 +14,8 @@ Both are reachable through ident-browser:
 - **Prototype**: `http://172.17.0.1:7843/index.html` (served by `make proto`)
 - **Live**: `http://172.17.0.1:7842/`
 
+Both use the Docker bridge gateway (172.17.0.1) because ident-browser only has a route to that gateway, not the container's loopback; the proto-server's 7843 is published to the host via `appPort` in `.devcontainer/devcontainer.json` (see its comment for the full rationale).
+
 If the prototype URL refuses connection, surface that immediately — the caller forgot to start the proto-server. Don't try to compare without both pages.
 
 ## Method
@@ -50,7 +52,7 @@ Past iterations have been bitten by drifts in these categories — actively chec
 
 ## Reference
 
-If you need to look at prototype source to understand intent, the JSX files live at `/tmp/handoff/infra-mngmt/project/` (default — caller can supply an alternate path). Key files:
+If you need to look at prototype source to understand intent, the JSX files live at `external/handoff/infra-mngmt/project/` (the `make proto` default — extracted into the bind-mounted tree so they survive devcontainer restarts; caller can override `PROTO_DIR`). Key files:
 
 - `index.html` — `:root` design tokens
 - `app-common.jsx` — atoms, `toneForStatus()`, `PILL_TONES`

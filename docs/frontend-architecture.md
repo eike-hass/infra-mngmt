@@ -1,10 +1,8 @@
 # Frontend architecture & guidelines
 
-Status: **in effect — M1–M5 + M7 of §16 have shipped; M6 deferred**. Sections marked **(now)** describe the present codebase; **(target)** describes where we are headed; **(rule)** is binding for new code regardless of where the surrounding files sit today.
+Status: **in effect — M1–M5 + M7 of §16 have shipped; M6 deferred**. Sections marked **(now)** describe the present codebase; **(target)** describes where we are headed (only M6 remains); **(rule)** is binding for new code regardless of where the surrounding files sit today.
 
-This document is the canonical reference for anyone touching anything under [internal/web/](../internal/web/). It is referenced from [CLAUDE.md](../CLAUDE.md) and [README.md](../README.md); changes to the frontend layout, asset pipeline, interaction model, or visual language must update this doc in the same change.
-
-It exists because the frontend has crossed the line where ad-hoc decisions start to compound, and because we have explicitly chosen *not* to migrate to a SPA framework — that choice only pays off if the discipline below is followed.
+This is the canonical reference for anyone touching [internal/web/](../internal/web/). It's referenced from [CLAUDE.md](../CLAUDE.md) and [README.md](../README.md); changes to the frontend layout, asset pipeline, interaction model, or visual language must update this doc in the same change. It exists because the frontend crossed the line where ad-hoc decisions compound, and because we explicitly chose *not* to adopt a SPA framework — a choice that only pays off if the discipline below is followed.
 
 ---
 
@@ -46,7 +44,7 @@ The visual tokens (§5.1), component vocabulary (§5.4), and UX patterns (§7.6�
 | Icons | Inline SVG | No icon font, no sprite sheet, no external set. |
 | Styling | Hand-written CSS with custom properties | No Tailwind, no CSS-in-JS, no PostCSS. |
 
-The server is `net/http` + chi, configured in [internal/web/server.go](../internal/web/server.go). Static assets are served from a single `embed.FS` rooted at `internal/web/static/`.
+The server is `net/http` + chi, configured in [internal/web/server.go](../internal/web/server.go). The router applies `middleware.Compress(5)` to gzip responses; chi compresses only its `text/*` + `application/{json,javascript,…}` allowlist, so `text/event-stream` (the container-events SSE) is left untouched and keeps streaming (biggest win is the CodeMirror bundle on the preview route). Static assets are served from a single `embed.FS` rooted at `internal/web/static/`.
 
 ---
 
@@ -54,9 +52,9 @@ The server is `net/http` + chi, configured in [internal/web/server.go](../intern
 
 ### 3.1 Now
 
-The §3.2 layout is the current shape — M1–M5 + M7 of §16 have shipped, so templates live in `templates/*.html.tmpl` (parsed via `embed.FS`), CSS lives in `static/css/app.css`, JS lives as ES modules under `static/js/`, and every vendored asset is in `static/vendor/`. There is no `internal/web/template.go`; the old raw-string constants were removed in M4. CDN references have been eliminated everywhere except for `cmd/vendor-codemirror/` (a build-time tool that downloads and bundles CodeMirror, not part of the production binary).
+The §3.2 layout is reality: templates in `templates/*.html.tmpl` (parsed via `embed.FS`), CSS in `static/css/app.css`, JS as ES modules under `static/js/`, vendored assets in `static/vendor/`. There is no `internal/web/template.go` — the old raw-string constants were removed in M4. CDN references are gone everywhere except `cmd/vendor-codemirror/` (a build-time bundler, not in the production binary).
 
-### 3.2 Target
+### 3.2 Current layout (achieved by M1–M5 + M7)
 
 ```
 internal/web/
@@ -117,6 +115,7 @@ We use Go template composition, not concatenation:
 - There is **no separate layout file**. `index.html.tmpl` is the full page shell (`<html>`/`<head>`/header/view container/footer); handlers compose it with `entity_list.html.tmpl` at render time — `parseTemplate("index", "templates/index.html.tmpl", "templates/entity_list.html.tmpl")`.
 - HTMX partials returned to the client are *whole files* under `templates/` (`preview`, `promote_picker`, `promote_result`, `container_controls`, `open_design_*`) — the response shape is obvious from the filename.
 - **Deliberate exception — the polling views:** `services.html.tmpl` and `llama.html.tmpl` each hold several `{{define}}` section shells, one per self-polling endpoint (see §7.10). Co-locating a view's sections in one file is intentional; the rule is only *don't scatter `{{define}}` blocks across **unrelated** files*.
+- **Parsed templates are cached.** `parseTemplate()` memoizes the parsed `*template.Template` by file-set key in `tmplCache` ([templates.go](../internal/web/templates.go)). The templates live in an immutable `embed.FS` and the FuncMap is stateless, so the parsed set is safe to reuse across concurrent requests — the self-polling section endpoints don't re-parse the full set (incl. the ~550-line services template) on every tick.
 
 ### 4.2 FuncMap
 
@@ -125,6 +124,7 @@ The `tmplFuncs` map ([handlers.go:317](../internal/web/handlers.go#L317)) is a c
 - **(rule)** A function added to `tmplFuncs` must have a unit test in [template_test.go](../internal/web/template_test.go) covering its happy path and the empty/zero input.
 - **(rule)** A FuncMap helper that returns `template.HTML` must escape any caller-supplied content explicitly. Never feed user-mutable data through `template.HTML`.
 - **(rule)** Formatters (`formatMem`, `formatCount`, `formatTokensPerSec`, …) are pure functions and must be unit-tested without spinning up a template.
+- **(rule)** Handlers execute templates via `renderTmpl(w, tmpl, data)` ([templates.go:53](../internal/web/templates.go#L53)), never `tmpl.Execute` directly. It logs execution errors instead of silently swallowing them — HTMX partials have already written their status by Execute time, so a late error can't change the response but must still leave a trace in the log.
 
 ### 4.3 Escaping
 
@@ -153,8 +153,8 @@ The `tmplFuncs` map ([handlers.go:317](../internal/web/handlers.go#L317)) is a c
 | `--bg3`  | `#1c1c1c` | Buttons / inputs / preview body |
 | `--bg4`  | `#222`    | Active tabs, hovered buttons |
 | `--text`  | `#c9c9c9` | Primary content |
-| `--text2` | `#888`    | Labels, secondary content, placeholder |
-| `--text3` | `#5a5a5a` | De-emphasized (file paths, build chip when fresh) |
+| `--text2` | `#989898` | Labels, secondary content, placeholder |
+| `--text3` | `#5e5e5e` | De-emphasized (file paths, build chip when fresh) |
 | `--white` | `#f0f0f0` | Logo, active emphasis |
 | `--border`  | `#252525` | Default rule |
 | `--border2` | `#2e2e2e` | Hover state, pill borders |
@@ -169,6 +169,10 @@ The `tmplFuncs` map ([handlers.go:317](../internal/web/handlers.go#L317)) is a c
 | `--orange` | `#f0a04a` | Attention / starting / degraded |
 | `--accent` | `oklch(68% 0.18 200)` (cyan) | Primary action / focus / build chip stale |
 | `--accent2`| `oklch(68% 0.18 302)` (magenta) | Project-scope badge contrast |
+
+**Pill tints** — status-pill / badge backgrounds, the single source of truth for those surfaces: `--pill-running` / `--pill-stopped` / `--pill-error` / `--pill-warning` / `--pill-starting` / `--pill-muted` / `--pill-amber`. Reused by `.status-pill[state]`, `.mcp-status`, `.health-pill`, `.exit-code`, `.broken-ref-banner` — build a new status surface from these, never a fresh tint.
+
+**Accent fills** — primary-button backgrounds: `--accent-fill` (6% accent tint, default) and `--accent-fill-hover` (14% on hover). Used by llama load, vault allow, and promote buttons.
 
 **Kind colors** (entity-kind glyph + group pill outline) and **scope colors** (the `global`/`project`/`devcontainer` badge on each entity) live in `:root` as `--kind-{mcp,command,agent,skill,hook,memory,claude_md}` and `--level-{global,project,devcontainer}`. The hues are deliberately distinct so the eye can scan a mixed list by either dimension at a glance.
 
@@ -240,7 +244,7 @@ When designing a new surface, **build it from these**. If you find yourself want
 - **(rule)** No `onclick="..."` attributes in templates. Bind in the page module via `addEventListener`. Exception: HTMX `hx-on:click` is permitted because it's namespaced and audit-friendly.
 - **(rule)** No `eval`, no `new Function()`, no string-templated HTML injected via `innerHTML` from user-mutable data. Build DOM nodes with `document.createElement` or render server-side and swap.
 - **(rule)** Browser APIs only — no `npm` packages, no `import` from URLs in production code. CodeMirror is the one allowed exception and is loaded as a single pre-built bundle file.
-- **(rule)** Any `EventSource` opened by a module must close itself on `pagehide` / view switch. The pattern in [template.go closeLogStream](../internal/web/template.go) is correct; copy it.
+- **(rule)** Any `EventSource` opened by a module must close itself on `pagehide` / view switch. The pattern in [containers.js closeLogStream](../internal/web/static/js/containers.js#L77) is correct; copy it.
 
 ### 6.3 What goes in app.js vs a page module
 
@@ -420,7 +424,7 @@ When those break down, reach for SSE instead (see §7.2). Specifically:
 
 ### 8.1 Now
 
-The three top-level views (`entities`, `services`, `llama`) are sibling `<div>`s toggled via `display:` in `showView()` ([template.go:641](../internal/web/template.go#L641)). The URL never changes, so reload, back/forward, and link-sharing don't work.
+The three top-level views (`entities`, `services`, `llama`) are sibling `<div>`s toggled via `display:` in `showView()` ([static/js/app.js](../internal/web/static/js/app.js)). The URL never changes, so reload, back/forward, and link-sharing don't work.
 
 ### 8.2 Target
 
