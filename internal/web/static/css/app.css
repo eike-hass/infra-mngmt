@@ -10,6 +10,13 @@
   --text:#c9c9c9;--text2:#989898;--text3:#5e5e5e;--white:#f0f0f0;
   --accent:oklch(68% 0.18 200);--accent2:oklch(68% 0.18 302);
   --green:#6bcf7f;--red:#e06c6c;--yellow:#ffcc5c;--orange:#f0a04a;
+  /* Status-pill / badge background tints — single source of truth, reused by
+     .status-pill, .mcp-status, .health-pill, .exit-code, .broken-ref-banner. */
+  --pill-running:#1a3a1a;--pill-stopped:#2a2a2a;--pill-error:#3a1a1a;
+  --pill-warning:#3a2a14;--pill-starting:#2a2a1a;--pill-muted:#1e1e1e;--pill-amber:#2a1e12;
+  /* Accent-intent fills for primary buttons (llama load / vault allow / promote). */
+  --accent-fill:color-mix(in srgb,var(--accent) 6%,transparent);
+  --accent-fill-hover:color-mix(in srgb,var(--accent) 14%,transparent);
   --kind-mcp:oklch(68% 0.18 200);--kind-command:oklch(68% 0.18 251);
   --kind-agent:oklch(68% 0.18 302);--kind-skill:oklch(68% 0.18 353);
   --kind-hook:oklch(68% 0.18 44);--kind-memory:oklch(68% 0.18 95);
@@ -353,20 +360,23 @@ body.show-internals .show-internals-btn:hover{background:color-mix(in srgb,var(-
 .svc-instance.open-design .svc-icon{color:var(--accent2)}
 .svc-instance.open-design .od-glyph{font-size:13px;line-height:1}
 .svc-instance.processes    .svc-icon{color:var(--kind-claude_md)}
+/* Loading placeholder shown inside a section wrapper while its HTMX fetch is
+   in flight (services sections, llama cards, index view shells). */
+.svc-section-placeholder{color:var(--text3);font-style:italic;font-size:11px;padding:12px;margin:0}
 .status-pill{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:10px;font-size:10px}
 .status-pill .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
-.status-pill.running{background:#1a3a1a;color:var(--green)}.status-pill.running .dot{background:var(--green)}
-.status-pill.stopped{background:#2a2a2a;color:var(--text2)}.status-pill.stopped .dot{background:var(--text3)}
-.status-pill.error{background:#3a1a1a;color:var(--red)}.status-pill.error .dot{background:var(--red)}
-.status-pill.warning{background:#3a2a14;color:var(--orange)}.status-pill.warning .dot{background:var(--orange)}
-.status-pill.starting{background:#2a2a1a;color:var(--yellow)}.status-pill.starting .dot{background:var(--yellow)}
-.status-pill.disabled{background:#1e1e1e;color:var(--text3)}.status-pill.disabled .dot{background:var(--text3)}
-.status-pill.unknown{background:#1e1e1e;color:var(--text3)}.status-pill.unknown .dot{background:var(--text3)}
+.status-pill.running{background:var(--pill-running);color:var(--green)}.status-pill.running .dot{background:var(--green)}
+.status-pill.stopped{background:var(--pill-stopped);color:var(--text2)}.status-pill.stopped .dot{background:var(--text3)}
+.status-pill.error{background:var(--pill-error);color:var(--red)}.status-pill.error .dot{background:var(--red)}
+.status-pill.warning{background:var(--pill-warning);color:var(--orange)}.status-pill.warning .dot{background:var(--orange)}
+.status-pill.starting{background:var(--pill-starting);color:var(--yellow)}.status-pill.starting .dot{background:var(--yellow)}
+.status-pill.disabled{background:var(--pill-muted);color:var(--text3)}.status-pill.disabled .dot{background:var(--text3)}
+.status-pill.unknown{background:var(--pill-muted);color:var(--text3)}.status-pill.unknown .dot{background:var(--text3)}
 .health-pill{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:10px;font-size:9px;letter-spacing:.02em;border:1px solid transparent;vertical-align:middle}
-.health-pill.ready{background:#15311a;color:var(--green);border-color:#1a3a1a}
-.health-pill.not-ready{background:#3a1a1a;color:var(--red);border-color:#4a1818}
-.health-pill.unknown{background:#1e1e1e;color:var(--text3);border-color:var(--border)}
-.exit-code{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:10px;font-size:9px;background:#3a1a1a;color:var(--red);vertical-align:middle}
+.health-pill.ready{background:#15311a;color:var(--green);border-color:var(--pill-running)}
+.health-pill.not-ready{background:var(--pill-error);color:var(--red);border-color:#4a1818}
+.health-pill.unknown{background:var(--pill-muted);color:var(--text3);border-color:var(--border)}
+.exit-code{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:10px;font-size:9px;background:var(--pill-error);color:var(--red);vertical-align:middle}
 .proc-name{color:var(--text)}
 /* Tier badges — colored to distinguish wsl (green-hue) from windows (blue-hue) */
 .tier-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;letter-spacing:.03em;font-weight:500}
@@ -444,8 +454,8 @@ body.show-internals tr.proc-internal{display:table-row}
 .llama-drain-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 8px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all var(--dur-fast) var(--ease-out)}
 .llama-drain-btn:hover{border-color:var(--red);color:var(--red);background:color-mix(in srgb,var(--red) 8%,transparent)}
 .llama-model-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 8px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all var(--dur-fast) var(--ease-out);flex-shrink:0}
-.llama-model-btn.load{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 6%,transparent)}
-.llama-model-btn.load:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.llama-model-btn.load{border-color:var(--accent);color:var(--accent);background:var(--accent-fill)}
+.llama-model-btn.load:hover{background:var(--accent-fill-hover)}
 .llama-model-btn.unload{border-color:color-mix(in srgb,var(--red) 40%,var(--border2));color:var(--red);background:color-mix(in srgb,var(--red) 9%,transparent)}
 .llama-model-btn.unload:hover{border-color:var(--red);background:color-mix(in srgb,var(--red) 18%,transparent)}
 /* Loaded-model block — full chrome (kicker + name + status + path + metrics + slots) */
@@ -557,16 +567,16 @@ body.show-internals tr.proc-internal{display:table-row}
 /* ── preview MCP status badge ── */
 .mcp-status{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font-size:10px;margin-top:8px}
 .mcp-status .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
-.mcp-status.running{background:#1a3a1a;color:var(--green)}.mcp-status.running .dot{background:var(--green)}
-.mcp-status.stopped,.mcp-status.disabled{background:#2a2a2a;color:var(--text2)}.mcp-status.stopped .dot,.mcp-status.disabled .dot{background:var(--text3)}
-.mcp-status.error{background:#3a1a1a;color:var(--red)}.mcp-status.error .dot{background:var(--red)}
-.mcp-status.starting{background:#2a2a1a;color:var(--yellow)}.mcp-status.starting .dot{background:var(--yellow)}
-.mcp-status.unresolved{background:#2a1e12;color:var(--orange)}.mcp-status.unresolved .dot{background:var(--orange)}
-.mcp-status.offline{background:#1e1e1e;color:var(--text2)}.mcp-status.offline .dot{background:var(--text3)}
-.mcp-status.unknown{background:#1e1e1e;color:var(--text3)}.mcp-status.unknown .dot{background:var(--text3);opacity:.4}
+.mcp-status.running{background:var(--pill-running);color:var(--green)}.mcp-status.running .dot{background:var(--green)}
+.mcp-status.stopped,.mcp-status.disabled{background:var(--pill-stopped);color:var(--text2)}.mcp-status.stopped .dot,.mcp-status.disabled .dot{background:var(--text3)}
+.mcp-status.error{background:var(--pill-error);color:var(--red)}.mcp-status.error .dot{background:var(--red)}
+.mcp-status.starting{background:var(--pill-starting);color:var(--yellow)}.mcp-status.starting .dot{background:var(--yellow)}
+.mcp-status.unresolved{background:var(--pill-amber);color:var(--orange)}.mcp-status.unresolved .dot{background:var(--orange)}
+.mcp-status.offline{background:var(--pill-muted);color:var(--text2)}.mcp-status.offline .dot{background:var(--text3)}
+.mcp-status.unknown{background:var(--pill-muted);color:var(--text3)}.mcp-status.unknown .dot{background:var(--text3);opacity:.4}
 
 /* ── broken-ref indicator in preview ── */
-.broken-ref-banner{background:#2a1e12;border:1px solid #5a3a18;border-radius:4px;color:var(--orange);padding:8px 12px;margin-bottom:12px;font-size:11px}
+.broken-ref-banner{background:var(--pill-amber);border:1px solid #5a3a18;border-radius:4px;color:var(--orange);padding:8px 12px;margin-bottom:12px;font-size:11px}
 /* ── vaults section (mcp-fs filesystem MCPs) — flat rows, parent-row disclosure ── */
 .svc-instance.vaults .vault-rows{display:flex;flex-direction:column}
 .vault-row{border-bottom:1px solid var(--border)}
@@ -630,8 +640,8 @@ body.show-internals tr.proc-internal{display:table-row}
 .vault-revoke-btn:hover{border-color:var(--red);background:color-mix(in srgb,var(--red) 18%,transparent)}
 .vault-tree-allow-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 8px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;transition:all var(--dur-fast) var(--ease-out);flex-shrink:0}
 .vault-tree-allow-btn:hover{border-color:var(--text2);color:var(--text)}
-.vault-tree-allow-btn.primary{background:color-mix(in srgb,var(--accent) 6%,transparent);border-color:var(--accent);color:var(--accent)}
-.vault-tree-allow-btn.primary:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.vault-tree-allow-btn.primary{background:var(--accent-fill);border-color:var(--accent);color:var(--accent)}
+.vault-tree-allow-btn.primary:hover{background:var(--accent-fill-hover)}
 .vault-tree-up{background:transparent;border:none;color:var(--text3);padding:0 4px;border-radius:3px;cursor:pointer;font-family:var(--font);font-size:10px;flex-shrink:0;transition:color var(--dur-fast) ease}
 .vault-tree-up:hover{color:var(--text)}
 .vault-tree-into{background:transparent;border:none;color:var(--text2);padding:0;cursor:pointer;font-family:var(--font);font-size:11px;text-align:left;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color var(--dur-fast) ease}
@@ -678,8 +688,8 @@ body.show-internals tr.proc-internal{display:table-row}
 /* ── edit toolbar ── */
 .preview-actions{display:flex;justify-content:flex-end;padding:6px 0 2px;gap:6px;align-items:center}
 .preview-toolbar{display:flex;justify-content:flex-end;margin-top:8px;gap:6px}
-.promote-btn{background:color-mix(in srgb,var(--accent) 6%,transparent);border:1px solid var(--accent);color:var(--accent);padding:2px 9px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;font-weight:500;transition:all .1s;position:relative}
-.promote-btn:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.promote-btn{background:var(--accent-fill);border:1px solid var(--accent);color:var(--accent);padding:2px 9px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;font-weight:500;transition:all .1s;position:relative}
+.promote-btn:hover{background:var(--accent-fill-hover)}
 .promote-btn:disabled{opacity:.5;cursor:wait}
 .promote-btn.htmx-request::after{content:"";display:inline-block;width:8px;height:8px;margin-left:5px;border:1px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-1px}
 .promote-slot:empty{display:none}
@@ -834,7 +844,7 @@ body.show-internals tr.proc-internal{display:table-row}
 
 /* ── Compose-project groups + Open Design card ── */
 /* Status-pill "degraded": project has some services running, some not. */
-.status-pill.degraded{background:#3a2a14;color:var(--orange)}.status-pill.degraded .dot{background:var(--orange)}
+.status-pill.degraded{background:var(--pill-warning);color:var(--orange)}.status-pill.degraded .dot{background:var(--orange)}
 
 /* Project-group rows inside the containers table. The header row is the
    project itself (with lifecycle controls); member rows are the individual
@@ -874,7 +884,7 @@ tr.project-member .proc-name{color:var(--text2)}
 .ods-name-dim{opacity:.6}
 .ods-desc{color:var(--text3);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
 .ods-web-chip{display:inline-flex;align-items:center;gap:3px;font-size:10px;text-decoration:none;color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);border-radius:10px;padding:1px 7px;flex-shrink:0;font-family:var(--font)}
-.ods-web-chip:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.ods-web-chip:hover{background:var(--accent-fill-hover)}
 .ods-web-chip-arrow{font-size:9px}
 .ods-web-chip-muted{color:var(--text3);background:transparent;border-color:var(--border2);pointer-events:none}
 .ods-version-chip{display:inline-flex;align-items:center;font-size:10px;color:var(--text2);background:transparent;border:1px solid var(--border2);border-radius:10px;padding:1px 6px;flex-shrink:0;font-family:var(--font)}
