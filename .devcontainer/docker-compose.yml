@@ -1,0 +1,54 @@
+# Portable base for the infra-mngmt dev container (committed, shareable).
+#
+# Personal / machine-specific bind mounts (Windows-side config, sibling-project
+# checkouts, …) do NOT belong here — put them in docker-compose.override.yml,
+# which is committed as a no-op and meant to be customized locally. Both files
+# are listed in devcontainer.json's `dockerComposeFile`, and Compose merges a
+# service's `volumes` by container mount-path, so the override only ever ADDS
+# to what's defined here.
+services:
+  app:
+    build:
+      # Context is .devcontainer (this file's dir) so `COPY init-firewall.sh`
+      # in the Dockerfile resolves — matches the old devcontainer.json default.
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TZ: "${TZ:-America/Los_Angeles}"
+        CLAUDE_CODE_VERSION: latest
+        GIT_DELTA_VERSION: "0.18.2"
+        ZSH_IN_DOCKER_VERSION: "1.2.0"
+    # init-firewall.sh needs these (was runArgs in devcontainer.json).
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=4096"
+      CLAUDE_CONFIG_DIR: /home/node/.claude
+      POWERLEVEL9K_DISABLE_GITSTATUS: "true"
+    # Publish the design-iteration proto-server to the WSL host on 0.0.0.0 so
+    # ident-browser can reach it via the docker bridge gateway (172.17.0.1) —
+    # the container side must bind 0.0.0.0:7843 (see `make proto`).
+    ports:
+      - "7843:7843"
+    volumes:
+      - claude-code-bashhistory:/commandhistory
+      - claude-code-config:/home/node/.claude
+      - playwright-browsers-v2:/home/node/.cache/ms-playwright
+      - gh-config:/home/node/.config/gh
+      # The repo itself, at /workspace. `..` is relative to this compose file
+      # (.devcontainer) → the repo root.
+      - ..:/workspace
+      # infra-mngmt's own config dir — portable via ${HOME} (no hard-coded
+      # username). Powers the deploy flow (reads /wsl-config/token) and host
+      # diagnostics. On a machine without this dir, Docker creates an empty one.
+      - ${HOME}/.config/infra-mngmt:/wsl-config
+    # devcontainer `overrideCommand` defaults to false for Compose, so the
+    # service command must not exit or the container would stop immediately.
+    command: sleep infinity
+
+volumes:
+  claude-code-bashhistory:
+  claude-code-config:
+  playwright-browsers-v2:
+  gh-config:

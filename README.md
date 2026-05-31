@@ -108,6 +108,8 @@ make build
 
 The devcontainer firewall already allowlists the Go module proxy (`proxy.golang.org`, `sum.golang.org`, `dl.google.com`); standard `go mod tidy` and `make build` work without env overrides.
 
+> The dev container is Compose-based (`.devcontainer/docker-compose.yml` is the portable base). To add machine-specific bind mounts — your Windows-side config, sibling project checkouts — edit `.devcontainer/docker-compose.override.yml` after marking it skip-worktree so your edits stay local; see that file's header for the exact steps.
+
 **Then from a WSL2 terminal, copy the binary into your PATH:**
 
 ```bash

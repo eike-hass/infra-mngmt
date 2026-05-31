@@ -103,9 +103,9 @@ vendor-codemirror:
 ## proto: serve a Design handoff prototype so ident-browser can render it
 ##        alongside the live app. Foreground; Ctrl-C to stop (or background
 ##        with `make proto &`). Override the path:
-##          make proto PROTO_DIR=/tmp/handoff/infra-mngmt/project
+##          make proto PROTO_DIR=/path/to/prototype
 ##        Reachable from ident-browser at http://172.17.0.1:$(PROTO_PORT)/
-##        via the appPort publish in .devcontainer/devcontainer.json.
+##        via the `ports` publish in .devcontainer/docker-compose.yml.
 proto:
 	@test -d "$(PROTO_DIR)" || { echo "no prototype at $(PROTO_DIR) — extract the handoff there or set PROTO_DIR=<path>"; exit 1; }
 	@echo "serving $(PROTO_DIR) at http://172.17.0.1:$(PROTO_PORT)/index.html"

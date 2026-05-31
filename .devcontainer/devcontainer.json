@@ -1,24 +1,10 @@
 {
   "name": "infra-mngmt Claude Code Sandbox",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "args": {
-      "TZ": "${localEnv:TZ:America/Los_Angeles}",
-      "CLAUDE_CODE_VERSION": "latest",
-      "GIT_DELTA_VERSION": "0.18.2",
-      "ZSH_IN_DOCKER_VERSION": "1.2.0"
-    }
-  },
-  "runArgs": ["--cap-add=NET_ADMIN", "--cap-add=NET_RAW"],
-  // Publish the design-iteration proto-server up to the WSL host so
-  // ident-browser can reach it the same way it reaches the live
-  // infra-mngmt (via the docker bridge gateway at 172.17.0.1). Bare
-  // "host:container" form publishes on 0.0.0.0 on the host — required
-  // because ident-browser only has a route to 172.17.0.1, not the host's
-  // 127.0.0.1. The WSL distro's firewall (init-firewall.sh + Windows
-  // host firewall) keeps the surface internal to WSL. Container bind
-  // must be 0.0.0.0:7843 inside the container — see `make proto`.
-  "appPort": ["7843:7843"],
+  // Compose-based: the portable base + a local-only override (see
+  // docker-compose.override.yml for how to add personal bind mounts).
+  "dockerComposeFile": ["docker-compose.yml", "docker-compose.override.yml"],
+  "service": "app",
+  "workspaceFolder": "/workspace",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -47,26 +33,6 @@
     }
   },
   "remoteUser": "node",
-  "mounts": [
-    "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
-    "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume",
-    "source=playwright-browsers-v2,target=/home/node/.cache/ms-playwright,type=volume",
-    "source=gh-config,target=/home/node/.config/gh,type=volume",
-    "source=/home/eike/.config/infra-mngmt,target=/wsl-config,type=bind",
-    "source=/c/Users/eike-/.config/infra-mngmt,target=/windows-config,type=bind",
-    "source=/home/eike/Workspace/open-design,target=/temp-opendesign,type=bind",
-    "source=/home/eike/Workspace/mcp-fs,target=/temp-mcp-fs,type=bind",
-    "source=/home/eike/Workspace/browser-mcp,target=/temp-browser-mcp,type=bind",
-    "source=/home/eike/Workspace/transparent-web,target=/temp-transparent-web,type=bind",
-    "source=/c/Users/eike-/llama,target=/temp-llama,type=bind"
-  ],
-  "containerEnv": {
-    "NODE_OPTIONS": "--max-old-space-size=4096",
-    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
-    "POWERLEVEL9K_DISABLE_GITSTATUS": "true"
-  },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
-  "workspaceFolder": "/workspace",
   "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
   "waitFor": "postStartCommand"
 }

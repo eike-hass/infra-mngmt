@@ -14,7 +14,7 @@ The goal is **thoroughness, not minimal token use**. Past iterations failed by s
 Already in place:
 
 - `make proto` — Python `http.server` on `0.0.0.0:7843` inside the devcontainer, serving `$PROTO_DIR` (default `external/handoff/infra-mngmt/project` — bind-mounted, survives container restarts).
-- `.devcontainer/devcontainer.json` — `appPort: ["7843:7843"]` publishes the port up to the WSL host on all interfaces; ident-browser reaches it via the docker-bridge gateway at `172.17.0.1:7843`.
+- `.devcontainer/docker-compose.yml` — the `ports: ["7843:7843"]` mapping publishes the port up to the WSL host on all interfaces; ident-browser reaches it via the docker-bridge gateway at `172.17.0.1:7843`.
 - `.gitignore` — `*-handoff.zip` and `/external/handoff/` are excluded; handoffs are ephemeral.
 
 **URLs (reachable from the devcontainer and from ident-browser):**

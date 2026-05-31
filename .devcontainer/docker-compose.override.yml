@@ -1,0 +1,22 @@
+# Local-only overrides for the dev container — keep your edits OUT of git.
+#
+# This file is committed as a no-op (an empty `volumes:` adds nothing) so a
+# fresh clone builds: it's listed in devcontainer.json's `dockerComposeFile`,
+# and Compose requires every listed file to exist. To add machine-specific
+# bind mounts WITHOUT committing them, mark the file skip-worktree once:
+#
+#   git update-index --skip-worktree .devcontainer/docker-compose.override.yml
+#
+# then add entries under `volumes:` below. Compose merges service `volumes` by
+# container mount-path, so these are ADDED to docker-compose.yml's mounts.
+# Use ${HOME} for WSL paths and /c/Users/<you> for Windows-side paths — never a
+# hard-coded username. To stop ignoring local edits again:
+#
+#   git update-index --no-skip-worktree .devcontainer/docker-compose.override.yml
+services:
+  app:
+    volumes: []
+    # Example personal mounts (uncomment + edit after skip-worktree):
+    # volumes:
+    #   - /c/Users/<you>/.config/infra-mngmt:/windows-config      # Windows-side config (host diagnostics)
+    #   - ${HOME}/Workspace/some-project:/temp-some-project       # sibling checkout for design / mcp-fs work

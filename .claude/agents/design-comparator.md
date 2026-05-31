@@ -14,7 +14,7 @@ Both are reachable through ident-browser:
 - **Prototype**: `http://172.17.0.1:7843/index.html` (served by `make proto`)
 - **Live**: `http://172.17.0.1:7842/`
 
-Both use the Docker bridge gateway (172.17.0.1) because ident-browser only has a route to that gateway, not the container's loopback; the proto-server's 7843 is published to the host via `appPort` in `.devcontainer/devcontainer.json` (see its comment for the full rationale).
+Both use the Docker bridge gateway (172.17.0.1) because ident-browser only has a route to that gateway, not the container's loopback; the proto-server's 7843 is published to the host via the `ports` mapping in `.devcontainer/docker-compose.yml` (see its comment for the full rationale).
 
 If the prototype URL refuses connection, surface that immediately — the caller forgot to start the proto-server. Don't try to compare without both pages.
 
