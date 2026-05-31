@@ -1629,3 +1629,19 @@ func TestQesc(t *testing.T) {
 		}
 	}
 }
+
+// TestStaticAssetGzipped pins the Compress middleware: a client advertising
+// gzip gets a gzip-encoded static asset (text/css is in chi's compressible set).
+func TestStaticAssetGzipped(t *testing.T) {
+	srv := newServerWithSource(newMockSource("host:/x", entity.GlobalScope()))
+	req := httptest.NewRequest(http.MethodGet, "/static/css/app.css", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if enc := rr.Header().Get("Content-Encoding"); enc != "gzip" {
+		t.Errorf("Content-Encoding = %q, want gzip", enc)
+	}
+}

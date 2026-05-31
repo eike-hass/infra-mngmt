@@ -127,6 +127,11 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 	s.mux.Use(middleware.Logger)
 	s.mux.Use(middleware.Recoverer)
 	s.mux.Use(s.securityHeadersMiddleware)
+	// gzip responses (HTML partials + static assets). chi's Compress only
+	// touches an allowlist of text/* + application/{json,javascript,…} types,
+	// so text/event-stream (the container events SSE) is left untouched and
+	// keeps streaming. Biggest win is the CodeMirror bundle on the preview route.
+	s.mux.Use(middleware.Compress(5))
 
 	// Public routes — no auth required.
 	s.mux.Get("/login", s.handleLoginGet)
