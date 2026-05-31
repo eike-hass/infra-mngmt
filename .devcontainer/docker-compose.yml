@@ -47,8 +47,28 @@ services:
     # service command must not exit or the container would stop immediately.
     command: sleep infinity
 
+# Volume names are load-bearing: renaming a named volume is a DATA MIGRATION,
+# not a config edit — Compose points the container at a *different* volume and
+# the old data is orphaned (not moved). See the README "Dev container volumes"
+# note before changing any name here.
 volumes:
+  # Project-scoped — Compose prefixes these with the project name, giving one
+  # stable volume per project. Intentional: replaces the old
+  # ${devcontainerId}-suffixed names that minted a fresh pair every rebuild and
+  # piled up orphans. (On the migration rebuild these started empty; restore
+  # prior data with the cp -a one-liner in the README.)
   claude-code-bashhistory:
   claude-code-config:
+  # Shared across all of your devcontainers (as the old unsuffixed names were).
+  # `name:` pins the literal volume so Compose does NOT project-prefix/re-scope
+  # it. Deliberately NOT `external: true`: external would re-attach the existing
+  # shared volume on this machine but FAIL on a fresh one (external volumes must
+  # pre-exist) — which is exactly the portability the Compose move was for.
+  # `name:` (no external) gives the same re-attach on your machine AND auto-
+  # creates on a fresh one. (Trade-off: a stray `docker compose down -v` could
+  # delete a name-pinned volume; external would prevent that. Devcontainers
+  # don't run `down -v`, so the portability win wins.)
   playwright-browsers-v2:
+    name: playwright-browsers-v2
   gh-config:
+    name: gh-config

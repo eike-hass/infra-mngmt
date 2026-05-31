@@ -109,6 +109,16 @@ make build
 The devcontainer firewall already allowlists the Go module proxy (`proxy.golang.org`, `sum.golang.org`, `dl.google.com`); standard `go mod tidy` and `make build` work without env overrides.
 
 > The dev container is Compose-based (`.devcontainer/docker-compose.yml` is the portable base). To add machine-specific bind mounts — your Windows-side config, sibling project checkouts — edit `.devcontainer/docker-compose.override.yml` after marking it skip-worktree so your edits stay local; see that file's header for the exact steps.
+>
+> **Dev container volumes (migration note).** Renaming a named volume is a *data migration*, not a config edit: Compose mounts a different volume and the old data is **orphaned, not moved**. Compose also project-prefixes named volumes unless pinned with `name:`. If a mount rename ever leaves `~/.claude` or shell history empty, the data is safe in the old volume — copy it across (container stopped):
+>
+> ```bash
+> # find the orphan (grep transcripts for repo-unique symbols; or pick the newest)
+> docker run --rm -v <old-volume>:/from:ro -v <new-volume>:/to alpine sh -c 'cp -a /from/. /to/'
+> # e.g. <new-volume> is infra-mngmt_devcontainer_claude-code-config
+> ```
+>
+> `playwright-browsers-v2` and `gh-config` are pinned with `name:` so they stay shared across all your devcontainers (no re-download / re-auth).
 
 **Then from a WSL2 terminal, copy the binary into your PATH:**
 
