@@ -23,7 +23,7 @@
       <p class="promote-result-prompt">overwrite the existing entity at the target?</p>
       <div class="promote-result-actions">
         <button class="promote-confirm"
-                hx-post="/api/promote?from={{.From}}&to={{.To}}&overwrite=true&name={{.NewName}}{{if .Mirror}}&mirror=true{{end}}"
+                hx-post="/api/promote?from={{.From | qesc}}&to={{.To | qesc}}&overwrite=true&name={{.NewName | qesc}}{{if .Mirror}}&mirror=true{{end}}"
                 hx-target="#promote-slot"
                 hx-swap="innerHTML">overwrite</button>
         <button class="promote-cancel"

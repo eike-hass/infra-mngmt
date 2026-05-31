@@ -9,10 +9,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/entity"
@@ -333,6 +335,22 @@ func TestHandleEntityWriteReadOnly(t *testing.T) {
 	srv.ServeHTTP(rr, req)
 	if rr.Code != 403 {
 		t.Errorf("status = %d, want 403", rr.Code)
+	}
+}
+
+func TestHandleEntityWriteTooLargeReturns413(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	e := m.addEntity(entity.KindCommand, "big", []byte("old"))
+	srv := newServerWithSource(m)
+	// One byte over the cap must be rejected before the source is written.
+	body := strings.NewReader(strings.Repeat("a", maxEntityBytes+1))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/entity?id="+e.ID, body))
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", rr.Code, rr.Body.String())
+	}
+	if string(m.files["command:big"]) != "old" {
+		t.Errorf("oversize write should not have touched the source, got %q", m.files["command:big"])
 	}
 }
 
@@ -1006,6 +1024,107 @@ func TestBearerTokenParsing(t *testing.T) {
 	}
 }
 
+// loginPost posts the login form with the given token/next and returns the recorder.
+func loginPost(srv *Server, token, next string) *httptest.ResponseRecorder {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("token="+token+"&next="+url.QueryEscape(next)))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	srv.ServeHTTP(rr, req)
+	return rr
+}
+
+func TestLoginPostAuthDisabledMintsNoSession(t *testing.T) {
+	// token == "" → login is a no-op redirect to "/", and crucially must not
+	// mint a phantom session cookie (authMiddleware ignores it anyway).
+	srv := newServerWithSource(newMockSource("host:/x", entity.GlobalScope())) // token ""
+	rr := loginPost(srv, "anything", "/")
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/" {
+		t.Fatalf("auth-disabled login: got %d Location=%q, want 303 /", rr.Code, rr.Header().Get("Location"))
+	}
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "im_session" {
+			t.Errorf("auth-disabled login must not set im_session cookie")
+		}
+	}
+	got := false
+	srv.sessions.Range(func(_, _ any) bool { got = true; return false })
+	if got {
+		t.Errorf("auth-disabled login must not store a session")
+	}
+}
+
+func TestLoginPostRejectsProtocolRelativeNext(t *testing.T) {
+	cases := []struct{ next, wantLoc string }{
+		{"/partials/services", "/partials/services"}, // legit relative path preserved
+		{"//evil.com", "/"},                          // protocol-relative open redirect
+		{`/\evil.com`, "/"},                          // backslash-folding (browsers treat \ as /)
+		{"/\tx", "/"},                                // control char
+		{"https://evil.com", "/"},                    // absolute URL
+		{"", "/"},                                    // empty
+	}
+	for _, c := range cases {
+		srv := New(nil, nil, "secret", nil, nil, nil, nil, nil, nil)
+		rr := loginPost(srv, "secret", c.next)
+		if rr.Code != http.StatusSeeOther {
+			t.Fatalf("next=%q: status %d, want 303", c.next, rr.Code)
+		}
+		if loc := rr.Header().Get("Location"); loc != c.wantLoc {
+			t.Errorf("next=%q: Location=%q, want %q", c.next, loc, c.wantLoc)
+		}
+	}
+}
+
+func TestLoginGetEvictsStaleSessionAndShowsForm(t *testing.T) {
+	// handleLoginGet must apply the same TTL+eviction as authMiddleware: a
+	// stale cookie should NOT bounce the user back into the app — it should
+	// be evicted and the login form shown.
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil, nil)
+	stale := "stale-sid"
+	srv.sessions.Store(stale, session{created: time.Now().Add(-sessionTTL - time.Minute)})
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	req.AddCookie(&http.Cookie{Name: "im_session", Value: stale})
+	srv.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("stale cookie on /login should render the form (200), got %d Location=%q", rr.Code, rr.Header().Get("Location"))
+	}
+	if _, ok := srv.sessions.Load(stale); ok {
+		t.Errorf("stale session should have been evicted by handleLoginGet")
+	}
+}
+
+func TestSessionExpiryRejectsStaleCookieAndEvicts(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil, nil)
+
+	// Fresh session authenticates.
+	fresh := "fresh-sid"
+	srv.sessions.Store(fresh, session{created: time.Now()})
+	rr := httptest.NewRecorder()
+	req := requestFrom(http.MethodGet, "/api/sources", "8.8.8.8") // untrusted → cookie path
+	req.AddCookie(&http.Cookie{Name: "im_session", Value: fresh})
+	srv.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("fresh session should authenticate, got %d", rr.Code)
+	}
+
+	// Session older than sessionTTL is rejected and evicted from the map.
+	stale := "stale-sid"
+	srv.sessions.Store(stale, session{created: time.Now().Add(-sessionTTL - time.Minute)})
+	rr = httptest.NewRecorder()
+	req = requestFrom(http.MethodGet, "/api/sources", "8.8.8.8")
+	req.AddCookie(&http.Cookie{Name: "im_session", Value: stale})
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther || !strings.HasPrefix(rr.Header().Get("Location"), "/login") {
+		t.Fatalf("stale session should redirect to login, got %d Location=%q", rr.Code, rr.Header().Get("Location"))
+	}
+	if _, ok := srv.sessions.Load(stale); ok {
+		t.Errorf("stale session should have been evicted from the map on access")
+	}
+}
+
 func TestLoginPostInvalidToken(t *testing.T) {
 	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()
@@ -1468,3 +1587,26 @@ func TestBuildContainerControlsView_StoppedDevcontainer(t *testing.T) {
 // outerHTML in place every 8s, and the static parts of the panel
 // (bridges, OD chrome, vault chrome) live in dedicated endpoints that
 // rarely re-render.
+
+// TestMapContainerState covers the shared raw-state → CSS-class mapping that
+// snapshotContainers and buildContainerProjectGroups now both call. The CSS
+// class uniquely identifies the graph.ContainerState bucket (running/stopped/
+// unknown), so asserting it validates the full switch including case-folding.
+func TestMapContainerState(t *testing.T) {
+	cases := map[string]string{
+		"running":    "running",
+		"RUNNING":    "running", // case-insensitive
+		"restarting": "running",
+		"exited":     "stopped",
+		"dead":       "stopped",
+		"paused":     "stopped",
+		"created":    "stopped",
+		"weird":      "unknown",
+		"":           "unknown",
+	}
+	for in, wantCSS := range cases {
+		if _, css := mapContainerState(in); css != wantCSS {
+			t.Errorf("mapContainerState(%q) css = %q, want %q", in, css, wantCSS)
+		}
+	}
+}

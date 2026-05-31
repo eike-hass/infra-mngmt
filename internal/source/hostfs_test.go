@@ -1090,3 +1090,60 @@ func TestHostFSReadFilesSingleFileFallback(t *testing.T) {
 		t.Errorf("unexpected payload: %+v", files)
 	}
 }
+
+func TestHostFSWriteFilesExclCreateThenConflict(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := t.TempDir()
+	src := NewHostFS(dir, scope)
+	ctx := context.Background()
+	payload := []EntityFile{{Data: []byte("# fresh")}}
+
+	// First create succeeds and writes the data.
+	if err := src.WriteFilesExcl(ctx, entity.KindCommand, "promoted", payload); err != nil {
+		t.Fatalf("first WriteFilesExcl: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "commands", "promoted.md"))
+	if err != nil || string(got) != "# fresh" {
+		t.Fatalf("file not written: data=%q err=%v", got, err)
+	}
+
+	// Second create (a double-submit / concurrent writer) must not clobber and
+	// must report a conflict.
+	err = src.WriteFilesExcl(ctx, entity.KindCommand, "promoted", []EntityFile{{Data: []byte("# clobber")}})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("second WriteFilesExcl = %v; want ErrConflict", err)
+	}
+	got, _ = os.ReadFile(filepath.Join(dir, "commands", "promoted.md"))
+	if string(got) != "# fresh" {
+		t.Errorf("existing file was overwritten: %q", got)
+	}
+}
+
+func TestHostFSWriteFilesExclSkillConflict(t *testing.T) {
+	scope := entity.GlobalScope()
+	dir := t.TempDir()
+	src := NewHostFS(dir, scope)
+	ctx := context.Background()
+	files := []EntityFile{{RelPath: "SKILL.md", Data: []byte("# skill")}}
+
+	if err := src.WriteFilesExcl(ctx, entity.KindSkill, "demo", files); err != nil {
+		t.Fatalf("first WriteFilesExcl: %v", err)
+	}
+	if err := src.WriteFilesExcl(ctx, entity.KindSkill, "demo", files); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second WriteFilesExcl = %v; want ErrConflict", err)
+	}
+}
+
+func TestHostFSWriteFilesExclRejectsEmptyName(t *testing.T) {
+	src := NewHostFS(t.TempDir(), entity.GlobalScope())
+	if err := src.WriteFilesExcl(context.Background(), entity.KindCommand, "", []EntityFile{{Data: []byte("x")}}); err == nil {
+		t.Fatal("WriteFilesExcl(empty name) = nil; want error")
+	}
+}
+
+func TestHostFSWriteRejectsEmptyName(t *testing.T) {
+	src := NewHostFS(t.TempDir(), entity.GlobalScope())
+	if err := src.Write(context.Background(), entity.KindCommand, "", []byte("x")); err == nil {
+		t.Fatal("Write(empty name) = nil; want error")
+	}
+}

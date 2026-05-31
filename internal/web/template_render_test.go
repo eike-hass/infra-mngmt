@@ -535,8 +535,10 @@ func TestPromoteResultRendersConflictWithRetry(t *testing.T) {
 		`name=deploy-prod`,
 		`overwrite=true`,
 		`mirror=true`,
-		`from=host:/a:command:deploy`,
-		`to=host:/b:command:deploy`,
+		// from/to source IDs are now URL-query-escaped (qesc) in the hx-post
+		// attribute so ':' and '/' don't corrupt the parsed query string.
+		`from=host%3A%2Fa%3Acommand%3Adeploy`,
+		`to=host%3A%2Fb%3Acommand%3Adeploy`,
 		`class="promote-confirm"`,
 		`class="promote-cancel"`,
 	} {

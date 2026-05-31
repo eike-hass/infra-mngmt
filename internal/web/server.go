@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -77,7 +78,7 @@ type Server struct {
 	mux                *chi.Mux
 	token              string         // required bearer token; empty = auth disabled
 	trustedNetworks    []netip.Prefix // CIDRs whose source IPs bypass auth
-	sessions           sync.Map       // session ID (string) → struct{}
+	sessions           sync.Map       // session ID (string) → session (creation time for lazy TTL expiry)
 	entityCache        entityCacheEntry
 	buildInfo          BuildInfo // populated via SetBuildInfo; surfaced at /api/version
 	wakeURL            string    // populated via SetWakeURL; rendered into the page so JS can wake WSL via the Windows-side wake-proxy
@@ -345,6 +346,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ── auth middleware ───────────────────────────────────────────────────────────
 
+// sessionTTL is the absolute lifetime of a login session. Sessions older than
+// this are treated as invalid and deleted lazily on access (no background
+// sweep — that would leak a goroutine in tests that construct many Servers).
+const sessionTTL = 24 * time.Hour
+
+// session is the value stored in s.sessions, keyed by session ID. It records
+// when the session was created so authMiddleware can enforce sessionTTL.
+type session struct {
+	created time.Time
+}
+
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.token == "" {
@@ -368,11 +380,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if c, err := r.Cookie("im_session"); err == nil {
-			if _, ok := s.sessions.Load(c.Value); ok {
-				next.ServeHTTP(w, r)
-				return
-			}
+		if c, err := r.Cookie("im_session"); err == nil && s.validSession(c.Value) {
+			next.ServeHTTP(w, r)
+			return
 		}
 		target := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
 		http.Redirect(w, r, target, http.StatusSeeOther)
@@ -435,21 +445,43 @@ func parseTrustedCIDRs(cidrs []string) []netip.Prefix {
 	return out
 }
 
+// safeNextPath sanitizes a post-login redirect target. It accepts only
+// same-origin absolute paths: a leading "/" but not "//" (protocol-relative,
+// e.g. "//evil.com") and containing no backslash or control char — browsers
+// fold "\" to "/", so "/\evil.com" would otherwise become a "//evil.com"
+// open redirect. Anything else falls back to "/".
+func safeNextPath(next string) string {
+	if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") &&
+		!strings.ContainsAny(next, "\\\t\r\n") {
+		return next
+	}
+	return "/"
+}
+
+// validSession reports whether id names a live (non-expired) session. A
+// missing, malformed, or expired entry returns false; expired/malformed
+// entries are evicted as a side effect (lazy TTL — see sessionTTL).
+func (s *Server) validSession(id string) bool {
+	v, ok := s.sessions.Load(id)
+	if !ok {
+		return false
+	}
+	if sess, ok := v.(session); ok && time.Since(sess.created) < sessionTTL {
+		return true
+	}
+	s.sessions.Delete(id)
+	return false
+}
+
 func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	// Already logged in — skip straight to the app.
 	if s.token == "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	if c, err := r.Cookie("im_session"); err == nil {
-		if _, ok := s.sessions.Load(c.Value); ok {
-			next := r.URL.Query().Get("next")
-			if next == "" || !strings.HasPrefix(next, "/") {
-				next = "/"
-			}
-			http.Redirect(w, r, next, http.StatusSeeOther)
-			return
-		}
+	if c, err := r.Cookie("im_session"); err == nil && s.validSession(c.Value) {
+		http.Redirect(w, r, safeNextPath(r.URL.Query().Get("next")), http.StatusSeeOther)
+		return
 	}
 	tmpl := parseTemplate("login", "templates/login.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -457,6 +489,11 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
+	// Auth disabled — never mint a session; just send to the app.
+	if s.token == "" {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -472,7 +509,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	sid := make([]byte, 16)
 	rand.Read(sid)
 	sessionID := hex.EncodeToString(sid)
-	s.sessions.Store(sessionID, struct{}{})
+	s.sessions.Store(sessionID, session{created: time.Now()})
 	http.SetCookie(w, &http.Cookie{
 		Name:     "im_session",
 		Value:    sessionID,
@@ -480,11 +517,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	next := r.FormValue("next")
-	if next == "" || !strings.HasPrefix(next, "/") {
-		next = "/"
-	}
-	http.Redirect(w, r, next, http.StatusSeeOther)
+	http.Redirect(w, r, safeNextPath(r.FormValue("next")), http.StatusSeeOther)
 }
 
 // faviconSVG is served at /favicon.svg — dual interlocking hexagons (host + container) on a transparent background.

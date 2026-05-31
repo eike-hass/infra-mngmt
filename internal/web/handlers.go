@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -385,6 +386,7 @@ var tmplFuncs = template.FuncMap{
 	},
 	"groupEntitiesByKind": groupEntitiesByKind,
 	"static":              staticAssetURL,
+	"qesc":                qesc,
 	// cardDelayMs returns the stagger-animation delay in ms for a card index.
 	// Each card is delayed by 15ms * index, capped at 30 cards (450ms total).
 	"cardDelayMs": func(i int) int {
@@ -465,6 +467,10 @@ var tmplFuncs = template.FuncMap{
 	// view — same model id → same hue across views. See odColorFor.
 	"modelColor": func(id string) template.CSS { return template.CSS(odColorFor(id)) },
 }
+
+// qesc URL-query-escapes a string for use in templated hx-get/hx-post query
+// strings, encoding user-controlled path/name values.
+func qesc(s string) string { return url.QueryEscape(s) }
 
 // commaInt formats an int64 with thousands separators ("1,234,567").
 func commaInt(n int64) string {
@@ -602,14 +608,24 @@ func (s *Server) handleEntityPreview(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+// maxEntityBytes caps an entity write body. .claude entities are small text
+// files; the limit keeps a runaway body from OOMing the process.
+const maxEntityBytes = 4 << 20 // 4 MiB
+
 func (s *Server) handleEntityWrite(w http.ResponseWriter, r *http.Request) {
 	rawID := r.URL.Query().Get("id")
 	if rawID == "" {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxEntityBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			http.Error(w, fmt.Sprintf("entity too large (max %d bytes)", maxEntityBytes), http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}

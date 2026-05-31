@@ -45,7 +45,7 @@ section refreshes — actions are user-initiated and rare, so the brief
 
   {{range .OpenDesignNames}}
   <div id="open-design-{{.}}" class="svc-instance svc-section-loading"
-       hx-get="/partials/services/open-design?name={{.}}"
+       hx-get="/partials/services/open-design?name={{. | qesc}}"
        hx-trigger="load, every 8s"
        hx-swap="outerHTML">
     <p class="svc-section-placeholder">loading open design…</p>
@@ -64,7 +64,7 @@ section refreshes — actions are user-initiated and rare, so the brief
   {{if .InstanceNames}}
   {{range .InstanceNames}}
   <div id="instance-{{.}}" class="svc-instance svc-section-loading"
-       hx-get="/partials/services/instances?name={{.}}"
+       hx-get="/partials/services/instances?name={{. | qesc}}"
        hx-trigger="load, every 8s"
        hx-swap="outerHTML">
     <p class="svc-section-placeholder">loading process-compose · {{.}}…</p>

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -232,6 +233,27 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 
 	dstLabel := sourceLabel(dstSource.ID(), dstSource.Scope().Global, dstSource.Scope().Project)
 
+	writeConflict := func() {
+		s.writePromoteResult(w, http.StatusConflict, promoteResult{
+			Conflict: true,
+			Message:  fmt.Sprintf("%s already has %s/%s", dstLabel, ent.Kind, targetName),
+			From:     from,
+			To:       to,
+			NewName:  targetName,
+			Mirror:   mirror,
+		})
+	}
+
+	// exclWriter is the create-only escape hatch (HostFSSource). When the
+	// destination implements it and this isn't an overwrite, we let the write
+	// itself enforce non-existence so the check and the create are atomic — a
+	// double-submit or concurrent promote can't silently clobber. Sources that
+	// don't implement it (Docker volumes, which are read-only anyway) fall back
+	// to the Has-then-write path below.
+	type exclWriter interface {
+		WriteFilesExcl(ctx context.Context, kind entity.Kind, name string, files []source.EntityFile) error
+	}
+
 	if !overwrite {
 		exists, herr := dstSource.Has(r.Context(), ent.Kind, targetName)
 		if herr != nil {
@@ -239,14 +261,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if exists {
-			s.writePromoteResult(w, http.StatusConflict, promoteResult{
-				Conflict: true,
-				Message:  fmt.Sprintf("%s already has %s/%s", dstLabel, ent.Kind, targetName),
-				From:     from,
-				To:       to,
-				NewName:  targetName,
-				Mirror:   mirror,
-			})
+			writeConflict()
 			return
 		}
 	}
@@ -256,6 +271,38 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read source: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Non-overwrite copies go through the atomic create-only path when the
+	// destination supports it, closing the TOCTOU window between the Has check
+	// above and the write below. mirror=true always clears first, so it owns
+	// the slot and uses the normal overwrite path.
+	if !overwrite && !mirror {
+		if ew, ok := dstSource.(exclWriter); ok {
+			switch err := ew.WriteFilesExcl(r.Context(), ent.Kind, targetName, files); {
+			case err == nil:
+				// fall through to success below
+			case errors.Is(err, source.ErrConflict):
+				writeConflict()
+				return
+			case errors.Is(err, source.ErrReadOnly):
+				s.writePromoteResult(w, http.StatusForbidden, promoteResult{
+					ReadOnly: true,
+					Message:  fmt.Sprintf("%s is read-only — Docker volume writes are not yet implemented", dstLabel),
+				})
+				return
+			default:
+				http.Error(w, "write target: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			s.invalidateEntityCache()
+			s.writePromoteResult(w, http.StatusOK, promoteResult{
+				OK:      true,
+				Message: promoteSuccessMsg(ent, targetName, dstLabel),
+			})
+			return
+		}
+	}
+
 	if mirror {
 		// ErrNotFound is fine — the destination is already clear of stale
 		// state. ErrReadOnly bubbles up as a friendly result. Anything else
@@ -285,14 +332,19 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.invalidateEntityCache()
-	msg := fmt.Sprintf("copied %s/%s to %s", ent.Kind, targetName, dstLabel)
-	if targetName != ent.Name {
-		msg = fmt.Sprintf("copied %s/%s to %s as %s", ent.Kind, ent.Name, dstLabel, targetName)
-	}
 	s.writePromoteResult(w, http.StatusOK, promoteResult{
 		OK:      true,
-		Message: msg,
+		Message: promoteSuccessMsg(ent, targetName, dstLabel),
 	})
+}
+
+// promoteSuccessMsg renders the "copied …" confirmation, noting the rename when
+// the target name differs from the source entity's name.
+func promoteSuccessMsg(ent entity.Entity, targetName, dstLabel string) string {
+	if targetName != ent.Name {
+		return fmt.Sprintf("copied %s/%s to %s as %s", ent.Kind, ent.Name, dstLabel, targetName)
+	}
+	return fmt.Sprintf("copied %s/%s to %s", ent.Kind, targetName, dstLabel)
 }
 
 func (s *Server) writePromoteResult(w http.ResponseWriter, status int, r promoteResult) {

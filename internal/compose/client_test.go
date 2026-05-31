@@ -2,6 +2,7 @@ package compose
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -263,6 +264,31 @@ func TestErrorResponseBubblesUp(t *testing.T) {
 	if _, err := c.Processes(context.Background()); err == nil {
 		t.Error("expected error from 500")
 	}
+}
+
+func TestProcessesCapsResponseBody(t *testing.T) {
+	// A misbehaving upstream returns far more than maxRespBytes. We must read
+	// at most the cap (so we can't OOM); the resulting truncated JSON then
+	// fails both unmarshal shapes rather than being fully buffered.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"name":"`))
+		_, _ = io.Copy(w, io.LimitReader(neverEnding{}, maxRespBytes+(1<<20)))
+	}))
+	defer srv.Close()
+	c := New("test", srv.URL, "")
+	if _, err := c.Processes(context.Background()); err == nil {
+		t.Fatal("expected parse error from truncated oversized body, got nil")
+	}
+}
+
+// neverEnding is an io.Reader that yields an unbounded stream of 'a' bytes.
+type neverEnding struct{}
+
+func (neverEnding) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'a'
+	}
+	return len(p), nil
 }
 
 func TestEndpointTrailingSlashTrimmed(t *testing.T) {

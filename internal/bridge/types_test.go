@@ -92,6 +92,45 @@ func TestBridgeValidateAcceptsSentinel(t *testing.T) {
 	}
 }
 
+func TestBridgeValidateRejectsMaliciousSentinel(t *testing.T) {
+	// A sentinel whose interior smuggles a backtick command substitution must
+	// be rejected — escapeDollar leaves backticks intact, so bash would run it
+	// at socat (re)start otherwise.
+	cases := []string{
+		"${`touch /tmp/pwned`}",
+		"${windows-host-ip;touch x}",
+		"${windows host ip}",
+		"${$(id)}",
+		"${a|b}",
+		"${a&b}",
+		"${a(b)}",
+		"${a'b}",
+		"${a\"b}",
+		"${}",
+	}
+	for _, addr := range cases {
+		t.Run(addr, func(t *testing.T) {
+			b := validBridge()
+			b.Listen.Addr = addr
+			if err := b.Validate(); err == nil {
+				t.Errorf("expected validation error for sentinel %q", addr)
+			}
+		})
+	}
+}
+
+func TestBridgeValidateAcceptsKnownSentinels(t *testing.T) {
+	for _, addr := range []string{"${wsl-host-ip}", "${windows-host-ip}"} {
+		t.Run(addr, func(t *testing.T) {
+			b := validBridge()
+			b.Listen.Addr = addr
+			if err := b.Validate(); err != nil {
+				t.Errorf("sentinel %q should be accepted: %v", addr, err)
+			}
+		})
+	}
+}
+
 func TestBridgeValidateFirewallRequired(t *testing.T) {
 	b := validBridge()
 	b.Firewall.DisplayName = ""

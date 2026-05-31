@@ -102,7 +102,27 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// Validate checks structural invariants that yaml.Unmarshal cannot — most
+// importantly that each process_compose entry has the fields the runtime
+// relies on. A typo'd top-level key (e.g. `process_compos`) is silently
+// dropped by yaml.Unmarshal, so without this check a broken config surfaces
+// only as an empty services panel rather than a startup error.
+func (c *Config) Validate() error {
+	for i, pc := range c.ProcessCompose {
+		if pc.Name == "" {
+			return fmt.Errorf("process_compose[%d]: name is required", i)
+		}
+		if pc.Endpoint == "" {
+			return fmt.Errorf("process_compose[%d] (%q): endpoint is required", i, pc.Name)
+		}
+	}
+	return nil
 }
 
 // LoadOrCreateToken reads the bearer token from path. If the file does not

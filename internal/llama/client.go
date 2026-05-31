@@ -23,6 +23,11 @@ import (
 	"time"
 )
 
+// maxRespBytes caps how much of any response body we read. These payloads are
+// health/props/metrics/slots/models JSON (KBs); the cap is a guardrail so a
+// misbehaving upstream can't OOM the dashboard.
+const maxRespBytes = 8 << 20 // 8 MiB
+
 // Client probes one llama-server endpoint. Endpoint is the base URL
 // ("http://host:port"); paths are appended. APIKey, when non-empty, is sent as
 // `Authorization: Bearer <key>` on every request except /health (which the
@@ -66,7 +71,7 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 		return Health{}, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	h := Health{OK: resp.StatusCode == http.StatusOK}
 	var parsed struct {
 		Status string `json:"status"`
@@ -111,7 +116,7 @@ func (c *Client) Props(ctx context.Context) (Props, error) {
 		return Props{}, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	if err != nil {
 		return Props{}, err
 	}
@@ -188,10 +193,10 @@ func (c *Client) Metrics(ctx context.Context, modelID string) (Metrics, error) {
 		return Metrics{Available: false}, nil
 	}
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 		return Metrics{}, fmt.Errorf("llama GET /metrics: %s", bytes.TrimSpace(body))
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	if err != nil {
 		return Metrics{}, err
 	}
@@ -366,10 +371,10 @@ func (c *Client) Slots(ctx context.Context, modelID string) ([]Slot, error) {
 		return nil, ErrSlotsDisabled
 	}
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 		return nil, fmt.Errorf("llama GET /slots: %s", bytes.TrimSpace(body))
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +410,7 @@ func (c *Client) EraseSlot(ctx context.Context, slotID int, modelID string) erro
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 		return fmt.Errorf("llama POST %s: HTTP %d: %s", path, resp.StatusCode, bytes.TrimSpace(body))
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
@@ -548,7 +553,7 @@ func (c *Client) Models(ctx context.Context) ([]Model, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -594,7 +599,7 @@ func (c *Client) modelLifecycle(ctx context.Context, path, modelID string) error
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		rbody, _ := io.ReadAll(resp.Body)
+		rbody, _ := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 		return fmt.Errorf("llama POST %s (model=%s): HTTP %d: %s", path, modelID, resp.StatusCode, bytes.TrimSpace(rbody))
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
@@ -613,7 +618,7 @@ func (c *Client) do(ctx context.Context, method, path string, auth bool) (*http.
 		return nil, fmt.Errorf("llama %s %s: %w", method, path, err)
 	}
 	if resp.StatusCode >= 400 && path != "/health" {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 		resp.Body.Close()
 		return nil, fmt.Errorf("llama %s %s: %s", method, path, bytes.TrimSpace(body))
 	}

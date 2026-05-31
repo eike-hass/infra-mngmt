@@ -31,7 +31,7 @@
           <code>{{.}}</code>
           <span class="vault-allow-spacer"></span>
           <button class="vault-revoke-btn"
-                  hx-post="/api/vault/disallow?name={{$.Name}}&path={{.}}"
+                  hx-post="/api/vault/disallow?name={{$.Name | qesc}}&path={{. | qesc}}"
                   hx-target="#vault-{{$.Name}}-mount"
                   hx-swap="innerHTML">remove</button>
         </div>
@@ -56,7 +56,7 @@
     <code class="vault-tree-cwd-path">{{.Path}}</code>
     {{if .ParentPath}}
       <button class="vault-tree-up"
-              hx-get="/partials/vault/tree?name={{.Name}}&at={{.ParentPath}}"
+              hx-get="/partials/vault/tree?name={{.Name | qesc}}&at={{.ParentPath | qesc}}"
               hx-target="#vault-tree-{{.Name}}" hx-swap="outerHTML"
               title="up one directory">../</button>
     {{end}}
@@ -65,20 +65,20 @@
     <div class="vault-tree-row mono">
       <span class="vault-tree-icon">▸</span>
       <button class="vault-tree-into"
-              hx-get="/partials/vault/tree?name={{$.Name}}&at={{.Full}}"
+              hx-get="/partials/vault/tree?name={{$.Name | qesc}}&at={{.Full | qesc}}"
               hx-target="#vault-tree-{{$.Name}}" hx-swap="outerHTML">{{$.Path}}/<span class="vault-tree-name">{{.Name}}</span>/</button>
       {{if .Allowed}}
         <span class="vault-flag-allowed" title="this path is explicitly listed in the allowlist">allowed</span>
       {{else if .CoveredBy}}
         <span class="vault-tree-covered" title="covered transitively by an ancestor; adding explicitly lets you keep this entry if you later remove the ancestor">covered by <code>{{.CoveredBy}}</code></span>
         <button class="vault-tree-allow-btn"
-                hx-post="/api/vault/allow?name={{$.Name}}&path={{.Full}}&at={{$.Path}}"
+                hx-post="/api/vault/allow?name={{$.Name | qesc}}&path={{.Full | qesc}}&at={{$.Path | qesc}}"
                 hx-target="#vault-{{$.Name}}-mount"
                 hx-swap="innerHTML"
                 title="add an explicit entry — useful if the ancestor gets removed later">allow here</button>
       {{else}}
         <button class="vault-tree-allow-btn primary"
-                hx-post="/api/vault/allow?name={{$.Name}}&path={{.Full}}&at={{$.Path}}"
+                hx-post="/api/vault/allow?name={{$.Name | qesc}}&path={{.Full | qesc}}&at={{$.Path | qesc}}"
                 hx-target="#vault-{{$.Name}}-mount"
                 hx-swap="innerHTML">+ allow</button>
       {{end}}

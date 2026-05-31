@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// maxRespBytes caps how much of any response body we read. process-compose's
+// /processes and /process/logs payloads are small JSON; the cap is a guardrail
+// so a misbehaving upstream can't OOM the dashboard.
+const maxRespBytes = 8 << 20 // 8 MiB
+
 // ProcessState mirrors the process-compose process object returned by /processes.
 // Field set and JSON tags match upstream src/types/process.go exactly so we can
 // trust the API rather than recompute (e.g. IsRunning, SystemTime).
@@ -72,7 +77,7 @@ func (c *Client) Processes(ctx context.Context) ([]ProcessState, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +166,7 @@ func (c *Client) Logs(ctx context.Context, process string, lines int) ([]LogLine
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +220,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*
 		return nil, fmt.Errorf("compose %s %s: %w", method, path, err)
 	}
 	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 		resp.Body.Close()
 		return nil, fmt.Errorf("compose %s %s: %s", method, path, bytes.TrimSpace(b))
 	}

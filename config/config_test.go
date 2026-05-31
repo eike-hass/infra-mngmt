@@ -155,6 +155,56 @@ func TestLoadOrCreateTokenTrimsWhitespace(t *testing.T) {
 	}
 }
 
+func TestValidate(t *testing.T) {
+	cases := []struct {
+		name    string
+		cfg     Config
+		wantErr bool
+	}{
+		{
+			name:    "no process_compose is valid",
+			cfg:     Config{},
+			wantErr: false,
+		},
+		{
+			name:    "complete entry is valid",
+			cfg:     Config{ProcessCompose: []ProcessCompose{{Name: "wsl", Endpoint: "http://localhost:9998"}}},
+			wantErr: false,
+		},
+		{
+			name:    "missing name",
+			cfg:     Config{ProcessCompose: []ProcessCompose{{Endpoint: "http://localhost:9998"}}},
+			wantErr: true,
+		},
+		{
+			name:    "missing endpoint",
+			cfg:     Config{ProcessCompose: []ProcessCompose{{Name: "wsl"}}},
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.cfg.Validate()
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadSurfacesInvalidProcessCompose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// Endpoint missing — a typo'd `process_compos:` key would also leave the
+	// slice empty/incomplete; here we assert the validator rejects it.
+	if err := os.WriteFile(path, []byte("process_compose:\n  - name: wsl\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for process_compose entry missing endpoint, got nil")
+	}
+}
+
 func TestResolveEndpointPassThrough(t *testing.T) {
 	cases := []string{
 		"http://localhost:9998",

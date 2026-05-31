@@ -486,6 +486,9 @@ func prettyJSON(raw json.RawMessage) []byte {
 }
 
 func (s *HostFSSource) Write(_ context.Context, kind entity.Kind, name string, data []byte) error {
+	if err := validateEntityName(name); err != nil {
+		return err
+	}
 	path, err := s.filePath(kind, name)
 	if err != nil {
 		return err
@@ -660,6 +663,82 @@ func (s *HostFSSource) WriteFiles(ctx context.Context, kind entity.Kind, name st
 		return fmt.Errorf("kind %s write expects exactly one file, got %d", kind, len(files))
 	}
 	return s.Write(ctx, kind, name, files[0].Data)
+}
+
+// WriteFilesExcl is WriteFiles with create-only semantics: it fails with
+// ErrConflict if the entity already exists, closing the check-then-write
+// (TOCTOU) gap promote has when overwrite is off. For single-file file-backed
+// kinds the create is atomic (O_EXCL); for skills it claims the directory with
+// a non-recursive Mkdir, which fails atomically when the dir already exists.
+//
+// Settings-backed kinds (mcp_server, hook) splice into a shared settings.json,
+// where the key is the unit of conflict — there's no filesystem-level atomic
+// create for a JSON key, so this falls back to a Has check plus the normal
+// splice. That window is narrow but non-zero; documented in promote's risks.
+func (s *HostFSSource) WriteFilesExcl(ctx context.Context, kind entity.Kind, name string, files []EntityFile) error {
+	if err := validateEntityName(name); err != nil {
+		return err
+	}
+	switch kind {
+	case entity.KindSkill:
+		return s.writeSkillFilesExcl(name, files)
+	case entity.KindMCPServer, entity.KindHook:
+		exists, err := s.Has(ctx, kind, name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return fmt.Errorf("%w: %s/%s", ErrConflict, kind, name)
+		}
+		return s.WriteFiles(ctx, kind, name, files)
+	}
+	if len(files) != 1 {
+		return fmt.Errorf("kind %s write expects exactly one file, got %d", kind, len(files))
+	}
+	var path string
+	if kind == entity.KindClaudeMD {
+		path = s.claudeMDPathForName(name)
+		if path == "" {
+			return fmt.Errorf("%w: cannot determine CLAUDE.md path for name %q", ErrNotFound, name)
+		}
+	} else {
+		p, err := s.filePath(kind, name)
+		if err != nil {
+			return err
+		}
+		path = p
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("%w: %s/%s", ErrConflict, kind, name)
+		}
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	_, err = f.Write(files[0].Data)
+	return err
+}
+
+// writeSkillFilesExcl claims <baseDir>/skills/<name>/ with a non-recursive
+// Mkdir so a concurrent promote can't silently overwrite, then writes the file
+// set. Returns ErrConflict if the skill directory already exists.
+func (s *HostFSSource) writeSkillFilesExcl(name string, files []EntityFile) error {
+	skillsDir := filepath.Join(s.baseDir, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		return err
+	}
+	root := filepath.Join(skillsDir, name)
+	if err := os.Mkdir(root, 0o755); err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("%w: skill %s", ErrConflict, name)
+		}
+		return err
+	}
+	return s.writeSkillFiles(name, files)
 }
 
 // writeSkillFiles writes a skill's file set under <baseDir>/skills/<name>/.

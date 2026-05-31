@@ -429,8 +429,17 @@ async function doRefresh(e) {
   // Remember which entity was selected so we can re-mark it after the swap.
   const prevSelectedId = document.querySelector('.entity-card.selected')?.dataset.id || null;
   try {
-    await fetch('/api/refresh', {method:'POST'});
-    const html = await fetch('/partials/entity-list').then(r => r.text());
+    const refreshResp = await fetch('/api/refresh', {method:'POST'});
+    if (!refreshResp.ok) {
+      showRescanToast('refresh failed: HTTP ' + refreshResp.status, 'error');
+      return;
+    }
+    const listResp = await fetch('/partials/entity-list');
+    if (!listResp.ok) {
+      showRescanToast('refresh failed: HTTP ' + listResp.status, 'error');
+      return;
+    }
+    const html = await listResp.text();
     document.getElementById('entity-list').innerHTML = html;
     rebuildFuse();
     // Re-apply collapse state since the swap rebuilt the .kind-group elements.

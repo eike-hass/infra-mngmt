@@ -83,14 +83,7 @@ func (s *Server) snapshotContainers(ctx context.Context) []graph.ContainerInfo {
 		}
 		ci.ID = mc.ID
 		ci.Status = mc.State
-		switch strings.ToLower(mc.State) {
-		case "running", "restarting":
-			ci.State = graph.ContainerRunning
-		case "exited", "dead", "paused", "created":
-			ci.State = graph.ContainerStopped
-		default:
-			ci.State = graph.ContainerUnknown
-		}
+		ci.State, _ = mapContainerState(mc.State)
 		out = append(out, ci)
 	}
 	return out
@@ -233,17 +226,11 @@ func (s *Server) buildContainerProjectGroups(ctx context.Context) []containerPro
 				} else if found {
 					row.ID = shortID(mc.ID)
 					row.Status = mc.State
-					switch strings.ToLower(mc.State) {
-					case "running", "restarting":
-						row.State = graph.ContainerRunning.String()
-						row.StateClass = containerStateCSS(graph.ContainerRunning)
+					cs, cls := mapContainerState(mc.State)
+					row.State = cs.String()
+					row.StateClass = cls
+					if cs == graph.ContainerRunning {
 						running++
-					case "exited", "dead", "paused", "created":
-						row.State = graph.ContainerStopped.String()
-						row.StateClass = containerStateCSS(graph.ContainerStopped)
-					default:
-						row.State = graph.ContainerUnknown.String()
-						row.StateClass = containerStateCSS(graph.ContainerUnknown)
 					}
 				}
 			}
@@ -301,6 +288,23 @@ func containerStateCSS(s graph.ContainerState) string {
 	default:
 		return "unknown"
 	}
+}
+
+// mapContainerState maps a raw Docker state string ("running", "exited", …)
+// to its graph.ContainerState and matching status-pill CSS class. Shared by
+// snapshotContainers and the per-service rows in buildContainerProjectGroups;
+// the latter keeps its running-count rollup at the call site.
+func mapContainerState(state string) (graph.ContainerState, string) {
+	var cs graph.ContainerState
+	switch strings.ToLower(state) {
+	case "running", "restarting":
+		cs = graph.ContainerRunning
+	case "exited", "dead", "paused", "created":
+		cs = graph.ContainerStopped
+	default:
+		cs = graph.ContainerUnknown
+	}
+	return cs, containerStateCSS(cs)
 }
 
 // handleContainerStartByName looks up the named container and starts it.

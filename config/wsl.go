@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"log"
 	"net"
 	"net/url"
 	"os"
@@ -99,6 +100,7 @@ func ResolveEndpoint(raw string) string {
 	}
 	ip := WSLWindowsHostIP()
 	if ip == "" {
+		log.Printf("warning: endpoint %q uses the wsl-windows sentinel but no Windows host IP could be resolved (not in WSL2, or /proc/net/route unreadable) — leaving unresolved; the client will likely fail with \"no such host\"", raw)
 		return raw // not in WSL2, or resolv.conf unreadable — leave as-is
 	}
 	if port := u.Port(); port != "" {

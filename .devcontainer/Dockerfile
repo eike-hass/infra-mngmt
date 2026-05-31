@@ -38,9 +38,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG GO_VERSION=1.25.0
 RUN ARCH="$(dpkg --print-architecture)" && \
   case "$ARCH" in \
-    amd64) GOARCH=amd64 ;; \
-    arm64) GOARCH=arm64 ;; \
-    *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+  amd64) GOARCH=amd64 ;; \
+  arm64) GOARCH=arm64 ;; \
+  *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
   esac && \
   wget -qO /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" && \
   tar -C /usr/local -xzf /tmp/go.tgz && \
@@ -51,8 +51,10 @@ ENV GOPATH=/home/node/go
 ENV GOBIN=/home/node/go/bin
 ENV PATH=$PATH:/home/node/go/bin
 
-# Install Playwright system-level OS dependencies for Chromium
-RUN npx --yes playwright@1.52.0 install-deps chromium
+# Install Playwright system-level OS dependencies for Chromium.
+# Keep this version aligned with the `playwright ... install chromium` step
+# below — a skew installs OS libs for one version and the browser for another.
+RUN npx --yes playwright@1.60.0 install-deps chromium
 
 # Install golangci-lint from GitHub releases. The Go module proxy
 # (proxy.golang.org via Google's CDN) rotates IPs, which can desync from the
@@ -65,12 +67,12 @@ RUN npx --yes playwright@1.52.0 install-deps chromium
 ARG GOLANGCI_LINT_VERSION=2.12.1
 RUN ARCH="$(dpkg --print-architecture)" && \
   case "$ARCH" in \
-    amd64) GOLANGCI_ARCH=linux-amd64 ;; \
-    arm64) GOLANGCI_ARCH=linux-arm64 ;; \
-    *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+  amd64) GOLANGCI_ARCH=linux-amd64 ;; \
+  arm64) GOLANGCI_ARCH=linux-arm64 ;; \
+  *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
   esac && \
   wget -qO /tmp/golangci-lint.tgz \
-    "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-${GOLANGCI_ARCH}.tar.gz" && \
+  "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-${GOLANGCI_ARCH}.tar.gz" && \
   tar -xzf /tmp/golangci-lint.tgz -C /tmp && \
   install -m 0755 "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-${GOLANGCI_ARCH}/golangci-lint" /usr/local/bin/golangci-lint && \
   rm -rf /tmp/golangci-lint.tgz "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-${GOLANGCI_ARCH}"
@@ -137,7 +139,7 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # /home/node/.cache/ms-playwright (backed by the playwright-browsers volume).
 # On first attach with a fresh volume, Docker seeds the volume from this path,
 # making Chromium available without needing to download through the firewall.
-RUN npx --yes playwright@1.52.0 install chromium
+RUN npx --yes playwright@1.60.0 install chromium
 
 # Copy and set up privileged setup scripts
 COPY init-firewall.sh /usr/local/bin/

@@ -95,6 +95,29 @@ func TestErrorBodyIsSurfaced(t *testing.T) {
 	}
 }
 
+func TestDoCapsResponseBody(t *testing.T) {
+	// A misbehaving control plane returns far more than maxRespBytes. We must
+	// read at most the cap (so we can't OOM); the resulting truncated JSON
+	// then fails to decode rather than being fully buffered.
+	c, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"path":"`)
+		_, _ = io.Copy(w, io.LimitReader(neverEnding{}, maxRespBytes+(1<<20)))
+	})
+	if _, err := c.Tree(context.Background(), ""); err == nil {
+		t.Fatal("expected decode error from truncated oversized body, got nil")
+	}
+}
+
+// neverEnding is an io.Reader that yields an unbounded stream of 'a' bytes.
+type neverEnding struct{}
+
+func (neverEnding) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'a'
+	}
+	return len(p), nil
+}
+
 func TestNewTrimsTrailingSlash(t *testing.T) {
 	c := New("http://x:3002/")
 	if c.BaseURL != "http://x:3002" {

@@ -6,7 +6,7 @@ require (
 	github.com/docker/docker v27.5.1+incompatible
 	github.com/evanw/esbuild v0.28.0
 	github.com/go-chi/chi/v5 v5.2.1
-	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
+	golang.org/x/sync v0.20.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

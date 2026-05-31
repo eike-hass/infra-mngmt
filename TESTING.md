@@ -78,15 +78,25 @@ parsing details that already have unit coverage.
 
 ## Coverage baseline
 
+Refreshed via `make test-cover` (statement coverage).
+
 | Package | Coverage |
 |---|---|
 | `internal/entity` | 100% |
-| `internal/graph` | 97% |
-| `config` | 78% |
-| `internal/compose` | 64% |
-| `internal/source` | 62% |
-| `internal/web` | 46% |
-| `internal/docker` | 17% (pure helpers only — HTTP path needs a Docker socket) |
+| `internal/containers` | 96% |
+| `internal/rates` | 92% |
+| `internal/deps` | 86% |
+| `internal/vault` | 86% |
+| `internal/llama` | 81% |
+| `cmd/wake-proxy` | 81% |
+| `internal/bridge` | 79% |
+| `internal/graph` | 75% |
+| `config` | 73% |
+| `internal/source` | 66% |
+| `internal/web` | 64% |
+| `internal/compose` | 60% |
+| `internal/docker` | 34% (pure helpers + volume cache; the live HTTP/exec path needs a Docker socket) |
+| `cmd/infra-mngmt` | 7% (mostly `main()` wiring — not unit-testable; logic lives in tested packages) |
 
 A regression below these numbers warrants a note in the PR explaining why.
 

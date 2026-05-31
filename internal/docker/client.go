@@ -680,7 +680,10 @@ func (c *Client) execStdout(ctx context.Context, containerID string, cmd []strin
 		return nil, fmt.Errorf("demux exec output: %w", err)
 	}
 	insp, err := c.cli.ContainerExecInspect(ctx, created.ID)
-	if err == nil && insp.ExitCode != 0 {
+	if err != nil {
+		return nil, fmt.Errorf("exec inspect: %w", err)
+	}
+	if insp.ExitCode != 0 {
 		return nil, fmt.Errorf("exec exited %d", insp.ExitCode)
 	}
 	return stdout.Bytes(), nil

@@ -456,6 +456,34 @@ func TestLoadModelSurfacesUpstreamError(t *testing.T) {
 	}
 }
 
+func TestPropsCapsResponseBody(t *testing.T) {
+	// A misbehaving upstream returns far more than maxRespBytes. We must read
+	// at most the cap (so we can't OOM); the resulting truncated JSON then
+	// fails to parse rather than being fully buffered.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Open a JSON object, then flood with bytes well past the cap.
+		_, _ = io.WriteString(w, `{"model_path":"`)
+		_, _ = io.Copy(w, io.LimitReader(neverEnding{}, maxRespBytes+(1<<20)))
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL, "").Props(context.Background())
+	if err == nil {
+		t.Fatal("expected parse error from truncated oversized body, got nil")
+	}
+}
+
+// neverEnding is an io.Reader that yields an unbounded stream of 'a' bytes.
+type neverEnding struct{}
+
+func (neverEnding) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'a'
+	}
+	return len(p), nil
+}
+
 func TestDrainHonorsContextCancel(t *testing.T) {
 	// /slots always reports busy — drain would loop forever without ctx cancel.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

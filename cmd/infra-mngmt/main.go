@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -9,9 +10,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/eike-hass/infra-mngmt/config"
@@ -252,6 +255,8 @@ func startWSLBridgeProcesses(bridges []bridge.Bridge, cfg *config.Config) {
 	if tok == "" && pc.TokenFile != "" {
 		if data, err := os.ReadFile(pc.TokenFile); err == nil {
 			tok = strings.TrimSpace(string(data))
+		} else {
+			log.Printf("warning: process_compose %q: read token_file %q: %v — instance will be queried without auth", pc.Name, pc.TokenFile, err)
 		}
 	}
 	client := compose.New(pc.Name, config.ResolveEndpoint(pc.Endpoint), tok)
@@ -434,6 +439,8 @@ func stopWSLBridgeProcesses(bridges []bridge.Bridge, cfg *config.Config) {
 	if tok == "" && pc.TokenFile != "" {
 		if data, err := os.ReadFile(pc.TokenFile); err == nil {
 			tok = strings.TrimSpace(string(data))
+		} else {
+			log.Printf("warning: process_compose %q: read token_file %q: %v — instance will be queried without auth", pc.Name, pc.TokenFile, err)
 		}
 	}
 	client := compose.New(pc.Name, config.ResolveEndpoint(pc.Endpoint), tok)
@@ -517,6 +524,8 @@ func reloadProcessCompose(pc config.ProcessCompose) error {
 	if tok == "" && pc.TokenFile != "" {
 		if data, err := os.ReadFile(pc.TokenFile); err == nil {
 			tok = strings.TrimSpace(string(data))
+		} else {
+			log.Printf("warning: process_compose %q: read token_file %q: %v — instance will be queried without auth", pc.Name, pc.TokenFile, err)
 		}
 	}
 	client := compose.New(pc.Name, config.ResolveEndpoint(pc.Endpoint), tok)
@@ -766,8 +775,29 @@ func runServer(args []string) {
 	} else {
 		log.Print("infra-mngmt build_epoch=(unstamped — built without Makefile)")
 	}
+	if _, _, err := net.SplitHostPort(cfg.Bind); err != nil {
+		log.Fatalf("invalid bind address %q: %v", cfg.Bind, err)
+	}
+
+	httpSrv := &http.Server{
+		Addr:              cfg.Bind,
+		Handler:           srv,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	log.Printf("infra-mngmt listening on http://%s", cfg.Bind)
-	if err := http.ListenAndServe(cfg.Bind, srv); err != nil {
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = httpSrv.Shutdown(sctx)
+	}()
+
+	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }

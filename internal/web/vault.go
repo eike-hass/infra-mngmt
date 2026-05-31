@@ -128,11 +128,20 @@ func (s *Server) loadVaultPanel(ctx context.Context, d *containers.Container, tr
 		view.Error = "fetch tree: " + err.Error()
 		return view
 	}
-	tv := &vaultTreeView{Name: d.Name, Path: t.Path}
+	view.Tree = buildVaultTree(d.Name, t, al.Allowed)
+	return view
+}
+
+// buildVaultTree assembles one rendered tree level from a fetched vault.Tree
+// and the current allowlist. Shared by loadVaultPanel (panel.Tree wants a
+// pointer) and handleVaultTree (which dereferences for the value-based
+// render path).
+func buildVaultTree(name string, t *vault.Tree, allowed []string) *vaultTreeView {
+	tv := &vaultTreeView{Name: name, Path: t.Path}
 	if t.Path != "" && strings.Count(t.Path, "/") > 0 && t.Path != "/data" {
 		tv.ParentPath = path.Dir(t.Path)
 	}
-	allowedSet := stringSet(al.Allowed)
+	allowedSet := stringSet(allowed)
 	for _, e := range t.Entries {
 		_, explicit := allowedSet[e.Full]
 		var coveredBy string
@@ -146,8 +155,7 @@ func (s *Server) loadVaultPanel(ctx context.Context, d *containers.Container, tr
 			CoveredBy: coveredBy,
 		})
 	}
-	view.Tree = tv
-	return view
+	return tv
 }
 
 // pathAllowed reports whether `p` (or any of its ancestors) is in the
@@ -219,25 +227,8 @@ func (s *Server) handleVaultTree(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	tv := vaultTreeView{Name: d.Name, Path: t.Path}
-	if t.Path != "" && strings.Count(t.Path, "/") > 0 && t.Path != "/data" {
-		tv.ParentPath = path.Dir(t.Path)
-	}
-	allowedSet := stringSet(al.Allowed)
-	for _, e := range t.Entries {
-		_, explicit := allowedSet[e.Full]
-		var coveredBy string
-		if !explicit {
-			coveredBy = closestAllowedAncestor(e.Full, allowedSet)
-		}
-		tv.Entries = append(tv.Entries, vaultTreeEntry{
-			Name:      e.Name,
-			Full:      e.Full,
-			Allowed:   explicit,
-			CoveredBy: coveredBy,
-		})
-	}
-	s.renderVaultTree(w, d.Name, tv)
+	tv := buildVaultTree(d.Name, t, al.Allowed)
+	s.renderVaultTree(w, d.Name, *tv)
 }
 
 // handleVaultAllow appends a path to the allowlist.

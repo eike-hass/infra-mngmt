@@ -93,6 +93,14 @@ type File struct {
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
+// sentinelNameRe constrains the interior of a `${...}` endpoint sentinel to a
+// bare identifier. Anything else (backticks, `$`, shell metacharacters,
+// whitespace) is rejected — otherwise a crafted sentinel like
+// `${`+"`touch /tmp/pwned`"+`}` would pass Validate and then survive
+// composegen's escapeDollar (which only doubles `$`, not backticks), letting
+// bash execute the embedded command at socat (re)start.
+var sentinelNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 // Validate checks the file-level invariants (unique names, supported tier+type
 // combos, valid endpoints/firewall, composite-parent references resolve).
 func (f *File) Validate() error {
@@ -226,8 +234,14 @@ func validateEndpoint(e Endpoint, label string) error {
 	if e.Addr == "" {
 		return fmt.Errorf("%s.addr is required", label)
 	}
-	// Allow sentinels (${...}) — they're resolved at apply time.
+	// Allow sentinels (${...}) — they're resolved at apply time. The interior
+	// must be a bare identifier; reject anything with shell metacharacters so a
+	// crafted sentinel can't smuggle a command substitution past composegen.
 	if strings.HasPrefix(e.Addr, "${") && strings.HasSuffix(e.Addr, "}") {
+		inner := e.Addr[2 : len(e.Addr)-1]
+		if !sentinelNameRe.MatchString(inner) {
+			return fmt.Errorf("%s.addr %q: sentinel name must match %s", label, e.Addr, sentinelNameRe.String())
+		}
 		return nil
 	}
 	if _, err := netip.ParseAddr(e.Addr); err != nil {

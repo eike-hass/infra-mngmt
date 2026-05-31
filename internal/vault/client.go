@@ -16,6 +16,11 @@ import (
 	"time"
 )
 
+// maxRespBytes caps how much of any response body we read. The control plane's
+// allowlist/tree payloads are small JSON; the cap is a guardrail so a
+// misbehaving upstream can't OOM the dashboard.
+const maxRespBytes = 8 << 20 // 8 MiB
+
 // Client talks to one mcp-fs control plane (typically reachable as
 // http://<container-name>:3002 over a shared internal Docker network).
 type Client struct {
@@ -117,7 +122,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		return err
 	}
 	defer resp.Body.Close()
-	buf, err := io.ReadAll(resp.Body)
+	buf, err := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
