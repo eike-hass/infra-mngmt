@@ -534,13 +534,14 @@ make tidy                 # go mod tidy
 
 The devcontainer firewall allowlists the Go module proxy (`proxy.golang.org`, `sum.golang.org`, `dl.google.com`) — no `GOPROXY=direct` workaround needed.
 
-After a code change, redeploy via the `infra-mngmt-deploy` process-compose entry — one-click from the services panel (the browser already holds a session), or, from inside the devcontainer, authenticate the POST with the bearer token (the host token file is bind-mounted at `/wsl-config/token`):
+After a code change, redeploy via the `infra-mngmt-deploy` process-compose entry — one-click from the services panel (the browser already holds a session), or, from inside the devcontainer, authenticate the POST with the bearer token (the host token file is bind-mounted at `/wsl-config/token`). Derive the host gateway rather than hard-coding it — a Compose-based devcontainer sits on its own Docker network, so the gateway is **not** the default-bridge `172.17.0.1`:
 
 ```bash
+GW=$(ip route | awk '/default/{print $3; exit}')   # host gateway (e.g. 172.22.0.1)
 curl -fsS -H "Authorization: Bearer $(cat /wsl-config/token)" \
-  -X POST "http://172.17.0.1:7842/process/start?instance=wsl&process=infra-mngmt-deploy"
+  -X POST "http://$GW:7842/process/start?instance=wsl&process=infra-mngmt-deploy"
 # then poll the public, no-auth /api/version until build_epoch changes:
-curl -fsS "http://172.17.0.1:7842/api/version" | jq .build_epoch
+curl -fsS "http://$GW:7842/api/version" | jq .build_epoch
 ```
 
 The originating request dies mid-deploy and the server recovers in ~1 s with the new binary; the bearer token (unlike a session cookie) survives the restart, so the curl above is stateless. Manual fallback: `cp dist/infra-mngmt ~/.local/bin/ && systemctl --user restart infra-mngmt`.
