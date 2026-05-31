@@ -114,16 +114,16 @@ section refreshes — actions are user-initiated and rare, so the brief
           {{if .Description}}<span class="bridge-composite-desc">{{.Description}}</span>{{end}}
           <div class="proc-actions bridge-composite-actions">
             <button class="proc-btn start"
-                    hx-post="/bridge/apply?name={{.Name}}"
+                    hx-post="/bridge/apply?name={{ .Name | qesc }}"
                     hx-target="#services-inner" hx-swap="outerHTML"
                     title="bring composite to active state; skips UAC if Windows portproxy is already in place">apply</button>
             <button class="proc-btn restart"
-                    hx-post="/bridge/pause?name={{.Name}}"
+                    hx-post="/bridge/pause?name={{ .Name | qesc }}"
                     hx-target="#services-inner" hx-swap="outerHTML"
                     title="pause: stop WSL relay + remove Windows portproxy. Smart-skips elevation if Windows side is already inactive; otherwise UAC."
                     hx-confirm="Pause composite {{.Name}}? Removing the Windows portproxy will request elevation if the rule is currently in place.">pause</button>
             <button class="proc-btn stop"
-                    hx-post="/bridge/reset?name={{.Name}}"
+                    hx-post="/bridge/reset?name={{ .Name | qesc }}"
                     hx-target="#services-inner" hx-swap="outerHTML"
                     hx-confirm="Reset composite {{.Name}}? This removes the netsh + firewall rules and will request elevation.">reset</button>
           </div>
@@ -158,16 +158,16 @@ section refreshes — actions are user-initiated and rare, so the brief
       <td class="col-actions">
         <div class="proc-actions">
           <button class="proc-btn start"
-                  hx-post="/bridge/apply?name={{.Name}}"
+                  hx-post="/bridge/apply?name={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML">apply</button>
           {{if eq .Tier "wsl"}}
           <button class="proc-btn restart"
-                  hx-post="/bridge/pause?name={{.Name}}"
+                  hx-post="/bridge/pause?name={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML"
                   title="pause: stop the relay process; reset to fully remove">pause</button>
           {{end}}
           <button class="proc-btn stop"
-                  hx-post="/bridge/reset?name={{.Name}}"
+                  hx-post="/bridge/reset?name={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML"
                   hx-confirm="Remove bridge {{.Name}}?">reset</button>
         </div>
@@ -224,11 +224,11 @@ section refreshes — actions are user-initiated and rare, so the brief
         <div class="proc-actions">
           {{if eq .StateClass "running"}}
           <button class="proc-btn stop"
-                  hx-post="/decl-container/stop?name={{.Name}}"
+                  hx-post="/decl-container/stop?name={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML">stop</button>
           {{else}}
           <button class="proc-btn start"
-                  hx-post="/decl-container/start?name={{.Name}}"
+                  hx-post="/decl-container/start?name={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML">start</button>
           {{end}}
         </div>
@@ -283,11 +283,11 @@ section refreshes — actions are user-initiated and rare, so the brief
         <div class="proc-actions">
           {{if eq .StateClass "running"}}
           <button class="proc-btn stop"
-                  hx-post="/decl-container/stop?name={{.Name}}"
+                  hx-post="/decl-container/stop?name={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML">stop</button>
           {{else if .ID}}
           <button class="proc-btn start"
-                  hx-post="/decl-container/start?name={{.Name}}"
+                  hx-post="/decl-container/start?name={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML">start</button>
           {{end}}
         </div>
@@ -303,7 +303,7 @@ section refreshes — actions are user-initiated and rare, so the brief
 {{$live := eq .Card.StateClass "running"}}
 <div id="open-design-{{.Card.Name}}"
      class="svc-instance open-design{{if not $live}} open-design-down{{end}}"
-     hx-get="/partials/services/open-design?name={{.Card.Name}}"
+     hx-get="/partials/services/open-design?name={{ .Card.Name | qesc }}"
      hx-trigger="every 8s"
      hx-swap="outerHTML">
   <div class="svc-header">
@@ -326,7 +326,7 @@ section refreshes — actions are user-initiated and rare, so the brief
     <span class="ods-version-chip ods-version-chip-loading"
           id="ods-version-{{.Card.Name}}"
           hx-preserve="true"
-          hx-get="/partials/open-design/version?name={{.Card.Name}}"
+          hx-get="/partials/open-design/version?name={{ .Card.Name | qesc }}"
           hx-trigger="load, every 60s"
           hx-swap="outerHTML">v…</span>
     {{else}}
@@ -348,7 +348,7 @@ section refreshes — actions are user-initiated and rare, so the brief
        "loading usage…" each card-refresh. */}}
   <div class="ods-body" id="ods-body-{{.Card.TokenStatsContainer}}"
        hx-preserve="true"
-       hx-get="/partials/open-design/token-stats?name={{.Card.TokenStatsContainer}}"
+       hx-get="/partials/open-design/token-stats?name={{ .Card.TokenStatsContainer | qesc }}"
        hx-trigger="load, every 8s"
        hx-swap="outerHTML">
     <div class="ods-body-loading">loading usage…</div>
@@ -412,7 +412,7 @@ section refreshes — actions are user-initiated and rare, so the brief
            unreachable branch of vault_panel.html.tmpl. */}}
       <div class="vault-row-body" id="vault-{{$v.Name}}-mount"
            hx-preserve="true"
-           hx-get="/partials/vault/panel?name={{$v.Name}}"
+           hx-get="/partials/vault/panel?name={{ $v.Name | qesc }}"
            hx-trigger="{{if lt $v.AllowedCount 0}}every 8s{{else}}load, every 8s{{end}}">
         {{if lt $v.AllowedCount 0}}
         <div class="vault-panel vault-panel-down" id="vault-{{$v.Name}}-panel">
@@ -439,7 +439,7 @@ section refreshes — actions are user-initiated and rare, so the brief
 {{define "instance-section"}}
 {{with .Instance}}
 <div id="instance-{{.Name}}" class="svc-instance processes" data-instance="{{.Name}}"
-     hx-get="/partials/services/instances?name={{.Name}}"
+     hx-get="/partials/services/instances?name={{ .Name | qesc }}"
      hx-trigger="every 8s"
      hx-swap="outerHTML">
   <div class="svc-header">
@@ -455,13 +455,13 @@ section refreshes — actions are user-initiated and rare, so the brief
               data-toggle="show-internals"
               title="show internal bridge-* processes for debugging">show internals</button>
       <button class="svc-boot-btn restart"
-              hx-post="/compose/reload?instance={{.Name}}"
+              hx-post="/compose/reload?instance={{ .Name | qesc }}"
               hx-target="#services-inner"
               hx-swap="outerHTML"
               title="re-read compose YAML and reconcile (drops removed entries on recent process-compose versions)">reload</button>
       {{else if .CanBoot}}
       <button class="svc-boot-btn start"
-              hx-post="/compose/start?instance={{.Name}}"
+              hx-post="/compose/start?instance={{ .Name | qesc }}"
               hx-target="#services-inner"
               hx-swap="outerHTML"
               title="start process-compose">start</button>
@@ -505,22 +505,22 @@ section refreshes — actions are user-initiated and rare, so the brief
         <div class="proc-actions">
           {{if canStop .Status}}
           <button class="proc-btn stop"
-                  hx-post="/process/stop?instance={{$instName}}&process={{.Name}}"
+                  hx-post="/process/stop?instance={{ $instName | qesc }}&process={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML"
                   title="halt the process and stop the restart loop">stop</button>
           {{end}}
           {{if canStart .Status}}
           <button class="proc-btn start"
-                  hx-post="/process/start?instance={{$instName}}&process={{.Name}}"
+                  hx-post="/process/start?instance={{ $instName | qesc }}&process={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML">start</button>
           {{end}}
           {{if .IsRunning}}
           <button class="proc-btn restart"
-                  hx-post="/process/restart?instance={{$instName}}&process={{.Name}}"
+                  hx-post="/process/restart?instance={{ $instName | qesc }}&process={{ .Name | qesc }}"
                   hx-target="#services-inner" hx-swap="outerHTML">restart</button>
           {{end}}
           <button class="proc-btn logs"
-                  hx-get="/partials/logs?instance={{$instName}}&process={{.Name}}"
+                  hx-get="/partials/logs?instance={{ $instName | qesc }}&process={{ .Name | qesc }}"
                   hx-target="#logs-{{$instName}}-{{.Name}}"
                   hx-swap="innerHTML">logs</button>
         </div>
@@ -537,7 +537,7 @@ section refreshes — actions are user-initiated and rare, so the brief
     <div class="svc-offline-endpoint">{{.Endpoint}}</div>
     {{if .CanBoot}}
     <button class="svc-boot-btn start"
-            hx-post="/compose/start?instance={{.Name}}"
+            hx-post="/compose/start?instance={{ .Name | qesc }}"
             hx-target="#services-inner"
             hx-swap="outerHTML">start process-compose</button>
     {{else}}

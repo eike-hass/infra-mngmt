@@ -50,7 +50,7 @@
           <li>
             <button class="promote-target {{if .ReadOnly}}readonly{{end}} {{if .Exists}}exists{{end}}"
                     {{if .ReadOnly}}disabled aria-disabled="true" title="this source is read-only"{{else}}
-                    hx-post="/api/promote?from={{$e.ID}}&to={{.SourceID}}"
+                    hx-post="/api/promote?from={{ $e.ID | qesc }}&to={{ .SourceID | qesc }}"
                     hx-include="#promote-rename-input, #promote-mirror-input"
                     hx-target="#promote-slot"
                     hx-swap="innerHTML"{{end}}>

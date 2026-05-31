@@ -294,7 +294,8 @@ func TestPreviewRendersFileBackedEntity(t *testing.T) {
 		`class="save-btn"`,
 		`class="cancel-btn"`,
 		`promote-btn`,
-		`hx-get="/partials/promote-picker?id=host:/x:command:deploy"`,
+		// entity ID is now URL-query-escaped (qesc) so ':' and '/' survive
+		`hx-get="/partials/promote-picker?id=host%3A%2Fx%3Acommand%3Adeploy"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered preview missing %q\n%s", want, out)

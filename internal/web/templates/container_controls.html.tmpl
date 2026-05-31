@@ -1,7 +1,7 @@
 {{- if .HasContainer -}}
 <span class="ov-ctr-dot {{.StateClass}}"></span><span class="ov-ctr-label">{{.StateLabel}}</span>{{if .ShowActionBtn}}
 <button class="ov-ctr-btn"
-        hx-post="/api/container/{{.ActionFn}}?id={{.ID}}&project={{.Project}}"
+        hx-post="/api/container/{{.ActionFn}}?id={{ .ID | qesc }}&project={{ .Project | qesc }}"
         hx-target="#ov-ctr"
         hx-swap="innerHTML"
         hx-disabled-elt="this"

@@ -1610,3 +1610,22 @@ func TestMapContainerState(t *testing.T) {
 		}
 	}
 }
+
+// TestQesc pins the query-escaping helper used throughout the HTMX templates:
+// the metacharacters that would otherwise truncate or corrupt a query string
+// (& ? # / space) must be percent-encoded.
+func TestQesc(t *testing.T) {
+	cases := map[string]string{
+		"plain":             "plain",
+		"a&b":               "a%26b",
+		"a?b":               "a%3Fb",
+		"a#b":               "a%23b",
+		"a b":               "a+b",
+		"host:/x:command:n": "host%3A%2Fx%3Acommand%3An",
+	}
+	for in, want := range cases {
+		if got := qesc(in); got != want {
+			t.Errorf("qesc(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

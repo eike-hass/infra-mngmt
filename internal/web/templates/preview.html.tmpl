@@ -17,7 +17,7 @@
   <div class="preview-name-row">
     <div class="preview-name">{{$e.Name}}</div>
     <button class="promote-btn"
-            hx-get="/partials/promote-picker?id={{$e.ID}}"
+            hx-get="/partials/promote-picker?id={{ $e.ID | qesc }}"
             hx-target="#promote-slot"
             hx-swap="innerHTML"
             hx-disabled-elt="this">promote →</button>

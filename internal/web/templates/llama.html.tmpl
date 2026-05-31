@@ -13,7 +13,7 @@
 {{range .Keys}}
 <article class="llama-card svc-section-loading"
          id="llama-card-{{.Instance}}-{{.Process}}"
-         hx-get="/partials/llama/card?instance={{.Instance}}&process={{.Process}}"
+         hx-get="/partials/llama/card?instance={{ .Instance | qesc }}&process={{ .Process | qesc }}"
          hx-trigger="load, every 10s"
          hx-swap="outerHTML">
   <p class="svc-section-placeholder">loading {{.Process}}…</p>
@@ -31,7 +31,7 @@
 {{$split := llamaModelsByLoadState .Models}}
 <article class="llama-card{{if $dead}} dead{{end}}"
          id="llama-card-{{.Instance}}-{{.Process}}"
-         hx-get="/partials/llama/card?instance={{.Instance}}&process={{.Process}}"
+         hx-get="/partials/llama/card?instance={{ .Instance | qesc }}&process={{ .Process | qesc }}"
          hx-trigger="every 10s"
          hx-swap="outerHTML"
          aria-label="llama server {{.Process}}">
@@ -76,7 +76,7 @@
       <span class="llama-head-stat" title="busy / total slots across all loaded models">slots <span class="{{if gt $rollup.BusySlots 0}}good{{else}}mute{{end}}">{{$rollup.BusySlots}}</span>/{{$rollup.TotalSlots}}</span>
       {{end}}
       <button class="llama-drain-btn"
-              hx-post="/api/llama/drain?instance={{.Instance}}&process={{.Process}}"
+              hx-post="/api/llama/drain?instance={{ .Instance | qesc }}&process={{ .Process | qesc }}"
               hx-target="#view-llama"
               hx-swap="innerHTML"
               hx-confirm="Drain queue on {{.Instance}}/{{.Process}}? This aborts any in-flight generation and pops queued tasks. Weights stay loaded — no model reload needed."
@@ -119,7 +119,7 @@
         <span class="llama-model-status status-loaded pulse-dot" title="{{statusHelp .Status}}"><span class="llama-model-status-dot"></span>loaded</span>
         <span class="llama-loaded-spacer"></span>
         <button class="llama-model-btn unload"
-                hx-post="/api/llama/unload?instance={{$inst}}&process={{$proc}}&model={{urlquery .ID}}"
+                hx-post="/api/llama/unload?instance={{ $inst | qesc }}&process={{ $proc | qesc }}&model={{urlquery .ID}}"
                 hx-target="#view-llama"
                 hx-swap="innerHTML"
                 hx-confirm="Unload {{.ID}}? Frees VRAM and kills any in-flight generation on this model. Next request to it will trigger a re-load (~seconds-minutes depending on size)."
@@ -169,7 +169,7 @@
         {{if not $m.Synthetic}}
           {{if or (eq $m.Status "unloaded") (eq $m.Status "sleeping") $m.Failed}}
           <button class="llama-model-btn load"
-                  hx-post="/api/llama/load?instance={{$inst}}&process={{$proc}}&model={{urlquery $m.ID}}"
+                  hx-post="/api/llama/load?instance={{ $inst | qesc }}&process={{ $proc | qesc }}&model={{urlquery $m.ID}}"
                   hx-target="#view-llama"
                   hx-swap="innerHTML"
                   hx-confirm="Load {{$m.ID}}? Under --models-max LRU this may evict another currently-loaded model. Load time depends on model size; status will go loading → loaded over the next refresh cycles."
