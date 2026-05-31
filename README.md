@@ -148,9 +148,12 @@ process_compose:
     compose_file: /c/Users/youruser/.config/infra-mngmt/process-compose.yaml
     token_file: /c/Users/youruser/.config/infra-mngmt/process-compose.token
 trusted_networks:
-  - 127.0.0.0/8
+  - 127.0.0.0/8 # the local browser (Windows → WSL is loopback-forwarded) stays logged-in-free
   - ::1/128
-  - 172.17.0.0/16 # Docker bridge so the devcontainer can reach the UI without logging in
+  # Do NOT add the whole Docker bridge (172.17.0.0/16) here: it trusts *every*
+  # container on the bridge — including the workspaces this tool inspects. The
+  # devcontainer's deploy flow authenticates with the bearer token instead
+  # (Authorization: Bearer $(cat token_file)) — see "Redeploy" below.
 extra_paths:
   - /home/youruser/projects/project-a
   - /home/youruser/projects/project-b
@@ -166,7 +169,7 @@ Each `process_compose` entry can carry the API token for its instance one of two
 | -------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `bind`                           | `127.0.0.1:7842`                                | Listen address. Set to `0.0.0.0:7842` for LAN access.                                                                                                                                |
 | `token_file`                     | `~/.config/infra-mngmt/token`                   | Path to the infra-mngmt bearer token. Set to `""` to disable auth.                                                                                                                   |
-| `trusted_networks`               | `[]`                                            | CIDRs whose source IPs bypass the bearer-token login. Typical: loopback + the Docker bridge.                                                                                         |
+| `trusted_networks`               | `[]`                                            | CIDRs whose source IPs bypass auth entirely. Use loopback only — a Docker-bridge CIDR trusts every container on the bridge. Headless clients should send `Authorization: Bearer <token>` rather than rely on a trusted CIDR.                |
 | `process_compose[].name`         | required                                        | Display name shown in the services tab; also the tier identifier in `dependencies.yaml`.                                                                                             |
 | `process_compose[].endpoint`     | required                                        | Base URL of the process-compose management API. Supports the `wsl-windows` hostname (see below).                                                                                     |
 | `process_compose[].binary`       | optional                                        | Path to the process-compose binary. When set, a **▶ start** button appears in the UI if the endpoint is unreachable.                                                                 |
@@ -521,7 +524,16 @@ make tidy                 # go mod tidy
 
 The devcontainer firewall allowlists the Go module proxy (`proxy.golang.org`, `sum.golang.org`, `dl.google.com`) — no `GOPROXY=direct` workaround needed.
 
-After a code change, redeploy via the `infra-mngmt-deploy` process-compose entry (one-click from the services panel, or `curl -X POST "http://172.17.0.1:7842/process/start?instance=wsl&process=infra-mngmt-deploy"` from the devcontainer). The originating session dies mid-deploy and recovers in ~1 s with the new binary; verify the new `build_epoch` to confirm. Manual fallback: `cp dist/infra-mngmt ~/.local/bin/ && systemctl --user restart infra-mngmt`.
+After a code change, redeploy via the `infra-mngmt-deploy` process-compose entry — one-click from the services panel (the browser already holds a session), or, from inside the devcontainer, authenticate the POST with the bearer token (the host token file is bind-mounted at `/wsl-config/token`):
+
+```bash
+curl -fsS -H "Authorization: Bearer $(cat /wsl-config/token)" \
+  -X POST "http://172.17.0.1:7842/process/start?instance=wsl&process=infra-mngmt-deploy"
+# then poll the public, no-auth /api/version until build_epoch changes:
+curl -fsS "http://172.17.0.1:7842/api/version" | jq .build_epoch
+```
+
+The originating request dies mid-deploy and the server recovers in ~1 s with the new binary; the bearer token (unlike a session cookie) survives the restart, so the curl above is stateless. Manual fallback: `cp dist/infra-mngmt ~/.local/bin/ && systemctl --user restart infra-mngmt`.
 
 ### Project docs
 

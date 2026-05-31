@@ -137,7 +137,7 @@ process_compose:
     binary: /c/Users/user/AppData/Local/Programs/process-compose/process-compose.exe
     compose_file: /c/Users/user/.config/infra-mngmt/process-compose.yaml
     token_file: /c/Users/user/.config/infra-mngmt/process-compose.token
-trusted_networks: [127.0.0.0/8, ::1/128, 172.17.0.0/16]
+trusted_networks: [127.0.0.0/8, ::1/128] # loopback only — NOT the Docker bridge; headless clients (devcontainer deploy) send Authorization: Bearer instead
 extra_paths: []
 ```
 

@@ -351,6 +351,19 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Bearer-token auth for headless/API clients (deploy scripts, smoke
+		// tests). Stateless — no session cookie needed, so it survives the
+		// process restart that a redeploy triggers. A present-but-wrong token
+		// gets a clean 401 instead of an HTML login redirect a script can't
+		// follow. Absent header falls through to the browser flows below.
+		if tok, ok := bearerToken(r); ok {
+			if subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.Error(w, "invalid bearer token", http.StatusUnauthorized)
+			return
+		}
 		if s.requestIsTrusted(r) {
 			next.ServeHTTP(w, r)
 			return
@@ -364,6 +377,22 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		target := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
 		http.Redirect(w, r, target, http.StatusSeeOther)
 	})
+}
+
+// bearerToken extracts the credential from an "Authorization: Bearer <token>"
+// header. Returns ("", false) when the header is absent or not a non-empty
+// Bearer scheme, so callers can distinguish "no header, try other auth" from
+// "Bearer header present but wrong".
+func bearerToken(r *http.Request) (string, bool) {
+	scheme, rest, found := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !found || !strings.EqualFold(scheme, "Bearer") {
+		return "", false
+	}
+	tok := strings.TrimSpace(rest)
+	if tok == "" {
+		return "", false
+	}
+	return tok, true
 }
 
 // requestIsTrusted reports whether r's source IP falls in one of the

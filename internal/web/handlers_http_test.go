@@ -860,6 +860,152 @@ func TestAuthBypassIPv6Loopback(t *testing.T) {
 	}
 }
 
+// ─── bearer-token auth (headless / deploy clients) ───────────────────────────
+
+// bearerReq builds an untrusted-origin request carrying the given
+// Authorization header value. Untrusted RemoteAddr ensures the bearer path —
+// not the trusted-network bypass — is what's under test.
+func bearerReq(method, target, authHeader string) *http.Request {
+	req := requestFrom(method, target, "8.8.8.8")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	return req
+}
+
+func TestAuthBearerValidTokenAllows(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil, nil)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, bearerReq(http.MethodGet, "/api/sources", "Bearer secret"))
+	if rr.Code != 200 {
+		t.Errorf("valid bearer token from untrusted IP should be allowed, got %d", rr.Code)
+	}
+}
+
+func TestAuthBearerSchemeIsCaseInsensitive(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil, nil)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, bearerReq(http.MethodGet, "/api/sources", "bearer secret"))
+	if rr.Code != 200 {
+		t.Errorf("lowercase bearer scheme should be accepted, got %d", rr.Code)
+	}
+}
+
+func TestAuthBearerWrongTokenReturns401(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil, nil)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, bearerReq(http.MethodGet, "/api/sources", "Bearer wrong"))
+	// A present-but-wrong bearer must be a clean 401, not a /login redirect:
+	// scripts can't follow the HTML login flow.
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("wrong bearer token should return 401, got %d", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "" {
+		t.Errorf("wrong bearer token should not redirect, got Location %q", loc)
+	}
+}
+
+func TestAuthBearerEmptyTokenFallsThroughToLogin(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil, nil)
+
+	// "Bearer " with no token is treated as no bearer header, so the request
+	// falls through to the browser flow and is redirected (not 401'd).
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, bearerReq(http.MethodGet, "/api/sources", "Bearer "))
+	if rr.Code != http.StatusSeeOther {
+		t.Errorf("empty bearer token should fall through to login redirect, got %d", rr.Code)
+	}
+}
+
+func TestAuthBearerWorksOnMutatingPost(t *testing.T) {
+	// The deploy flow POSTs to a mutating route from an untrusted (bridge)
+	// origin; a valid bearer must carry it past auth (404 here = past auth,
+	// unknown instance — not a 303 login redirect or 401).
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil, nil)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, bearerReq(http.MethodPost, "/process/start?instance=nope&process=x", "Bearer secret"))
+	if rr.Code == http.StatusSeeOther || rr.Code == http.StatusUnauthorized {
+		t.Errorf("valid bearer should pass auth on mutating POST, got %d", rr.Code)
+	}
+}
+
+func TestAuthBearerTakesPrecedenceOverTrustedIP(t *testing.T) {
+	// Deliberate design choice: bearer is checked before the trusted-network
+	// bypass, so a request from a trusted IP that presents a WRONG bearer
+	// fails closed (401) rather than being waved through on IP alone. No real
+	// client hits this (the browser never sends Authorization), but lock the
+	// fail-closed-on-explicit-bad-credential behavior in.
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := New([]source.Source{m}, nil, "secret", nil, nil, nil, nil, nil,
+		[]string{"127.0.0.0/8"})
+
+	// Wrong bearer from a trusted IP → 401, not the IP bypass.
+	rr := httptest.NewRecorder()
+	req := requestFrom(http.MethodGet, "/api/sources", "127.0.0.1")
+	req.Header.Set("Authorization", "Bearer wrong")
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("wrong bearer from trusted IP should 401 (bearer precedence), got %d", rr.Code)
+	}
+
+	// No Authorization header from the same trusted IP → IP bypass still works.
+	rr = httptest.NewRecorder()
+	srv.ServeHTTP(rr, requestFrom(http.MethodGet, "/api/sources", "127.0.0.1"))
+	if rr.Code != 200 {
+		t.Errorf("trusted IP without bearer should still bypass, got %d", rr.Code)
+	}
+}
+
+func TestAuthBearerIgnoredWhenAuthDisabled(t *testing.T) {
+	// With no token configured, a (wrong) bearer header must not flip an
+	// open server into returning 401.
+	m := newMockSource("host:/x", entity.GlobalScope())
+	srv := newServerWithSource(m) // token == ""
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, bearerReq(http.MethodGet, "/api/sources", "Bearer anything"))
+	if rr.Code != 200 {
+		t.Errorf("auth disabled should allow regardless of bearer header, got %d", rr.Code)
+	}
+}
+
+func TestBearerTokenParsing(t *testing.T) {
+	cases := []struct {
+		header  string
+		wantTok string
+		wantOK  bool
+	}{
+		{"", "", false},
+		{"Bearer abc", "abc", true},
+		{"bearer abc", "abc", true},
+		{"BEARER abc", "abc", true},
+		{"Bearer   abc  ", "abc", true},
+		{"Bearer ", "", false},
+		{"Bearer", "", false},
+		{"Basic abc", "", false},
+		{"Token abc", "", false},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		if c.header != "" {
+			req.Header.Set("Authorization", c.header)
+		}
+		tok, ok := bearerToken(req)
+		if ok != c.wantOK || tok != c.wantTok {
+			t.Errorf("bearerToken(%q) = (%q,%v), want (%q,%v)", c.header, tok, ok, c.wantTok, c.wantOK)
+		}
+	}
+}
+
 func TestLoginPostInvalidToken(t *testing.T) {
 	srv := New(nil, nil, "secret", nil, nil, nil, nil, nil, nil)
 	rr := httptest.NewRecorder()

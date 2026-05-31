@@ -17,11 +17,11 @@ infra-mngmt is a local management dashboard. The primary attack surface is:
 
 A bearer token is generated automatically on first run and stored at `~/.config/infra-mngmt/token` with `0600` permissions. The file is created with a 64-hex-character random token (32 bytes from `crypto/rand`).
 
-All routes except `/login` and `/logout` require a session cookie issued after presenting the correct token. Token comparison uses `crypto/subtle.ConstantTimeCompare` to prevent timing attacks.
+Protected routes accept the token two ways. **Browsers** present it once at `/login` and receive a session cookie (`im_session`, `HttpOnly` + `SameSite=Strict`). **Headless clients** (deploy scripts, smoke tests) send `Authorization: Bearer <token>` directly — stateless, so it survives the process restart a redeploy triggers, where an in-memory session cookie would not. A present-but-wrong bearer token returns `401` rather than an HTML login redirect a script can't follow. Both paths compare the token with `crypto/subtle.ConstantTimeCompare` to prevent timing attacks. A few routes are intentionally public: `/login`, `/logout`, `/static/*`, `/favicon.svg`, `/sw.js`, and `/api/version` (build identity only — non-sensitive, so deploy scripts can confirm a restart without auth).
 
 Session IDs are 16 random bytes encoded as hex. Sessions are stored only in memory (lost on restart, requiring re-login).
 
-To disable authentication (local-only, trusted environment), remove `token_file` from `config.yaml`. **Do not do this if the service is reachable from other machines.** A safer middle ground is `trusted_networks:` — list CIDRs whose source IPs bypass the login flow (e.g. `127.0.0.0/8`, `172.17.0.0/16` for the Docker bridge) without disabling auth wholesale.
+To disable authentication (local-only, trusted environment), remove `token_file` from `config.yaml`. **Do not do this if the service is reachable from other machines.** A safer middle ground is `trusted_networks:` — CIDRs whose source IPs bypass auth without disabling it wholesale. **Use this for loopback only** (`127.0.0.0/8`, `::1/128`) — the local browser, since Windows→WSL is loopback-forwarded. **Do not trust the whole Docker bridge (`172.17.0.0/16`)**: that bypasses auth for *every* container on the bridge, including the untrusted workspaces this tool is built to inspect — a sandbox-to-host privilege escalation, since the bypassed routes drive UAC-elevated Windows firewall changes, process control, and vault-allowlist edits. Containers that need to reach the API (the devcontainer deploy flow) should send the bearer token instead.
 
 ### Bind address
 
@@ -179,6 +179,7 @@ If this is a concern, run infra-mngmt without Docker socket access; it will log 
 | Auth token auto-generated with `crypto/rand` | ✅ |
 | Token stored `0600` | ✅ |
 | Constant-time token comparison | ✅ |
+| `Authorization: Bearer` accepted for headless clients (so the Docker bridge need not be a trusted network) | ✅ |
 | `SameSite=Strict` session cookie | ✅ |
 | `HttpOnly` session cookie | ✅ |
 | All HTML auto-escaped via `html/template` | ✅ |
