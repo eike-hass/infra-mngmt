@@ -69,32 +69,28 @@ internal/web/
   promote.go
   status.go
   templates/              // *.html.tmpl, embed.FS rooted here
-    layout.html.tmpl      // <html>, <head>, header, view container, footer
-    index.html.tmpl       // entity-list + preview, extends layout
+    index.html.tmpl       // full page shell; composed with entity_list at render time
     entity_list.html.tmpl // partial, returned from /partials/entity-list
-    preview.html.tmpl     // partial
-    services.html.tmpl
+    preview.html.tmpl     // entity preview partial
+    services.html.tmpl    // services view; several {{define}} section shells (see §7.10)
     logs.html.tmpl
-    llama.html.tmpl
+    llama.html.tmpl       // llama view; per-card {{define}} shells (see §7.10)
     login.html.tmpl
     promote_picker.html.tmpl
     promote_result.html.tmpl
-    vault.html.tmpl
-    components/           // sub-templates included by name
-      entity_card.html.tmpl
-      service_row.html.tmpl
-      build_chip.html.tmpl
-      kind_pill.html.tmpl
+    container_controls.html.tmpl
+    vault_panel.html.tmpl
+    open_design_token_stats.html.tmpl
+    open_design_version.html.tmpl
   static/
-    app.css               // shared tokens, layout, components
-    pages/
-      services.css        // page-scoped CSS, only loaded by that page
-      llama.css
+    css/
+      app.css             // single shared stylesheet — tokens, layout, components
     js/
-      app.js              // bootstrap: htmx config, view switch, search
-      preview.js          // markdown rendering, edit-in-place
-      containers.js       // container panel: SSE, controls
-      llama.js            // llama page module
+      app.js              // bootstrap: htmx config, view switch, search, toasts
+      preview.js          // markdown rendering, edit-in-place (CodeMirror)
+      containers.js       // container panel: SSE events, controls
+      promote.js          // promote modal
+      wake.js             // WSL wake-on-idle island (gated on wake_url)
     vendor/
       htmx.min.js
       fuse.min.js
@@ -118,15 +114,13 @@ internal/web/
 
 We use Go template composition, not concatenation:
 
-- `layout.html.tmpl` defines `{{define "page"}}` blocks: `head`, `body`, `scripts`. Pages override the blocks they care about and inherit the rest.
-- Reusable fragments live under `components/` and are included by `{{template "entity_card" .}}` with an explicit data argument.
-- Partials returned to HTMX are *whole files* under `templates/`, not nested defines — this keeps the response shape obvious from the filename.
-
-Avoid `{{define}}` blocks scattered across unrelated files; the rule is *one named template per file* unless the file is explicitly the layout.
+- There is **no separate layout file**. `index.html.tmpl` is the full page shell (`<html>`/`<head>`/header/view container/footer); handlers compose it with `entity_list.html.tmpl` at render time — `parseTemplate("index", "templates/index.html.tmpl", "templates/entity_list.html.tmpl")`.
+- HTMX partials returned to the client are *whole files* under `templates/` (`preview`, `promote_picker`, `promote_result`, `container_controls`, `open_design_*`) — the response shape is obvious from the filename.
+- **Deliberate exception — the polling views:** `services.html.tmpl` and `llama.html.tmpl` each hold several `{{define}}` section shells, one per self-polling endpoint (see §7.10). Co-locating a view's sections in one file is intentional; the rule is only *don't scatter `{{define}}` blocks across **unrelated** files*.
 
 ### 4.2 FuncMap
 
-The `tmplFuncs` map ([handlers.go:293](../internal/web/handlers.go#L293)) is a curated surface. Keep it small and documented.
+The `tmplFuncs` map ([handlers.go:317](../internal/web/handlers.go#L317)) is a curated surface. Keep it small and documented. Security-relevant helpers worth knowing: `static` (cache-busted asset URLs — never hand-build them), `qesc` (`url.QueryEscape` for user-controlled values in `hx-get`/`hx-post` query strings), and the `template.HTML` icon helpers (whose inputs must be trusted constants).
 
 - **(rule)** A function added to `tmplFuncs` must have a unit test in [template_test.go](../internal/web/template_test.go) covering its happy path and the empty/zero input.
 - **(rule)** A FuncMap helper that returns `template.HTML` must escape any caller-supplied content explicitly. Never feed user-mutable data through `template.HTML`.
@@ -195,7 +189,7 @@ The `tmplFuncs` map ([handlers.go:293](../internal/web/handlers.go#L293)) is a c
 
 - Components are flat, BEM-ish: `.entity-card`, `.entity-card-header`, `.entity-card.is-collapsed`. No nesting selectors more than two levels deep.
 - State classes are prefixed `is-` (`is-active`, `is-collapsed`, `is-loading`) — never set state via `style="display:none"` from JS for anything more than transient toggling.
-- Page-scoped styles live in `static/pages/<page>.css` and are loaded only on that page via a `{{block "head" .}}` override.
+- All component and layout CSS lives in the single `static/css/app.css`, loaded once on every page. There is no per-page stylesheet split today; if `app.css` grows unwieldy, split it by *component* into additional embedded files rather than a per-page-loaded scheme.
 
 ### 5.3 Rules
 
@@ -609,8 +603,8 @@ For any change that adds or modifies UI:
 2. **Pick the route.** §8 — new top-level view = new URL.
 3. **Decide what's a partial.** Anything HTMX touches must be its own template file under `templates/`.
 4. **Wire the data.** Define a view struct next to the handler; never `map[string]any`.
-5. **Write the template.** New file under `templates/`. Reuse a `components/` partial if one fits.
-6. **Style it.** Page-scoped CSS in `static/pages/<page>.css` if > 20 lines; otherwise extend `app.css` and reuse tokens.
+5. **Write the template.** New file under `templates/`. If the view needs self-polling sub-sections, co-locate their `{{define}}` shells in that file (see §7.10).
+6. **Style it.** Extend `static/css/app.css` and reuse `:root` tokens — no hex literals, no per-page stylesheet.
 7. **Script it.** New module under `static/js/<page>.js` only if interaction goes beyond HTMX. Bootstrap from `app.js` only if every page needs it.
 8. **Test it.**
    - Unit-test new FuncMap helpers and view-struct mappers.
@@ -672,5 +666,5 @@ M1–M5 + M7 are pure structural wins. M6 is the only step explicitly skipped.
 
 1. ✅ **Cache busting for static assets.** Resolved: [internal/web/static.go](../internal/web/static.go) `staticAssetURL` appends `?v=<token>` derived from `BuildInfo.Commit` (falling back to `BuildEpoch` for unstamped builds). Wired via `SetBuildInfo`; covered by `TestStaticAssetURL_CacheBuster` and `TestSetBuildInfo_WiresCacheBuster`.
 2. ✅ **HTMX error toast surface.** Resolved during M7: [containers.js](../internal/web/static/js/containers.js) subscribes to `htmx:responseError` and toasts when any `/api/container/*` action fails. Same hook is the place to extend if other API endpoints need similar treatment — the listener gates on path prefix so it's safe to broaden.
-3. ✅ **CSP header.** Resolved: [securityHeadersMiddleware](../internal/web/static.go) ships `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; …` plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. `script-src` and `connect-src` are now `'self'`-only after the modal-script extraction, the `onclick=` removal, and the CodeMirror vendoring. `'unsafe-inline'` remains in `style-src` for inline `style="display:none"` toggles and dynamic widths — dropping it requires migrating those to class-based toggles; tracked as a follow-up.
+3. ✅ **CSP header.** Resolved: [securityHeadersMiddleware](../internal/web/static.go) ships `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; …` plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin` (switched from `no-referrer`, which nulled the cross-origin `Origin` header in Chromium and broke the wake.js POST). `script-src` and `connect-src` are now `'self'`-only after the modal-script extraction, the `onclick=` removal, and the CodeMirror vendoring. `'unsafe-inline'` remains in `style-src` for inline `style="display:none"` toggles and dynamic widths — dropping it requires migrating those to class-based toggles; tracked as a follow-up.
 4. ✅ **Lazy-loading CodeMirror.** Resolved: [preview.js](../internal/web/static/js/preview.js) `loadCodeMirror()` wraps a dynamic `import("/static/vendor/codemirror.bundle.js")` and caches the promise, so the ~1.1 MB bundle is fetched at most once and only when the user clicks "edit". Initial page render no longer pays the cost. While the bundle is in flight the editor slot shows a `"loading editor…"` placeholder; a cancel during that window bails before instantiating the editor.
