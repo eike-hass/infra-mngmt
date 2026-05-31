@@ -3,6 +3,8 @@ package web
 import (
 	"embed"
 	"html/template"
+	"log"
+	"net/http"
 	"path"
 	"strings"
 	"sync"
@@ -42,4 +44,14 @@ func parseTemplate(_ string, files ...string) *template.Template {
 	t := template.Must(template.New(main).Funcs(tmplFuncs).ParseFS(templatesFS, files...))
 	tmplCache[key] = t
 	return t
+}
+
+// renderTmpl executes tmpl with data, logging (rather than silently swallowing)
+// any execution error. HTMX partials write their status before Execute, so a
+// late error can't change the response — but it must still surface in the log
+// instead of producing a half-written body with no trace.
+func renderTmpl(w http.ResponseWriter, tmpl *template.Template, data any) {
+	if err := tmpl.Execute(w, data); err != nil {
+		log.Printf("template execute: %v", err)
+	}
 }

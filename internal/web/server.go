@@ -490,7 +490,7 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	}
 	tmpl := parseTemplate("login", "templates/login.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, map[string]string{"Next": r.URL.Query().Get("next"), "Error": ""})
+	renderTmpl(w, tmpl, map[string]string{"Next": r.URL.Query().Get("next"), "Error": ""})
 }
 
 func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
@@ -508,7 +508,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		tmpl := parseTemplate("login", "templates/login.html.tmpl")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = tmpl.Execute(w, map[string]string{"Next": r.FormValue("next"), "Error": "invalid token"})
+		renderTmpl(w, tmpl, map[string]string{"Next": r.FormValue("next"), "Error": "invalid token"})
 		return
 	}
 	sid := make([]byte, 16)

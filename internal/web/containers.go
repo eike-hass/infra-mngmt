@@ -868,7 +868,7 @@ func (s *Server) handleOpenDesignTokenStats(w http.ResponseWriter, r *http.Reque
 func (s *Server) renderOpenDesignTokenStats(w http.ResponseWriter, view openDesignTokenStatsView) {
 	tmpl := parseTemplate("ods", "templates/open_design_token_stats.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, view)
+	renderTmpl(w, tmpl, view)
 }
 
 // openDesignVersionView is the data model for the version chip on an Open
@@ -950,5 +950,5 @@ func (s *Server) handleOpenDesignVersion(w http.ResponseWriter, r *http.Request)
 func (s *Server) renderOpenDesignVersion(w http.ResponseWriter, view openDesignVersionView) {
 	tmpl := parseTemplate("odv", "templates/open_design_version.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, view)
+	renderTmpl(w, tmpl, view)
 }

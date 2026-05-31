@@ -550,7 +550,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	statuses := s.resolveMCPStatuses(r.Context(), all)
 	tmpl := parseTemplate("index", "templates/index.html.tmpl", "templates/entity_list.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses, Build: s.buildInfo, WakeURL: s.wakeURL})
+	renderTmpl(w, tmpl, pageData{Sources: tabs, Entities: all, MCPStatuses: statuses, Build: s.buildInfo, WakeURL: s.wakeURL})
 }
 
 // handleEntityListPartial returns just the entity-list inner HTML for in-place
@@ -564,7 +564,9 @@ func (s *Server) handleEntityListPartial(w http.ResponseWriter, r *http.Request)
 	statuses := s.resolveMCPStatuses(r.Context(), all)
 	tmpl := parseTemplate("partial", "templates/entity_list.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.ExecuteTemplate(w, "entity-list-inner", pageData{Entities: all, MCPStatuses: statuses})
+	if err := tmpl.ExecuteTemplate(w, "entity-list-inner", pageData{Entities: all, MCPStatuses: statuses}); err != nil {
+		log.Printf("template execute: %v", err)
+	}
 }
 
 // handleEntityPreview returns the preview pane HTML fragment (HTMX target).
@@ -597,7 +599,7 @@ func (s *Server) handleEntityPreview(w http.ResponseWriter, r *http.Request) {
 			}
 			tmpl := parseTemplate("preview", "templates/preview.html.tmpl")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_ = tmpl.Execute(w, map[string]any{
+			renderTmpl(w, tmpl, map[string]any{
 				"Entity":    e,
 				"Content":   string(content),
 				"MCPStatus": mcpStatus,
@@ -1823,7 +1825,7 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	tmpl := parseTemplate("logs", "templates/logs.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, data)
+	renderTmpl(w, tmpl, data)
 }
 
 // formatMem formats bytes as a compact string.

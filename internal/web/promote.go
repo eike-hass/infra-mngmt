@@ -157,7 +157,7 @@ func (s *Server) handlePromotePicker(w http.ResponseWriter, r *http.Request) {
 
 	tmpl := parseTemplate("promote-picker", "templates/promote_picker.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.Execute(w, data)
+	renderTmpl(w, tmpl, data)
 }
 
 // handlePromote copies an entity to a target source. Optional ?name=<newName>
@@ -351,7 +351,7 @@ func (s *Server) writePromoteResult(w http.ResponseWriter, status int, r promote
 	tmpl := parseTemplate("promote-result", "templates/promote_result.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	_ = tmpl.Execute(w, r)
+	renderTmpl(w, tmpl, r)
 }
 
 // handlePromoteClear empties the promote slot. Dismiss buttons in the picker
