@@ -138,7 +138,8 @@ func TestServicesTemplateRendersBridges(t *testing.T) {
 		"Producer Pal MCP",
 		`status-pill running`,
 		`/bridge/apply?name=producer-pal`,
-		`/bridge/reset?name=producer-pal`,
+		// reset now routes through the blast-radius confirm modal
+		`/partials/blast-radius?action=bridge-reset&name=producer-pal`,
 		`/bridges/apply`,
 		`svc-running-count">1/2 active`,
 	} {

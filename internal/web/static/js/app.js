@@ -572,6 +572,16 @@ document.body.addEventListener('click', e => {
     if (window.showToast) window.showToast({title: 'vault action failed', body: err.message || String(err)});
   });
 });
+// Dismiss the blast-radius confirm modal once its "proceed" action succeeds
+// (the action itself swaps #services-inner; this clears the modal in #blast-slot).
+document.body.addEventListener('htmx:afterRequest', e => {
+  if (!e.detail.successful) return;
+  const verb = (e.detail.requestConfig && e.detail.requestConfig.verb || '').toLowerCase();
+  if (verb === 'post' && e.target.closest && e.target.closest('#blast-slot')) {
+    const slot = document.getElementById('blast-slot');
+    if (slot) slot.innerHTML = '';
+  }
+});
 document.body.addEventListener('htmx:responseError', e => {
   const xhr = e.detail.xhr;
   const verb = (e.detail.requestConfig && e.detail.requestConfig.verb || '').toUpperCase();

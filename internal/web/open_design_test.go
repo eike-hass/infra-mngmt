@@ -445,7 +445,7 @@ func TestServicesTemplateRendersProjectGroupAndCard(t *testing.T) {
 		`<tr class="project-header" data-project="open-design"`,
 		`project-disclosure`,
 		`project-kind-label">compose`,
-		`/decl-container/stop?name=open-design`,
+		`/partials/blast-radius?action=decl-container-stop&name=open-design`, // stop routes through the confirm modal
 		`<tr class="project-member" data-project="open-design"`,
 	} {
 		if !strings.Contains(containers, want) {

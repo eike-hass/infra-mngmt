@@ -355,6 +355,51 @@ func TestHandleDiagnoseNoNeeds(t *testing.T) {
 	}
 }
 
+// ─── GET /partials/blast-radius (confirm modal) ──────────────────────────────
+
+func TestHandleBlastRadiusListsDependents(t *testing.T) {
+	// An MCP depends on service llama@windows; stopping that process should
+	// list the MCP as a dependent in the confirm modal.
+	m := newMockSource("host:/x", entity.GlobalScope())
+	m.addEntity(entity.KindMCPServer, "foo", nil)
+	srv := newServerWithSource(m)
+	srv.depRules = []deps.Rule{{
+		Entity: "mcp:foo", Scope: "*",
+		Needs: []deps.Need{{Kind: "service", Name: "llama", Tier: "windows"}},
+	}}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet,
+		"/partials/blast-radius?action=process-stop&instance=windows&process=llama", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"Stop windows/llama", "proceed",
+		`hx-post="/process/stop?`, "foo"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("blast-radius body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestHandleBlastRadiusUnknownAction(t *testing.T) {
+	srv := newServerWithSource(newMockSource("host:/x", entity.GlobalScope()))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/blast-radius?action=bogus", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestHandleBlastRadiusMissingParams(t *testing.T) {
+	srv := newServerWithSource(newMockSource("host:/x", entity.GlobalScope()))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/blast-radius?action=bridge-reset", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (missing name)", rr.Code)
+	}
+}
+
 // ─── POST /api/entity (write) ───────────────────────────────────────────────
 
 func TestHandleEntityWrite(t *testing.T) {

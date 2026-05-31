@@ -24,6 +24,7 @@ import (
 	"github.com/eike-hass/infra-mngmt/internal/compose"
 	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/entity"
+	"github.com/eike-hass/infra-mngmt/internal/graph"
 	"github.com/eike-hass/infra-mngmt/internal/source"
 )
 
@@ -591,6 +592,56 @@ func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
 	tmpl := parseTemplate("diagnose", "templates/diagnose.html.tmpl")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	renderTmpl(w, tmpl, map[string]any{"Path": path, "Root": path[len(path)-1]})
+}
+
+// handleBlastRadius renders a confirm modal for a destructive action, listing
+// what (transitively) depends on the supplier being taken down: GET
+// /partials/blast-radius?action=<bridge-reset|decl-container-stop|process-stop>
+// &name=…|&instance=…&process=…. The modal's "proceed" button fires the real
+// action; "cancel"/close clear the slot.
+func (s *Server) handleBlastRadius(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var nodeID, label, postURL string
+	switch q.Get("action") {
+	case "bridge-reset":
+		name := q.Get("name")
+		if name == "" {
+			http.Error(w, "missing name", http.StatusBadRequest)
+			return
+		}
+		nodeID, label = graph.BridgeNodeID(name), "Reset bridge "+name
+		postURL = "/bridge/reset?" + url.Values{"name": {name}}.Encode()
+	case "decl-container-stop":
+		name := q.Get("name")
+		if name == "" {
+			http.Error(w, "missing name", http.StatusBadRequest)
+			return
+		}
+		nodeID, label = graph.ContainerNodeID(name), "Stop container "+name
+		postURL = "/decl-container/stop?" + url.Values{"name": {name}}.Encode()
+	case "process-stop":
+		inst, proc := q.Get("instance"), q.Get("process")
+		if inst == "" || proc == "" {
+			http.Error(w, "missing instance/process", http.StatusBadRequest)
+			return
+		}
+		nodeID, label = graph.ServiceNodeID(inst, proc), "Stop "+inst+"/"+proc
+		postURL = "/process/stop?" + url.Values{"instance": {inst}, "process": {proc}}.Encode()
+	default:
+		http.Error(w, "unknown action", http.StatusBadRequest)
+		return
+	}
+	all, _ := s.allEntities(r.Context())
+	g := s.buildDependencyGraph(r.Context(), all)
+	dependents := g.BlastRadius(nodeID)
+	tmpl := parseTemplate("blast_radius", "templates/blast_radius.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	renderTmpl(w, tmpl, map[string]any{
+		"Label":      label,
+		"ActionURL":  postURL,
+		"Dependents": dependents,
+		"Count":      len(dependents),
+	})
 }
 
 func (s *Server) handleEntityPreview(w http.ResponseWriter, r *http.Request) {

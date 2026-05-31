@@ -164,7 +164,8 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Get("/api/entity/content", s.handleEntityContent)
 		r.Post("/api/entity", s.handleEntityWrite)
 		r.Get("/partials/entity", s.handleEntityPreview)
-		r.Get("/partials/diagnose", s.handleDiagnose) // ?id=  root-cause trace for a broken entity
+		r.Get("/partials/diagnose", s.handleDiagnose)        // ?id=  root-cause trace for a broken entity
+		r.Get("/partials/blast-radius", s.handleBlastRadius) // ?action=&…  confirm modal: what a destructive action affects
 		r.Get("/partials/entity-list", s.handleEntityListPartial)
 		r.Get("/partials/promote-picker", s.handlePromotePicker)
 		r.Get("/partials/promote-clear", s.handlePromoteClear)

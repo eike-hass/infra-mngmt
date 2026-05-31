@@ -123,9 +123,8 @@ section refreshes — actions are user-initiated and rare, so the brief
                     title="pause: stop WSL relay + remove Windows portproxy. Smart-skips elevation if Windows side is already inactive; otherwise UAC."
                     hx-confirm="Pause composite {{.Name}}? Removing the Windows portproxy will request elevation if the rule is currently in place.">pause</button>
             <button class="proc-btn stop"
-                    hx-post="/bridge/reset?name={{ .Name | qesc }}"
-                    hx-target="#services-inner" hx-swap="outerHTML"
-                    hx-confirm="Reset composite {{.Name}}? This removes the netsh + firewall rules and will request elevation.">reset</button>
+                    hx-get="/partials/blast-radius?action=bridge-reset&name={{ .Name | qesc }}"
+                    hx-target="#blast-slot" hx-swap="innerHTML">reset</button>
           </div>
         </div>
       </td>
@@ -167,9 +166,8 @@ section refreshes — actions are user-initiated and rare, so the brief
                   title="pause: stop the relay process; reset to fully remove">pause</button>
           {{end}}
           <button class="proc-btn stop"
-                  hx-post="/bridge/reset?name={{ .Name | qesc }}"
-                  hx-target="#services-inner" hx-swap="outerHTML"
-                  hx-confirm="Remove bridge {{.Name}}?">reset</button>
+                  hx-get="/partials/blast-radius?action=bridge-reset&name={{ .Name | qesc }}"
+                  hx-target="#blast-slot" hx-swap="innerHTML">reset</button>
         </div>
       </td>
     </tr>
@@ -224,8 +222,8 @@ section refreshes — actions are user-initiated and rare, so the brief
         <div class="proc-actions">
           {{if eq .StateClass "running"}}
           <button class="proc-btn stop"
-                  hx-post="/decl-container/stop?name={{ .Name | qesc }}"
-                  hx-target="#services-inner" hx-swap="outerHTML">stop</button>
+                  hx-get="/partials/blast-radius?action=decl-container-stop&name={{ .Name | qesc }}"
+                  hx-target="#blast-slot" hx-swap="innerHTML">stop</button>
           {{else}}
           <button class="proc-btn start"
                   hx-post="/decl-container/start?name={{ .Name | qesc }}"
@@ -283,8 +281,8 @@ section refreshes — actions are user-initiated and rare, so the brief
         <div class="proc-actions">
           {{if eq .StateClass "running"}}
           <button class="proc-btn stop"
-                  hx-post="/decl-container/stop?name={{ .Name | qesc }}"
-                  hx-target="#services-inner" hx-swap="outerHTML">stop</button>
+                  hx-get="/partials/blast-radius?action=decl-container-stop&name={{ .Name | qesc }}"
+                  hx-target="#blast-slot" hx-swap="innerHTML">stop</button>
           {{else if .ID}}
           <button class="proc-btn start"
                   hx-post="/decl-container/start?name={{ .Name | qesc }}"
@@ -505,9 +503,9 @@ section refreshes — actions are user-initiated and rare, so the brief
         <div class="proc-actions">
           {{if canStop .Status}}
           <button class="proc-btn stop"
-                  hx-post="/process/stop?instance={{ $instName | qesc }}&process={{ .Name | qesc }}"
-                  hx-target="#services-inner" hx-swap="outerHTML"
-                  title="halt the process and stop the restart loop">stop</button>
+                  hx-get="/partials/blast-radius?action=process-stop&instance={{ $instName | qesc }}&process={{ .Name | qesc }}"
+                  hx-target="#blast-slot" hx-swap="innerHTML"
+                  title="stop the process (shows what depends on it first)">stop</button>
           {{end}}
           {{if canStart .Status}}
           <button class="proc-btn start"

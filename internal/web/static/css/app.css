@@ -591,6 +591,11 @@ body.show-internals tr.proc-internal{display:table-row}
 .diag-health{color:var(--text2);margin-left:auto;font-size:10px}
 .diag-detail{color:var(--text3);font-size:10px}
 .diag-root-note{margin-top:8px;color:var(--text2);font-size:10px}
+/* ── blast-radius confirm (reuses .promote-modal chrome) ── */
+.blast-list{list-style:none;margin:0 0 4px;padding:0;display:flex;flex-direction:column;gap:4px;max-height:40vh;overflow-y:auto}
+.blast-item{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:3px;background:var(--bg3);border-left:2px solid var(--border2);font-size:11px}
+.blast-item.health-down,.blast-item.health-missing{border-left-color:var(--red)}
+.blast-item.health-offline{border-left-color:var(--orange)}
 /* ── vaults section (mcp-fs filesystem MCPs) — flat rows, parent-row disclosure ── */
 .svc-instance.vaults .vault-rows{display:flex;flex-direction:column}
 .vault-row{border-bottom:1px solid var(--border)}

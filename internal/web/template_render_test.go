@@ -25,6 +25,7 @@ var htmlTemplateFiles = map[string]string{
 	"entity_list":             "templates/entity_list.html.tmpl",
 	"preview":                 "templates/preview.html.tmpl",
 	"diagnose":                "templates/diagnose.html.tmpl",
+	"blast_radius":            "templates/blast_radius.html.tmpl",
 	"services":                "templates/services.html.tmpl",
 	"logs":                    "templates/logs.html.tmpl",
 	"llama":                   "templates/llama.html.tmpl",

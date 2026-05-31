@@ -1,0 +1,36 @@
+{{/* Blast-radius confirm modal, rendered into #blast-slot by a destructive
+     action button. "proceed" fires the real action (.ActionURL) and the
+     app.js after-request listener clears the slot; "cancel"/close clear it via
+     /partials/promote-clear. Reuses the promote-modal chrome. */}}
+<div class="promote-modal">
+  <div class="promote-modal-card">
+    <div class="promote-modal-head">
+      <div class="promote-modal-titles">
+        <div class="promote-modal-title">{{.Label}}?</div>
+        <div class="promote-modal-sub">
+          {{if .Count}}this takes down {{.Count}} dependent{{if ne .Count 1}}s{{end}}{{else}}nothing depends on this{{end}}
+        </div>
+      </div>
+      <button class="promote-close" hx-get="/partials/promote-clear" hx-target="#blast-slot" hx-swap="innerHTML" aria-label="close">×</button>
+    </div>
+    <div class="promote-modal-body">
+      {{if .Count}}
+      <ul class="blast-list">
+        {{range .Dependents}}
+        <li class="blast-item health-{{.Health}}">
+          <span class="diag-kind">{{.Kind}}</span>
+          <span class="diag-label">{{.Label}}</span>
+          <span class="diag-health">{{.Health}}</span>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}
+      <p class="promote-result-prompt">Nothing in the dependency graph points at this — safe to proceed.</p>
+      {{end}}
+      <div class="promote-result-actions">
+        <button class="promote-cancel" hx-get="/partials/promote-clear" hx-target="#blast-slot" hx-swap="innerHTML">cancel</button>
+        <button class="promote-confirm" hx-post="{{.ActionURL}}" hx-target="#services-inner" hx-swap="outerHTML">proceed</button>
+      </div>
+    </div>
+  </div>
+</div>

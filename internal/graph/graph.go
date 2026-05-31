@@ -348,6 +348,12 @@ func (g *Graph) DiagnoseEntity(entityID string) []*Node {
 	return g.Diagnose(entityNodeID(entityID))
 }
 
+// Exported node-ID builders so callers (the web layer) can address supplier
+// nodes for BlastRadius without knowing the internal scheme.
+func ServiceNodeID(instance, name string) string { return serviceID(instance, name) }
+func BridgeNodeID(name string) string            { return bridgeID(name) }
+func ContainerNodeID(name string) string         { return containerID(name) }
+
 // BlastRadius returns every node that (transitively) depends on id, via the
 // reverse edges. Order is breadth-first from id; id itself is excluded.
 func (g *Graph) BlastRadius(id string) []*Node {
