@@ -12,6 +12,13 @@
   {{if eq $s.State "error"}}
   <div class="broken-ref-banner" style="background:#2a1212;border-color:#5a1818;color:var(--red)">✖ backing process <strong>{{$s.Instance}}/{{$s.Process}}</strong> is in error state</div>
   {{end}}
+  {{if eq $s.State "offline"}}
+  <div class="broken-ref-banner">⚠ backing tier unreachable — can't tell if this is running until process-compose responds</div>
+  {{end}}
+  {{if or (eq $s.State "unresolved") (eq $s.State "stopped") (eq $s.State "error") (eq $s.State "offline")}}
+  <button class="diag-why-btn" hx-get="/partials/diagnose?id={{ $e.ID | qesc }}" hx-target="#diag-slot" hx-swap="innerHTML">why?</button>
+  <div id="diag-slot"></div>
+  {{end}}
 {{end}}
 <div class="preview-header">
   <div class="preview-name-row">

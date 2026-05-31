@@ -1,0 +1,20 @@
+{{/* Root-cause trace for a broken entity: entity → … → root cause. Rendered
+     into #diag-slot by the preview's "why?" button. .Path is []*graph.Node
+     (consumer → supplier order); .Root is the last (deepest unhealthy) node. */}}
+<div class="diag-trace">
+  <div class="diag-trace-head">why is this broken?</div>
+  <ol class="diag-chain">
+    {{range $n := .Path}}
+    <li class="diag-node health-{{$n.Health}}{{if eq $n.ID $.Root.ID}} diag-root{{end}}">
+      <span class="diag-kind">{{$n.Kind}}</span>
+      <span class="diag-label">{{$n.Label}}</span>
+      <span class="diag-health">{{$n.Health}}</span>
+      {{if $n.Detail}}<span class="diag-detail">{{$n.Detail}}</span>{{end}}
+    </li>
+    {{end}}
+  </ol>
+  <div class="diag-root-note">
+    root cause: <strong>{{.Root.Kind}} {{.Root.Label}}</strong>
+    ({{.Root.Health}}{{if .Root.Detail}} — {{.Root.Detail}}{{end}})
+  </div>
+</div>

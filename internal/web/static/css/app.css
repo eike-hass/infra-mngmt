@@ -577,6 +577,20 @@ body.show-internals tr.proc-internal{display:table-row}
 
 /* ── broken-ref indicator in preview ── */
 .broken-ref-banner{background:var(--pill-amber);border:1px solid #5a3a18;border-radius:4px;color:var(--orange);padding:8px 12px;margin-bottom:12px;font-size:11px}
+/* ── diagnosis (root-cause trace) ── */
+.diag-why-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:2px 9px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;margin-bottom:8px;transition:all var(--dur-fast) var(--ease-out)}
+.diag-why-btn:hover{border-color:var(--orange);color:var(--orange)}
+.diag-trace{background:var(--card-bg-2);border:1px solid var(--border);border-radius:4px;padding:10px 12px;margin-bottom:12px;font-size:11px}
+.diag-trace-head{color:var(--text2);font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.diag-chain{list-style:none;display:flex;flex-direction:column;gap:4px;margin:0;padding:0}
+.diag-node{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:3px;border-left:2px solid var(--border2);background:var(--bg3)}
+.diag-node.diag-root{border-left-color:var(--red);background:var(--pill-error)}
+.diag-node.health-offline.diag-root{border-left-color:var(--orange);background:var(--pill-amber)}
+.diag-kind{color:var(--text3);font-size:9px;text-transform:uppercase;letter-spacing:.04em;min-width:64px}
+.diag-label{color:var(--white);font-weight:500}
+.diag-health{color:var(--text2);margin-left:auto;font-size:10px}
+.diag-detail{color:var(--text3);font-size:10px}
+.diag-root-note{margin-top:8px;color:var(--text2);font-size:10px}
 /* ── vaults section (mcp-fs filesystem MCPs) — flat rows, parent-row disclosure ── */
 .svc-instance.vaults .vault-rows{display:flex;flex-direction:column}
 .vault-row{border-bottom:1px solid var(--border)}

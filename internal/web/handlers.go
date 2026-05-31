@@ -570,6 +570,29 @@ func (s *Server) handleEntityListPartial(w http.ResponseWriter, r *http.Request)
 }
 
 // handleEntityPreview returns the preview pane HTML fragment (HTMX target).
+// handleDiagnose renders the root-cause trace for a (broken) entity:
+// GET /partials/diagnose?id=<entityID>. It builds the dependency graph live
+// and walks from the entity to the deepest unhealthy supplier. Lazy-loaded by
+// the "why?" affordance in the preview.
+func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	all, _ := s.allEntities(r.Context())
+	g := s.buildDependencyGraph(r.Context(), all)
+	path := g.DiagnoseEntity(id)
+	if len(path) == 0 {
+		// No graphed needs for this entity (nothing to diagnose).
+		http.NotFound(w, r)
+		return
+	}
+	tmpl := parseTemplate("diagnose", "templates/diagnose.html.tmpl")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	renderTmpl(w, tmpl, map[string]any{"Path": path, "Root": path[len(path)-1]})
+}
+
 func (s *Server) handleEntityPreview(w http.ResponseWriter, r *http.Request) {
 	rawID := r.URL.Query().Get("id")
 	if rawID == "" {

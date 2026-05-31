@@ -342,6 +342,12 @@ func (g *Graph) Diagnose(id string) []*Node {
 	return path
 }
 
+// DiagnoseEntity is Diagnose for an entity addressed by its entity ID, so
+// callers (the web layer) don't need to know the node-ID scheme.
+func (g *Graph) DiagnoseEntity(entityID string) []*Node {
+	return g.Diagnose(entityNodeID(entityID))
+}
+
 // BlastRadius returns every node that (transitively) depends on id, via the
 // reverse edges. Order is breadth-first from id; id itself is excluded.
 func (g *Graph) BlastRadius(id string) []*Node {

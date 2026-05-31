@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eike-hass/infra-mngmt/internal/deps"
 	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/entity"
 	"github.com/eike-hass/infra-mngmt/internal/source"
@@ -304,6 +305,52 @@ func TestHandleEntityContentNotFound(t *testing.T) {
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/entity/content?id=nope", nil))
 	if rr.Code != 404 {
+		t.Errorf("status = %d, want 404", rr.Code)
+	}
+}
+
+// ─── GET /partials/diagnose (root-cause trace) ───────────────────────────────
+
+func TestHandleDiagnoseTracesRootCause(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	e := m.addEntity(entity.KindMCPServer, "foo", nil)
+	srv := newServerWithSource(m)
+	// Rule binds the MCP to a service; with no compose instance up, it resolves
+	// offline → the trace should reach the service supplier as the root cause.
+	srv.depRules = []deps.Rule{{
+		Entity: "mcp:foo", Scope: "*",
+		Needs: []deps.Need{{Kind: "service", Name: "llama", Tier: "windows"}},
+	}}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/diagnose?id="+e.ID, nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"why is this broken", "llama", "root cause"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("diagnose body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestHandleDiagnoseMissingID(t *testing.T) {
+	srv := newServerWithSource(newMockSource("host:/x", entity.GlobalScope()))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/diagnose", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+// An entity with no graphed needs has nothing to diagnose → 404.
+func TestHandleDiagnoseNoNeeds(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	e := m.addEntity(entity.KindSkill, "lonely", nil) // no rule, not an MCP → no needs
+	srv := newServerWithSource(m)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/partials/diagnose?id="+e.ID, nil))
+	if rr.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rr.Code)
 	}
 }

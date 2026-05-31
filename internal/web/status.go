@@ -42,69 +42,16 @@ func (s *Server) resolveMCPStatuses(ctx context.Context, entities []entity.Entit
 		return nil
 	}
 
-	var (
-		mu             sync.Mutex
-		procs          []graph.ProcInfo
-		anyOnline      bool
-		containerInfos []graph.ContainerInfo
-		wg             sync.WaitGroup
-	)
-
-	for _, c := range s.compose {
-		c := c
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			cctx, cancel := context.WithTimeout(ctx, composeProbeTimeout)
-			defer cancel()
-			if !c.Ping(cctx) {
-				return
-			}
-			mu.Lock()
+	in := s.gatherStatusInputs(ctx)
+	anyOnline := false
+	for _, up := range in.instanceUp {
+		if up {
 			anyOnline = true
-			mu.Unlock()
-			ps, err := c.Processes(cctx)
-			if err != nil {
-				return
-			}
-			local := make([]graph.ProcInfo, 0, len(ps))
-			for _, p := range ps {
-				local = append(local, graph.ProcInfo{
-					Instance: c.Name(),
-					Name:     p.Name,
-					CSSState: statusClass(p.Status),
-				})
-			}
-			mu.Lock()
-			procs = append(procs, local...)
-			mu.Unlock()
-		}()
+			break
+		}
 	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cctx, cancel := context.WithTimeout(ctx, containerProbeTimeout)
-		defer cancel()
-		ci := s.snapshotContainers(cctx)
-		mu.Lock()
-		containerInfos = ci
-		mu.Unlock()
-	}()
-
-	wg.Wait()
-
-	// Stable order so downstream resolver behavior is reproducible regardless
-	// of goroutine scheduling. graph.Resolve's matchers are exact-name, so
-	// order doesn't change correctness — only test determinism.
-	sort.Slice(procs, func(i, j int) bool {
-		if procs[i].Instance != procs[j].Instance {
-			return procs[i].Instance < procs[j].Instance
-		}
-		return procs[i].Name < procs[j].Name
-	})
-
-	resolved := graph.Resolve(entities, procs, s.bridges, containerInfos, s.depRules, anyOnline)
+	resolved := graph.Resolve(entities, in.procs, s.bridges, in.containers, s.depRules, anyOnline)
 	result := make(map[string]*MCPStatus, len(resolved))
 	for _, er := range resolved {
 		// Skip entities with no needs and no fallback — leaving them out of
@@ -161,4 +108,93 @@ func entityRefsCSSState(er graph.EntityRefs, rep graph.Ref) string {
 	default:
 		return "unknown"
 	}
+}
+
+// statusInputs is the observed runtime state gathered once per status cycle:
+// the union of process-compose processes, container snapshots, and per-instance
+// reachability. Shared by resolveMCPStatuses (badges) and buildDependencyGraph.
+type statusInputs struct {
+	procs      []graph.ProcInfo
+	containers []graph.ContainerInfo
+	instanceUp map[string]bool // compose instance name → pinged reachable this cycle
+}
+
+// gatherStatusInputs probes every compose instance (ping + process list) and
+// the Docker daemon in parallel, each under its own timeout, and returns the
+// combined observed state. instanceUp records reachability per instance (seeded
+// false, set true on a successful ping) so an offline tier is attributable.
+func (s *Server) gatherStatusInputs(ctx context.Context) statusInputs {
+	var (
+		mu             sync.Mutex
+		procs          []graph.ProcInfo
+		containerInfos []graph.ContainerInfo
+		wg             sync.WaitGroup
+	)
+	instanceUp := make(map[string]bool, len(s.compose))
+	for _, c := range s.compose {
+		instanceUp[c.Name()] = false // set true on successful ping below
+	}
+
+	for _, c := range s.compose {
+		c := c
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cctx, cancel := context.WithTimeout(ctx, composeProbeTimeout)
+			defer cancel()
+			if !c.Ping(cctx) {
+				return
+			}
+			mu.Lock()
+			instanceUp[c.Name()] = true
+			mu.Unlock()
+			ps, err := c.Processes(cctx)
+			if err != nil {
+				return
+			}
+			local := make([]graph.ProcInfo, 0, len(ps))
+			for _, p := range ps {
+				local = append(local, graph.ProcInfo{
+					Instance: c.Name(),
+					Name:     p.Name,
+					CSSState: statusClass(p.Status),
+				})
+			}
+			mu.Lock()
+			procs = append(procs, local...)
+			mu.Unlock()
+		}()
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cctx, cancel := context.WithTimeout(ctx, containerProbeTimeout)
+		defer cancel()
+		ci := s.snapshotContainers(cctx)
+		mu.Lock()
+		containerInfos = ci
+		mu.Unlock()
+	}()
+
+	wg.Wait()
+
+	// Stable order so downstream resolution is reproducible regardless of
+	// goroutine scheduling (matchers are exact-name, so this is only for
+	// determinism).
+	sort.Slice(procs, func(i, j int) bool {
+		if procs[i].Instance != procs[j].Instance {
+			return procs[i].Instance < procs[j].Instance
+		}
+		return procs[i].Name < procs[j].Name
+	})
+	return statusInputs{procs: procs, containers: containerInfos, instanceUp: instanceUp}
+}
+
+// buildDependencyGraph gathers current status and assembles the dependency
+// graph for diagnosis / blast-radius. Probes on demand (not cached) so a
+// user-initiated "why?" always reflects live state.
+func (s *Server) buildDependencyGraph(ctx context.Context, entities []entity.Entity) *graph.Graph {
+	in := s.gatherStatusInputs(ctx)
+	return graph.BuildGraph(entities, in.procs, s.bridges, in.containers, s.depRules, in.instanceUp)
 }
