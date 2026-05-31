@@ -39,7 +39,10 @@ function openLogStream(id) {
   if (_logEventSource) _logEventSource.close();
   _logContainerId = id;
   const panel = document.getElementById('ov-log-panel');
-  panel.innerHTML = '<div class="ctr-log-wrap"><div class="ctr-log-bar">container events<button class="ctr-log-close" onclick="closeLogStream()">×</button></div><div class="ctr-event-list" id="ctr-event-list"></div></div>';
+  // No inline onclick — CSP is script-src 'self' (no unsafe-inline), so an
+  // onclick attribute would silently no-op. The close button is wired via the
+  // delegated .ctr-log-close listener below.
+  panel.innerHTML = '<div class="ctr-log-wrap"><div class="ctr-log-bar">container events<button class="ctr-log-close" aria-label="close">×</button></div><div class="ctr-event-list" id="ctr-event-list"></div></div>';
   panel.style.display = '';
 
   _logEventSource = new EventSource('/api/container/events-stream?id='+encodeURIComponent(id));
@@ -79,12 +82,12 @@ function closeLogStream() {
   refreshControls();
 }
 
-// HTMX response-error listener: toast when a container action returns 5xx.
-document.addEventListener('htmx:responseError', (e) => {
-  const path = e.detail?.pathInfo?.requestPath || '';
-  if (!path.startsWith('/api/container/')) return;
-  const body = (e.detail?.xhr?.responseText || '').trim();
-  window.showToast({title: 'container action failed', body: body || ('HTTP ' + e.detail.xhr.status)});
+// Note: the htmx:responseError toast for /api/container/* failures lives in
+// app.js's single consolidated listener (avoids double-toasting). Close button
+// for the event-log panel is wired by delegation since its markup is injected
+// via innerHTML and CSP forbids inline onclick handlers.
+document.body.addEventListener('click', e => {
+  if (e.target.closest('.ctr-log-close')) closeLogStream();
 });
 
 // Initial controls render — depends on app.js having set window.activeProject.

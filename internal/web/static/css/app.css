@@ -831,6 +831,7 @@ body.show-internals tr.proc-internal{display:table-row}
 .toast{background:var(--card-bg);border:1px solid var(--red);border-left:3px solid var(--red);color:var(--text);padding:10px 36px 10px 12px;border-radius:4px;font-size:11px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.4);position:relative;pointer-events:auto;opacity:0;transform:translateY(8px);transition:opacity var(--dur-base),transform var(--dur-base);word-break:break-word;max-width:100%}
 .toast.show{opacity:1;transform:translateY(0)}
 .toast.info{border-color:var(--accent);border-left-color:var(--accent)}
+.toast.ok{border-color:var(--green);border-left-color:var(--green)}
 .toast .toast-title{color:var(--white);font-weight:600;margin-bottom:2px;font-size:11px}
 .toast .toast-body{color:var(--text2);white-space:pre-wrap}
 .toast .toast-close{position:absolute;top:6px;right:8px;background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;line-height:1;padding:0;font-family:inherit}

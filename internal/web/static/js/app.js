@@ -61,16 +61,19 @@ function applyFilters() {
 // ephemeral and gets reset on the next tab switch.
 const COLLAPSED_KEY = 'infra-mngmt:groups-collapsed';
 
-function readCollapsedSet() {
-  try {
-    const raw = localStorage.getItem(COLLAPSED_KEY);
-    return new Set(raw ? JSON.parse(raw) : []);
-  } catch (_) { return new Set(); }
+// loadSet/saveSet — shared localStorage<->Set persistence used by the
+// kind-group, bridge-composite, llama-logs, and llama-collapsed features.
+// Both swallow storage/parse errors so a corrupt value never breaks the UI.
+function loadSet(key) {
+  try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); }
+  catch (_) { return new Set(); }
+}
+function saveSet(key, set) {
+  try { localStorage.setItem(key, JSON.stringify([...set])); } catch (_) {}
 }
 
-function writeCollapsedSet(set) {
-  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set])); } catch (_) {}
-}
+function readCollapsedSet() { return loadSet(COLLAPSED_KEY); }
+function writeCollapsedSet(set) { saveSet(COLLAPSED_KEY, set); }
 
 function applyCollapsedStateForAllView() {
   const collapsed = readCollapsedSet();
@@ -105,13 +108,13 @@ function setCompositeExpanded(name, expanded) {
   });
   // Persist preference per-composite.
   const key = 'im_composite_expanded';
-  const set = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  const set = loadSet(key);
   if (expanded) set.add(name); else set.delete(name);
-  localStorage.setItem(key, JSON.stringify([...set]));
+  saveSet(key, set);
 }
 function reapplyCompositeExpansion() {
   const key = 'im_composite_expanded';
-  const set = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  const set = loadSet(key);
   document.querySelectorAll('tr.bridge-composite[data-composite]').forEach(row => {
     const name = row.getAttribute('data-composite');
     if (set.has(name)) setCompositeExpanded(name, true);
@@ -151,16 +154,12 @@ const LLAMA_LOGS_OPEN_KEY = 'im_llama_logs_open';
 function onLlamaLogsToggle(el) {
   const key = el.getAttribute('data-llama-logs-key');
   if (!key) return;
-  let set;
-  try { set = new Set(JSON.parse(localStorage.getItem(LLAMA_LOGS_OPEN_KEY) || '[]')); }
-  catch (_) { set = new Set(); }
+  const set = loadSet(LLAMA_LOGS_OPEN_KEY);
   if (el.open) set.add(key); else set.delete(key);
-  try { localStorage.setItem(LLAMA_LOGS_OPEN_KEY, JSON.stringify([...set])); } catch (_) {}
+  saveSet(LLAMA_LOGS_OPEN_KEY, set);
 }
 function applyLlamaLogsOpenFromStorage() {
-  let set;
-  try { set = new Set(JSON.parse(localStorage.getItem(LLAMA_LOGS_OPEN_KEY) || '[]')); }
-  catch (_) { return; }
+  const set = loadSet(LLAMA_LOGS_OPEN_KEY);
   document.querySelectorAll('details.llama-logs-section[data-llama-logs-key]').forEach(d => {
     if (set.has(d.getAttribute('data-llama-logs-key'))) d.open = true;
   });
@@ -170,14 +169,8 @@ function applyLlamaLogsOpenFromStorage() {
 // Persisted per card key (instance|process) in localStorage.
 const LLAMA_COLLAPSED_KEY = 'im_llama_collapsed';
 
-function readLlamaCollapsedSet() {
-  try { return new Set(JSON.parse(localStorage.getItem(LLAMA_COLLAPSED_KEY) || '[]')); }
-  catch (_) { return new Set(); }
-}
-
-function writeLlamaCollapsedSet(set) {
-  try { localStorage.setItem(LLAMA_COLLAPSED_KEY, JSON.stringify([...set])); } catch (_) {}
-}
+function readLlamaCollapsedSet() { return loadSet(LLAMA_COLLAPSED_KEY); }
+function writeLlamaCollapsedSet(set) { saveSet(LLAMA_COLLAPSED_KEY, set); }
 
 function applyLlamaCollapsedFromStorage() {
   const collapsed = readLlamaCollapsedSet();
@@ -373,7 +366,7 @@ async function doRescan(e) {
   try {
     const r = await fetch('/api/sources/rescan', {method:'POST'});
     if (!r.ok) {
-      showRescanToast('rescan failed: HTTP ' + r.status, 'error');
+      showToast({title: 'rescan failed', body: 'HTTP ' + r.status});
       return;
     }
     const body = await r.json();
@@ -383,43 +376,25 @@ async function doRescan(e) {
       // Refresh the entity list so the new sources actually render. Pass a
       // synthetic event because doRefresh() calls e.stopPropagation().
       await doRefresh({stopPropagation:()=>{}});
-      showRescanToast('added ' + added + ' new source' + (added===1?'':'s') + ': ' + body.added.join(', '), 'ok');
+      showToast({title: 'rescan complete', body: 'added ' + added + ' new source' + (added===1?'':'s') + ': ' + body.added.join(', '), kind: 'ok'});
     } else {
       // Surface what was actually scanned so the user can debug "why didn't
       // my new project show up?". The list is the universe of sources
       // discovery currently sees; if their new project isn't there, the
       // problem is upstream (no .claude/, no devcontainer label, not in a
       // scanned workspace dir, etc.).
-      showRescanToast(
-        'no new sources (scanned ' + discovered + '): ' + (body.discovered || []).join(', '),
-        'info'
-      );
+      showToast({
+        title: 'rescan complete',
+        body: 'no new sources (scanned ' + discovered + '): ' + (body.discovered || []).join(', '),
+        kind: 'info',
+      });
     }
   } catch (err) {
-    showRescanToast('rescan error: ' + err, 'error');
+    showToast({title: 'rescan error', body: String(err)});
   } finally {
     btn.classList.remove('spinning');
     btn.disabled = false;
   }
-}
-
-function showRescanToast(msg, kind) {
-  let host = document.getElementById('rescan-toast-host');
-  if (!host) {
-    host = document.createElement('div');
-    host.id = 'rescan-toast-host';
-    host.style.cssText = 'position:fixed;top:54px;right:14px;z-index:9999;display:flex;flex-direction:column;gap:6px;max-width:520px';
-    document.body.appendChild(host);
-  }
-  const t = document.createElement('div');
-  const palette = kind === 'ok'    ? 'background:#11201a;border:1px solid #1d4d3c;color:#7ddca7'
-                : kind === 'error' ? 'background:#2a1212;border:1px solid #5a1818;color:#e06c6c'
-                :                    'background:#16161b;border:1px solid #2a2a2a;color:#c9c9c9';
-  t.style.cssText = palette + ';padding:8px 12px;border-radius:4px;font-size:11px;font-family:ui-monospace,monospace;line-height:1.5;word-break:break-all;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .2s';
-  t.textContent = msg;
-  t.onclick = () => t.remove();
-  host.appendChild(t);
-  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 8000);
 }
 
 async function doRefresh(e) {
@@ -431,12 +406,12 @@ async function doRefresh(e) {
   try {
     const refreshResp = await fetch('/api/refresh', {method:'POST'});
     if (!refreshResp.ok) {
-      showRescanToast('refresh failed: HTTP ' + refreshResp.status, 'error');
+      showToast({title: 'refresh failed', body: 'HTTP ' + refreshResp.status});
       return;
     }
     const listResp = await fetch('/partials/entity-list');
     if (!listResp.ok) {
-      showRescanToast('refresh failed: HTTP ' + listResp.status, 'error');
+      showToast({title: 'refresh failed', body: 'HTTP ' + listResp.status});
       return;
     }
     const html = await listResp.text();
@@ -522,7 +497,7 @@ function showToast({title, body, kind='error', timeout=8000}) {
   const stack = document.getElementById('toast-stack');
   if (!stack) return;
   const t = document.createElement('div');
-  t.className = 'toast' + (kind === 'info' ? ' info' : '');
+  t.className = 'toast' + (kind === 'info' ? ' info' : kind === 'ok' ? ' ok' : '');
   const close = document.createElement('button');
   close.className = 'toast-close';
   close.setAttribute('aria-label', 'dismiss');
@@ -600,10 +575,20 @@ document.body.addEventListener('click', e => {
 document.body.addEventListener('htmx:responseError', e => {
   const xhr = e.detail.xhr;
   const verb = (e.detail.requestConfig && e.detail.requestConfig.verb || '').toUpperCase();
-  const path = (e.detail.requestConfig && e.detail.requestConfig.path) || '';
+  // pathInfo.requestPath is set for hx-* requests; requestConfig.path is the
+  // fallback. Compute from both so routing works regardless of htmx version.
+  const path = (e.detail.pathInfo && e.detail.pathInfo.requestPath) ||
+               (e.detail.requestConfig && e.detail.requestConfig.path) || '';
   const text = (xhr.responseText || xhr.statusText || 'request failed').trim();
   // Trim absurdly long bodies; full detail is in the server journal.
   const body = text.length > 400 ? text.slice(0, 400) + '…' : text;
+  // Container actions get a friendlier title. This branch was formerly a
+  // separate listener in containers.js; consolidated here so a /api/container/*
+  // failure toasts once, not twice.
+  if (path.startsWith('/api/container/')) {
+    showToast({title: 'container action failed', body: body || ('HTTP ' + xhr.status)});
+    return;
+  }
   showToast({
     title: xhr.status + ' ' + (verb ? verb + ' ' : '') + path,
     body: body,
