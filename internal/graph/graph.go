@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -77,7 +78,39 @@ type Node struct {
 	Kind   NodeKind
 	Label  string // human-facing short label
 	Health Health
-	Detail string // optional one-liner, e.g. "stopped", "tier unreachable"
+	Detail string // optional one-liner, e.g. "stopped", "tier unreachable". For entity nodes: the entity kind (mcp_server, skill, …).
+	Sub    string // optional secondary label. For entity nodes: the scope/project the entity lives in ("global" or the repo name).
+}
+
+// IsEntity reports whether this node is a Claude Code entity (vs a supplier:
+// service, bridge, container, or instance).
+func (n *Node) IsEntity() bool { return n.Kind == NodeEntity }
+
+// TypeLabel is the type chip shown in diagnosis / blast-radius. For an entity it
+// is the specific entity kind (mcp_server, skill, …, carried in Detail) rather
+// than the generic structural kind "entity"; for a supplier it is the node kind.
+func (n *Node) TypeLabel() string {
+	if n.IsEntity() && n.Detail != "" {
+		return n.Detail
+	}
+	return string(n.Kind)
+}
+
+// scopeLabel renders an entity's scope as a short project name for display:
+// "global" for the host scope, otherwise the repo directory name (the basename
+// of the repo root). Falls back to the full path if no usable basename.
+func scopeLabel(s entity.Scope) string {
+	if s.Global {
+		return "global"
+	}
+	if s.Project == "" {
+		return ""
+	}
+	base := filepath.Base(s.Project)
+	if base == "." || base == "/" || base == "" {
+		return s.Project
+	}
+	return base
 }
 
 // Graph is a directed dependency graph: out edges point consumer → supplier
@@ -230,6 +263,7 @@ func BuildGraph(
 		en := g.ensure(&Node{
 			ID: entityNodeID(e.ID), Kind: NodeEntity, Label: e.Name,
 			Health: healthFromRefState(er.State), Detail: string(e.Kind),
+			Sub: scopeLabel(e.Scope),
 		})
 		for _, r := range er.Refs {
 			g.edge(en.ID, g.supplierNodeFor(r, instanceUp).ID)

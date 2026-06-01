@@ -18,8 +18,9 @@
       <ul class="blast-list">
         {{range .Dependents}}
         <li class="blast-item health-{{.Health}}">
-          <span class="diag-kind">{{.Kind}}</span>
+          <span class="diag-kind">{{.TypeLabel}}</span>
           <span class="diag-label">{{.Label}}</span>
+          {{if .Sub}}<span class="diag-scope" title="scope">{{.Sub}}</span>{{end}}
           <span class="diag-health">{{.Health}}</span>
         </li>
         {{end}}

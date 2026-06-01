@@ -380,7 +380,10 @@ func TestHandleBlastRadiusListsDependents(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{"Stop windows/llama", "proceed",
-		`hx-post="/process/stop?`, "foo"} {
+		`hx-post="/process/stop?`, "foo",
+		"mcp_server", // dependent shows its real entity kind, not the bare "entity"
+		"global",     // …and its scope/project, so you know which one
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("blast-radius body missing %q:\n%s", want, body)
 		}

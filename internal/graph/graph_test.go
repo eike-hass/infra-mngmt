@@ -72,6 +72,62 @@ func TestDiagnose_HealthyEntityTerminatesAtItself(t *testing.T) {
 	}
 }
 
+// Entity nodes carry their entity kind (not the bare structural "entity") and
+// their project scope, so a blast-radius dependent reads "skill deploy · my-repo"
+// — telling you which project a destructive action would break, not just that
+// "an entity" depends on it.
+func TestEntityNodeCarriesKindAndProjectScope(t *testing.T) {
+	projEnt := skill("deploy", entity.ProjectScope("/home/u/repos/my-repo"))
+	globalEnt := ent("g1", "foo") // global mcp_server named "foo"
+
+	rules := []deps.Rule{
+		{Entity: "skill:deploy", Scope: "project:*", Needs: []deps.Need{{Kind: "service", Name: "live", Tier: "wsl"}}},
+		rule("foo", deps.Need{Kind: "service", Name: "live", Tier: "wsl"}),
+	}
+	procs := []ProcInfo{{Instance: "wsl", Name: "live", CSSState: "running"}}
+	g := BuildGraph([]entity.Entity{projEnt, globalEnt}, procs, nil, nil, rules, map[string]bool{"wsl": true})
+
+	pn := g.Node(entityNodeID(projEnt.ID))
+	if pn == nil {
+		t.Fatal("project entity node was not created")
+	}
+	if pn.Sub != "my-repo" {
+		t.Errorf("project node Sub = %q, want repo name %q", pn.Sub, "my-repo")
+	}
+	if got := pn.TypeLabel(); got != string(entity.KindSkill) {
+		t.Errorf("project node TypeLabel = %q, want entity kind %q (not structural %q)", got, entity.KindSkill, NodeEntity)
+	}
+
+	gn := g.Node(entityNodeID(globalEnt.ID))
+	if gn == nil {
+		t.Fatal("global entity node was not created")
+	}
+	if gn.Sub != "global" {
+		t.Errorf("global node Sub = %q, want %q", gn.Sub, "global")
+	}
+}
+
+// scopeLabel renders an entity scope as a short, display-ready project name.
+func TestScopeLabel(t *testing.T) {
+	cases := []struct {
+		name  string
+		scope entity.Scope
+		want  string
+	}{
+		{"global", entity.GlobalScope(), "global"},
+		{"project repo basename", entity.ProjectScope("/home/u/repos/infra-mngmt"), "infra-mngmt"},
+		{"project trailing slash", entity.ProjectScope("/home/u/repos/app/"), "app"},
+		{"empty project", entity.Scope{}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := scopeLabel(c.scope); got != c.want {
+				t.Errorf("scopeLabel(%+v) = %q, want %q", c.scope, got, c.want)
+			}
+		})
+	}
+}
+
 // Blast radius: stopping the Windows tier affects the service that runs on it
 // and the entity that needs that service.
 func TestBlastRadius_TierAffectsServiceAndEntity(t *testing.T) {
