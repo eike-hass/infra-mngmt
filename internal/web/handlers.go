@@ -26,6 +26,7 @@ import (
 	"github.com/eike-hass/infra-mngmt/internal/entity"
 	"github.com/eike-hass/infra-mngmt/internal/graph"
 	"github.com/eike-hass/infra-mngmt/internal/source"
+	"golang.org/x/sync/singleflight"
 )
 
 var validName = regexp.MustCompile(`^[a-zA-Z0-9_\-]{1,128}$`)
@@ -738,6 +739,7 @@ type entityCacheEntry struct {
 	mu      sync.RWMutex
 	entries []entity.Entity
 	fetchAt time.Time
+	group   singleflight.Group // collapses concurrent cold-cache scans into one
 }
 
 func (s *Server) invalidateEntityCache() {
@@ -1433,15 +1435,54 @@ func sseEscape(s string) string {
 // to avoid spinning up Docker sidecars on every HTTP request. Sources are
 // fetched in parallel so latency = slowest single source, not their sum.
 func (s *Server) allEntities(ctx context.Context) ([]entity.Entity, error) {
-	s.entityCache.mu.RLock()
-	if len(s.entityCache.entries) > 0 && time.Since(s.entityCache.fetchAt) < entityCacheTTL {
-		out := s.entityCache.entries
-		s.entityCache.mu.RUnlock()
-		return out, nil
+	if ents, ok := s.cachedEntities(); ok {
+		return ents, nil
 	}
-	s.entityCache.mu.RUnlock()
 
-	// Fetch all sources concurrently.
+	// Collapse concurrent cache-misses into a single scan. Each scan can spin
+	// up a Docker volume sidecar per volume, so N simultaneous cold scans (the
+	// first request burst after a restart, or after the TTL lapses) multiply
+	// container-create load on the daemon until requests time out — the
+	// "webview hangs under load" symptom. singleflight makes the other callers
+	// wait for and share the one in-flight scan instead of each launching their
+	// own. The key is constant: there is only ever one logical "all sources"
+	// scan in flight.
+	v, err, _ := s.entityCache.group.Do("all", func() (any, error) {
+		// A scan that completed while we were queued behind the leader already
+		// refreshed the cache — don't rescan on its heels.
+		if ents, ok := s.cachedEntities(); ok {
+			return ents, nil
+		}
+		all := s.scanAllSources(ctx)
+		s.entityCache.mu.Lock()
+		s.entityCache.entries = all
+		s.entityCache.fetchAt = time.Now()
+		s.entityCache.mu.Unlock()
+		return all, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]entity.Entity), nil
+}
+
+// cachedEntities returns the cached entity slice when present and within TTL.
+// The returned slice is the shared cache backing array — callers must treat it
+// as read-only (the existing contract; the resolver and templates only read).
+func (s *Server) cachedEntities() ([]entity.Entity, bool) {
+	s.entityCache.mu.RLock()
+	defer s.entityCache.mu.RUnlock()
+	if len(s.entityCache.entries) > 0 && time.Since(s.entityCache.fetchAt) < entityCacheTTL {
+		return s.entityCache.entries, true
+	}
+	return nil, false
+}
+
+// scanAllSources fetches entities from every source concurrently and flattens
+// the successful results. A source error is dropped rather than failing the
+// whole list — one dead source (e.g. an unreachable volume) shouldn't blank
+// every entity.
+func (s *Server) scanAllSources(ctx context.Context) []entity.Entity {
 	type result struct {
 		entities []entity.Entity
 		err      error
@@ -1465,13 +1506,25 @@ func (s *Server) allEntities(ctx context.Context) ([]entity.Entity, error) {
 			all = append(all, r.entities...)
 		}
 	}
+	return all
+}
 
-	s.entityCache.mu.Lock()
-	s.entityCache.entries = all
-	s.entityCache.fetchAt = time.Now()
-	s.entityCache.mu.Unlock()
-
-	return all, nil
+// WarmEntityCache populates the entity cache up front so the first real request
+// doesn't pay the cold-scan cost — a cold scan spins up a Docker volume sidecar
+// per volume and can take several seconds, which is the multi-second first-load
+// users saw after every restart. Intended to run in a background goroutine at
+// startup; a failure just means the first request scans as it did before, so
+// errors are logged, not fatal.
+func (s *Server) WarmEntityCache() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	ents, err := s.allEntities(ctx)
+	if err != nil {
+		log.Printf("entity cache warm: %v", err)
+		return
+	}
+	log.Printf("entity cache warmed: %d entities in %s", len(ents), time.Since(start).Round(time.Millisecond))
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

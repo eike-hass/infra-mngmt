@@ -788,6 +788,12 @@ func runServer(args []string) {
 	}
 	log.Printf("infra-mngmt listening on http://%s", cfg.Bind)
 
+	// Warm the entity cache in the background so the first request isn't cold.
+	// A cold scan spins up a Docker volume sidecar per volume (multi-second);
+	// warming up front turns that first page load from seconds into the warm
+	// ~milliseconds. Non-blocking so it never delays accepting connections.
+	go srv.WarmEntityCache()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {

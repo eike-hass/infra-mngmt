@@ -15,9 +15,11 @@ var templatesFS embed.FS
 
 // Parsed templates are cached by their file-set key. The templates live in an
 // embedded (immutable) FS and the FuncMap is stateless, so a parsed
-// *template.Template is safe to reuse across concurrent requests — html/template
-// only mutates during parse, not during Execute. Caching avoids re-parsing the
-// full set (incl. the 550-line services template) on every request/poll.
+// *template.Template is safe to reuse across concurrent requests: the first
+// Execute lazily escapes (mutates) the tree, but html/template guards that pass
+// with the template set's internal lock, after which concurrent Execute is
+// safe. Caching avoids re-parsing the full set (incl. the 550-line services
+// template) on every request/poll.
 var (
 	tmplCacheMu sync.Mutex
 	tmplCache   = map[string]*template.Template{}

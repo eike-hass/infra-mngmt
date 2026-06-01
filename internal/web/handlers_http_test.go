@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,7 +30,8 @@ type mockSource struct {
 	entities []entity.Entity
 	files    map[string][]byte // key = "<kind>:<name>"
 	readOnly bool
-	calls    int32 // count of Entities() calls (atomic)
+	calls    int32         // count of Entities() calls (atomic)
+	delay    time.Duration // optional artificial latency per Entities() call
 }
 
 func newMockSource(id string, scope entity.Scope) *mockSource {
@@ -41,6 +43,9 @@ func (m *mockSource) Scope() entity.Scope { return m.scope }
 func (m *mockSource) Writable() bool      { return !m.readOnly }
 func (m *mockSource) Entities(_ context.Context) ([]entity.Entity, error) {
 	atomic.AddInt32(&m.calls, 1)
+	if m.delay > 0 {
+		time.Sleep(m.delay)
+	}
 	return m.entities, nil
 }
 func (m *mockSource) Read(_ context.Context, kind entity.Kind, name string) ([]byte, error) {
@@ -1735,5 +1740,59 @@ func TestStaticAssetGzipped(t *testing.T) {
 	}
 	if enc := rr.Header().Get("Content-Encoding"); enc != "gzip" {
 		t.Errorf("Content-Encoding = %q, want gzip", enc)
+	}
+}
+
+// TestAllEntitiesSingleflight pins the cold-cache collapse: many requests
+// arriving while the cache is cold (the first burst after a restart) must share
+// a single source scan, not each launch their own. Each real scan spins up a
+// Docker volume sidecar per volume, so N concurrent scans previously multiplied
+// container-create load until requests timed out — the "webview hangs under
+// load" symptom. The mock's delay holds the scan open long enough that all the
+// callers pile into one in-flight Do.
+func TestAllEntitiesSingleflight(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	m.addEntity(entity.KindCommand, "run", []byte("body"))
+	m.delay = 40 * time.Millisecond
+	srv := newServerWithSource(m)
+
+	const n = 24
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := srv.allEntities(context.Background()); err != nil {
+				t.Errorf("allEntities: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&m.calls); got != 1 {
+		t.Fatalf("expected 1 source scan for %d concurrent cold calls, got %d", n, got)
+	}
+}
+
+// TestWarmEntityCache pins the startup warm: after WarmEntityCache the cache is
+// populated, so the next allEntities is served warm without a second scan.
+func TestWarmEntityCache(t *testing.T) {
+	m := newMockSource("host:/x", entity.GlobalScope())
+	m.addEntity(entity.KindCommand, "run", []byte("body"))
+	srv := newServerWithSource(m)
+
+	srv.WarmEntityCache()
+	if got := atomic.LoadInt32(&m.calls); got != 1 {
+		t.Fatalf("warm should scan once, got %d", got)
+	}
+	ents, err := srv.allEntities(context.Background())
+	if err != nil {
+		t.Fatalf("allEntities: %v", err)
+	}
+	if len(ents) != 1 {
+		t.Fatalf("expected 1 entity from warmed cache, got %d", len(ents))
+	}
+	if got := atomic.LoadInt32(&m.calls); got != 1 {
+		t.Fatalf("warmed cache should not rescan, got %d scans", got)
 	}
 }
