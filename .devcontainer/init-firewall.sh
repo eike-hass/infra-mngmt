@@ -102,7 +102,6 @@ for domain in \
     "vscode.blob.core.windows.net" \
     "update.code.visualstudio.com" \
     "w3.org" \
-    "playwright.download.prss.microsoft.com" \
     "gopkg.in"; do
     echo "Resolving $domain..."
     ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
@@ -127,6 +126,24 @@ if [ -z "$HOST_IP" ]; then
     echo "ERROR: Failed to detect host IP"
     exit 1
 fi
+
+# Repoint host.docker.internal at the REAL gateway. docker-compose.yml maps this
+# name via `extra_hosts: host-gateway`, but Docker hardwires `host-gateway` to
+# the *default-bridge* gateway (172.17.0.1) regardless of the container's actual
+# network. A Compose container lives on its own bridge whose gateway is the
+# default route ($HOST_IP, e.g. 172.22.0.1); host services published for the
+# container (the ident-browser MCP in .mcp.json → host.docker.internal:3000)
+# answer on THAT gateway, not docker0 — so the baked entry is a dead IP and the
+# MCP client can't connect. Rewrite it to $HOST_IP on every start so it stays
+# correct and drift-proof across network recreation.
+# /etc/hosts is a Docker-managed bind mount, so `sed -i` (rename-over-target)
+# fails with EBUSY. Write through the existing inode instead: filter to a temp
+# file, then truncate-and-copy back with `cat >`.
+grep -v 'host\.docker\.internal' /etc/hosts > /tmp/hosts.new
+cat /tmp/hosts.new > /etc/hosts
+rm -f /tmp/hosts.new
+echo "$HOST_IP	host.docker.internal" >> /etc/hosts
+echo "Repointed host.docker.internal -> $HOST_IP"
 
 HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
 echo "Host network detected as: $HOST_NETWORK"

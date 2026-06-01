@@ -18,11 +18,14 @@ services:
         CLAUDE_CODE_VERSION: latest
         GIT_DELTA_VERSION: "0.18.2"
         ZSH_IN_DOCKER_VERSION: "1.2.0"
-    # Map host.docker.internal → the host gateway so things in the container
-    # (e.g. the ident-browser MCP URL in .mcp.json) can reach host services by a
-    # stable name. Compose-based devcontainers get their own network with a
-    # shifting subnet, so a hard-coded gateway IP (172.17.0.1 / 172.22.0.1)
-    # breaks on every network recreation; host-gateway always resolves.
+    # Seed host.docker.internal so the name exists from first boot. NOTE:
+    # `host-gateway` resolves to the *default-bridge* gateway (172.17.0.1), NOT
+    # this Compose network's gateway — and host services (the ident-browser MCP
+    # in .mcp.json) answer on the Compose gateway (the container's default
+    # route, e.g. 172.22.0.1), so this entry alone points at a dead IP.
+    # init-firewall.sh (postStartCommand, runs as root) REWRITES this entry to
+    # the real default-route gateway on every start — that's what actually makes
+    # host.docker.internal reachable. See docs/proposals/ui-audit-2026-06.md §C.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # init-firewall.sh needs these (was runArgs in devcontainer.json).
@@ -41,7 +44,6 @@ services:
     volumes:
       - claude-code-bashhistory:/commandhistory
       - claude-code-config:/home/node/.claude
-      - playwright-browsers-v2:/home/node/.cache/ms-playwright
       - gh-config:/home/node/.config/gh
       # The repo itself, at /workspace. `..` is relative to this compose file
       # (.devcontainer) → the repo root.
@@ -75,7 +77,5 @@ volumes:
   # creates on a fresh one. (Trade-off: a stray `docker compose down -v` could
   # delete a name-pinned volume; external would prevent that. Devcontainers
   # don't run `down -v`, so the portability win wins.)
-  playwright-browsers-v2:
-    name: playwright-browsers-v2
   gh-config:
     name: gh-config

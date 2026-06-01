@@ -51,11 +51,6 @@ ENV GOPATH=/home/node/go
 ENV GOBIN=/home/node/go/bin
 ENV PATH=$PATH:/home/node/go/bin
 
-# Install Playwright system-level OS dependencies for Chromium.
-# Keep this version aligned with the `playwright ... install chromium` step
-# below — a skew installs OS libs for one version and the browser for another.
-RUN npx --yes playwright@1.60.0 install-deps chromium
-
 # Install golangci-lint from GitHub releases. The Go module proxy
 # (proxy.golang.org via Google's CDN) rotates IPs, which can desync from the
 # firewall's startup-time DNS resolution; GitHub releases have stable, allowed
@@ -93,11 +88,7 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 ENV DEVCONTAINER=true
 
 # Create workspace and config directories and set permissions.
-# /home/node/.cache/ms-playwright is the mount-point for the playwright-browsers
-# named volume; pre-creating it with node ownership means a freshly-created
-# volume inherits those perms (Docker copies the mount-point dir into an empty
-# volume on first attach).
-RUN mkdir -p /workspace /home/node/.claude /home/node/.cache /home/node/.cache/ms-playwright /home/node/.config/gh && \
+RUN mkdir -p /workspace /home/node/.claude /home/node/.cache /home/node/.config/gh && \
   chown -R node:node /workspace /home/node/.claude /home/node/.cache /home/node/.config/gh
 
 WORKDIR /workspace
@@ -134,12 +125,6 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 
 # Install Claude
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
-
-# Pre-install the Chromium browser binary as the node user, so it lives in
-# /home/node/.cache/ms-playwright (backed by the playwright-browsers volume).
-# On first attach with a fresh volume, Docker seeds the volume from this path,
-# making Chromium available without needing to download through the firewall.
-RUN npx --yes playwright@1.60.0 install chromium
 
 # Copy and set up privileged setup scripts
 COPY init-firewall.sh /usr/local/bin/

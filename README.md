@@ -118,7 +118,7 @@ The devcontainer firewall already allowlists the Go module proxy (`proxy.golang.
 > # e.g. <new-volume> is infra-mngmt_devcontainer_claude-code-config
 > ```
 >
-> `playwright-browsers-v2` and `gh-config` are pinned with `name:` so they stay shared across all your devcontainers (no re-download / re-auth).
+> `gh-config` is pinned with `name:` so it stays shared across all your devcontainers (no re-auth).
 
 **Then from a WSL2 terminal, copy the binary into your PATH:**
 
