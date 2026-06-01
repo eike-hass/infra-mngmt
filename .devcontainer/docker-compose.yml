@@ -18,6 +18,13 @@ services:
         CLAUDE_CODE_VERSION: latest
         GIT_DELTA_VERSION: "0.18.2"
         ZSH_IN_DOCKER_VERSION: "1.2.0"
+    # Map host.docker.internal → the host gateway so things in the container
+    # (e.g. the ident-browser MCP URL in .mcp.json) can reach host services by a
+    # stable name. Compose-based devcontainers get their own network with a
+    # shifting subnet, so a hard-coded gateway IP (172.17.0.1 / 172.22.0.1)
+    # breaks on every network recreation; host-gateway always resolves.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # init-firewall.sh needs these (was runArgs in devcontainer.json).
     cap_add:
       - NET_ADMIN
