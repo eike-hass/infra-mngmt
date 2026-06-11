@@ -81,6 +81,15 @@
       <div class="entity-list" id="entity-list">
         {{template "entity-list-inner" .}}
       </div>
+      {{/* Legend for the MCP runtime-status badge colors (C2) — the square dot
+           on MCP rows is otherwise color-only. Text labels double as a
+           colorblind-safe cue. */}}
+      <div class="badge-legend" title="MCP runtime status (the square badge on MCP server rows)">
+        <span class="badge-legend-item"><span class="runtime-badge running"></span>running</span>
+        <span class="badge-legend-item"><span class="runtime-badge starting"></span>starting</span>
+        <span class="badge-legend-item"><span class="runtime-badge unresolved"></span>unresolved</span>
+        <span class="badge-legend-item"><span class="runtime-badge error"></span>down</span>
+      </div>
     </aside>
     <div class="preview" id="preview">
       <div class="preview-empty">

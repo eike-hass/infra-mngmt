@@ -151,6 +151,34 @@ func TestStartStopRestart(t *testing.T) {
 	}
 }
 
+func TestStopNotRunningIsIdempotent(t *testing.T) {
+	// Stopping an already-exited process is a no-op, not an error. process-compose
+	// returns 500 {"error":"process p is not running"} when the process self-exited
+	// before the stop landed; Stop must swallow that so the UI doesn't surface a
+	// spurious error toast for what is really a no-op.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"process p is not running"}`))
+	}))
+	defer srv.Close()
+	c := New("test", srv.URL, "")
+	if err := c.Stop(context.Background(), "p"); err != nil {
+		t.Errorf("Stop on a not-running process must be idempotent (nil), got: %v", err)
+	}
+}
+
+func TestStopRealErrorStillBubbles(t *testing.T) {
+	// A genuine failure (anything other than "is not running") must still surface.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	c := New("test", srv.URL, "")
+	if err := c.Stop(context.Background(), "p"); err == nil {
+		t.Error("a non-'not running' stop error must still bubble up")
+	}
+}
+
 func TestReload(t *testing.T) {
 	var hits []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -251,6 +279,25 @@ func TestLogsPlainTextFallback(t *testing.T) {
 	}
 	if logs[0].Message != "line1" {
 		t.Errorf("got %+v", logs)
+	}
+}
+
+func TestLogsEmptyWrappedReturnsNoLines(t *testing.T) {
+	// process-compose returns {"logs":[]} for a process with an empty buffer
+	// (Disabled / never-started). This must yield ZERO lines so the template
+	// renders its "no logs" empty state — NOT one line containing the literal
+	// JSON, which is what the plain-text fallback would (wrongly) produce.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"logs":[]}`))
+	}))
+	defer srv.Close()
+	c := New("test", srv.URL, "")
+	logs, err := c.Logs(context.Background(), "p", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 0 {
+		t.Errorf(`empty {"logs":[]} must yield 0 lines, got %d: %+v`, len(logs), logs)
 	}
 }
 

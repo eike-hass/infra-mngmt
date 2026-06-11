@@ -23,13 +23,21 @@ rebuildFuse();
 // Initial load: activeProject is '__all__', so apply any persisted collapse
 // state from a previous session. (Project views always start expanded.)
 // Defined later in this script — run on next tick so the function is in scope.
-queueMicrotask(() => applyCollapsedStateForAllView());
+queueMicrotask(() => {
+  applyCollapsedStateForAllView();
+  // activeProject is '__all__' on load, so reveal each row's project label
+  // (C1). applyFilters() toggles this on subsequent tab switches.
+  document.getElementById('entity-list')?.classList.add('show-project');
+});
 
 function applyFilters() {
   const ids = fuseResults ? new Set(fuseResults.map(r=>r.item.id)) : null;
   const list = document.getElementById('entity-list');
   // 'flat' class hides group headers when a single-kind filter is active.
   list.classList.toggle('flat', activeKind !== 'all');
+  // 'show-project' reveals each row's owning-project label, but only in the
+  // cross-scope "all" view — on a project tab it'd be redundant (C1).
+  list.classList.toggle('show-project', activeProject === '__all__');
 
   let any = false;
   cards().forEach(c => {
@@ -256,6 +264,55 @@ document.addEventListener('DOMContentLoaded', () => {
   applyLlamaCollapsedFromStorage();
   bindLlamaDisclosures();
   bindProjectHeaders();
+});
+
+// ── In-app confirm modal (B7) ───────────────────────────────────────────────
+// htmx's hx-confirm defaults to the native window.confirm() — unstyleable, off
+// the app's theme, and auto-dismissed by headless automation (so a UI-driven
+// load/unload/drain/pause silently no-ops). Intercept htmx:confirm and render a
+// styled modal that matches the blast-radius/promote chrome instead. Built in a
+// page-level overlay so a section poll can't clobber it.
+function showConfirmModal(question, onProceed) {
+  document.getElementById('confirm-slot')?.remove();
+  // Split "Title? trailing detail…" into a heading + body, mirroring the
+  // blast-radius modal's title/sub split.
+  const m = question.match(/^(.*?\?)\s*([\s\S]*)$/);
+  const title = m ? m[1] : 'Confirm action';
+  const detail = m ? m[2] : question;
+  const wrap = document.createElement('div');
+  wrap.id = 'confirm-slot';
+  wrap.innerHTML =
+    '<div class="promote-modal"><div class="promote-modal-card">' +
+    '<div class="promote-modal-head"><div class="promote-modal-titles">' +
+    '<div class="promote-modal-title"></div></div>' +
+    '<button class="promote-close" type="button" aria-label="cancel">×</button></div>' +
+    '<div class="promote-modal-body"><p class="promote-result-prompt"></p>' +
+    '<div class="promote-result-actions">' +
+    '<button class="promote-cancel" type="button">cancel</button>' +
+    '<button class="promote-confirm" type="button">proceed</button>' +
+    '</div></div></div></div>';
+  // textContent (not innerHTML) for the question — never inject it as markup.
+  wrap.querySelector('.promote-modal-title').textContent = title;
+  const prompt = wrap.querySelector('.promote-result-prompt');
+  if (detail) { prompt.textContent = detail; } else { prompt.remove(); }
+  const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (ev) => { if (ev.key === 'Escape') close(); };
+  wrap.querySelector('.promote-cancel').addEventListener('click', close);
+  wrap.querySelector('.promote-close').addEventListener('click', close);
+  wrap.querySelector('.promote-modal').addEventListener('click', (ev) => {
+    if (ev.target === ev.currentTarget) close(); // backdrop click cancels
+  });
+  wrap.querySelector('.promote-confirm').addEventListener('click', () => { close(); onProceed(); });
+  document.body.appendChild(wrap);
+  document.addEventListener('keydown', onKey);
+  wrap.querySelector('.promote-confirm').focus();
+}
+
+document.addEventListener('htmx:confirm', (e) => {
+  const q = e.detail && e.detail.question; // hx-confirm text; null when unset
+  if (!q) return;            // no hx-confirm on this element → let htmx proceed
+  e.preventDefault();        // suppress the native confirm + the immediate request
+  showConfirmModal(q, () => e.detail.issueRequest(true)); // true = skip htmx's own confirm
 });
 
 function toggleKindGroup(headerEl) {

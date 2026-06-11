@@ -113,6 +113,13 @@ func (c *Client) Start(ctx context.Context, process string) error {
 func (c *Client) Stop(ctx context.Context, process string) error {
 	resp, err := c.do(ctx, http.MethodPatch, "/process/stop/"+process, nil)
 	if err != nil {
+		// Idempotent: stopping an already-exited/not-running process is a no-op,
+		// not a failure. process-compose returns 500 {"error":"process X is not
+		// running"} when the process self-exited just before the stop landed —
+		// swallow that so the UI doesn't surface a spurious error toast.
+		if strings.Contains(err.Error(), "is not running") {
+			return nil
+		}
 		return err
 	}
 	resp.Body.Close()
@@ -171,29 +178,34 @@ func (c *Client) Logs(ctx context.Context, process string, lines int) ([]LogLine
 		return nil, err
 	}
 
-	// process-compose returns {"logs": ["line1", "line2", ...]} — strings,
-	// not structured LogLine objects. Try that first, then the structured
-	// shapes that older builds may use, then plain text.
-	var stringWrapped struct {
-		Logs []string `json:"logs"`
+	// process-compose returns {"logs": [...]}. Detect that wrapped shape FIRST —
+	// even when the array is EMPTY — so an empty buffer ({"logs":[]}, common for
+	// Disabled / never-started processes) returns zero lines and the template
+	// renders its "no logs" state. Without this presence check an empty array
+	// falls through to the plain-text fallback below, which would emit the
+	// literal `{"logs":[]}` as a bogus log line.
+	var probe struct {
+		Logs json.RawMessage `json:"logs"`
 	}
-	if err := json.Unmarshal(body, &stringWrapped); err == nil && len(stringWrapped.Logs) > 0 {
-		out := make([]LogLine, 0, len(stringWrapped.Logs))
-		for _, ln := range stringWrapped.Logs {
-			ln = strings.TrimRight(ln, "\r\n")
-			if ln == "" {
-				continue
+	if err := json.Unmarshal(body, &probe); err == nil && probe.Logs != nil {
+		// Elements are usually strings; some builds use structured objects.
+		var asStrings []string
+		if err := json.Unmarshal(probe.Logs, &asStrings); err == nil {
+			out := make([]LogLine, 0, len(asStrings))
+			for _, ln := range asStrings {
+				if ln = strings.TrimRight(ln, "\r\n"); ln != "" {
+					out = append(out, LogLine{Message: ln})
+				}
 			}
-			out = append(out, LogLine{Message: ln})
+			return out, nil
 		}
-		return out, nil
+		var asObjs []LogLine
+		if err := json.Unmarshal(probe.Logs, &asObjs); err == nil {
+			return asObjs, nil
+		}
+		return nil, nil // wrapped but unparseable elements — don't dump raw JSON
 	}
-	var wrapped struct {
-		Logs []LogLine `json:"logs"`
-	}
-	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Logs) > 0 {
-		return wrapped.Logs, nil
-	}
+	// Bare-array shape (older builds): [{"time":...}] or ["line1", ...].
 	var list []LogLine
 	if err := json.Unmarshal(body, &list); err == nil && len(list) > 0 {
 		return list, nil

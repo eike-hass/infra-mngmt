@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -198,6 +199,34 @@ func TestHandleLlamaDrainCancelsActiveSlot(t *testing.T) {
 		t.Errorf("response missing llama-card selector; body=%s", w.Body.String()[:min(200, w.Body.Len())])
 	}
 }
+
+// TestLlamaDeadCardNoDoubledName is the regression for the doubled-word bug:
+// the unreachable card hardcoded "llama-server " and then appended {{.Process}},
+// so a process literally named "llama-server" rendered "llama-server llama-server
+// isn't reachable". The card must show the process name exactly once.
+func TestLlamaDeadCardNoDoubledName(t *testing.T) {
+	// Port 0 is unconnectable, so /health fails fast → the card renders its
+	// unreachable state.
+	s := newServerWithLlama("http://127.0.0.1:0", "windows", "llama-server")
+	req := httptest.NewRequest(http.MethodGet,
+		"/partials/llama/card?instance=windows&process=llama-server", nil)
+	w := httptest.NewRecorder()
+	s.handleLlamaCard(w, req)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "isn't reachable") {
+		t.Fatalf("expected an unreachable card; got: %s", body[:min(400, len(body))])
+	}
+	// The doubling only shows in the rendered TEXT (a <span> sits between the
+	// hardcoded word and {{.Process}}), so strip tags + collapse whitespace
+	// before asserting.
+	text := strings.Join(strings.Fields(tagStrip.ReplaceAllString(body, " ")), " ")
+	if strings.Contains(text, "llama-server llama-server") {
+		t.Errorf("doubled process name in unreachable card text: %q", text)
+	}
+}
+
+var tagStrip = regexp.MustCompile(`<[^>]*>`)
 
 // Note: structural-ETag tests removed when the llama view moved to
 // per-card polling (docs/frontend-architecture.md §7.10). The 304

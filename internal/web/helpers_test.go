@@ -110,6 +110,23 @@ func TestSourceLevel(t *testing.T) {
 	}
 }
 
+func TestProjectShort(t *testing.T) {
+	cases := []struct {
+		e    entity.Entity
+		want string
+	}{
+		{entity.Entity{Scope: entity.GlobalScope()}, "global"},
+		{entity.Entity{Scope: entity.ProjectScope("/home/eike/Workspace/infra-mngmt")}, "infra-mngmt"},
+		{entity.Entity{Scope: entity.ProjectScope("/home/eike/Workspace/open-design")}, "open-design"},
+		{entity.Entity{Scope: entity.Scope{Project: ""}}, "global"}, // empty path → global
+	}
+	for _, tc := range cases {
+		if got := projectShort(tc.e); got != tc.want {
+			t.Errorf("projectShort(%+v) = %q, want %q", tc.e.Scope, got, tc.want)
+		}
+	}
+}
+
 func TestSourceLabelHost(t *testing.T) {
 	if got := sourceLabel("host:/home/u/.claude", true, ""); got != "~/.claude" {
 		t.Errorf("global host label = %q", got)

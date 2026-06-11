@@ -65,7 +65,7 @@
       </div>
     </div>
     {{if $dead}}
-    <span class="llama-head-err" title="GET /health failed: {{.HealthErr}}"><span class="llama-head-err-tag">unreachable</span> {{.HealthErr}}</span>
+    <span class="llama-head-err" title="GET /health failed: {{.HealthErr}}"><span class="llama-head-err-tag">unreachable</span><span class="llama-head-err-msg">{{.HealthErr}}</span></span>
     {{else}}
     <div class="llama-head-stats">
       {{if $rollup.HasThroughput}}
@@ -94,7 +94,7 @@
   <div class="svc-unreachable expand-enter llama-card-down">
     <div class="svc-unreachable-warn">
       <span class="svc-unreachable-warn-icon" aria-hidden="true">⚠</span>
-      <span>llama-server <span class="svc-unreachable-name">{{.Process}}</span> isn't reachable</span>
+      <span><span class="svc-unreachable-name">{{.Process}}</span> isn't reachable</span>
     </div>
     <div class="svc-unreachable-explain">
       /health didn't respond on <span class="svc-unreachable-strong">{{.Endpoint}}</span> — models, slots, and metrics can't be queried until the process is back. lifecycle for this server lives in the <span class="svc-unreachable-strong">process-compose · {{.Instance}}</span> section under services. the llama view polls every 10s; this card refreshes once it's reachable again.

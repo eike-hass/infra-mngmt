@@ -484,21 +484,29 @@ section refreshes — actions are user-initiated and rare, so the brief
         {{if and .HasHealthProbe (or (ne .Health "Ready") (not .IsRunning))}}<span class="health-pill {{healthClass .Health}}" title="readiness: {{.Health}}">{{.Health}}</span>{{end}}
         {{if and (not .IsRunning) (ne .ExitCode 0)}}<span class="exit-code" title="exit code">{{.ExitCode}}</span>{{end}}
       </td>
-      <td class="col-pid">{{if .Pid}}{{.Pid}}{{else}}—{{end}}</td>
+      {{/* PID/CPU/MEM/AGE are live-only: a Stopped/Completed process keeps its
+           last-known PID/mem in process-compose's state, which would render as
+           stale "still consuming resources" data. Show — when not running (F5).
+           Restarts stays — it's historical. */}}
+      <td class="col-pid">{{if and .IsRunning .Pid}}{{.Pid}}{{else}}—{{end}}</td>
       <td>{{.Restarts}}</td>
       <td>
+        {{if .IsRunning}}
         <div class="usage-bar">
           <div class="usage-bar-track"><div class="usage-bar-fill {{cpuBarClass .CPU}}" style="width:{{cpuBarWidth .CPU}}%"></div></div>
           <span class="usage-val">{{printf "%.1f" .CPU}}%</span>
         </div>
+        {{else}}<span class="usage-val mute">—</span>{{end}}
       </td>
       <td>
+        {{if .IsRunning}}
         <div class="usage-bar">
           <div class="usage-bar-track"><div class="usage-bar-fill mem" style="width:{{memBarWidth .Mem}}%"></div></div>
           <span class="usage-val">{{formatMem .Mem}}</span>
         </div>
+        {{else}}<span class="usage-val mute">—</span>{{end}}
       </td>
-      <td>{{if .SystemTime}}{{.SystemTime}}{{else}}—{{end}}</td>
+      <td>{{if and .IsRunning .SystemTime}}{{.SystemTime}}{{else}}—{{end}}</td>
       <td class="col-actions">
         <div class="proc-actions">
           {{if canStop .Status}}
@@ -522,7 +530,11 @@ section refreshes — actions are user-initiated and rare, so the brief
                   hx-target="#logs-{{$instName}}-{{.Name}}"
                   hx-swap="innerHTML">logs</button>
         </div>
-        <div id="logs-{{$instName}}-{{.Name}}"></div>
+        {{/* hx-preserve keeps the loaded logs across the section's 8s poll —
+             without it the outerHTML re-render wipes them the instant they
+             appear (F4). The poll re-emits this (empty) div with the same id,
+             so htmx keeps the existing populated one. */}}
+        <div id="logs-{{$instName}}-{{.Name}}" hx-preserve="true"></div>
       </td>
     </tr>
     {{end}}

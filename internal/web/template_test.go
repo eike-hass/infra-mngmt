@@ -63,6 +63,28 @@ func TestServicesTemplateRendersOfflineCard(t *testing.T) {
 	}
 }
 
+// TestStoppedProcessHidesStaleStats: a Stopped/Completed process keeps its last
+// PID/mem/age in process-compose state. The row must render "—" for those —
+// not the stale values that imply a dead process is still consuming resources
+// (F5). Restarts stays (it's historical).
+func TestStoppedProcessHidesStaleStats(t *testing.T) {
+	views := []instanceView{{
+		Name:     "windows",
+		Endpoint: "http://x",
+		Online:   true,
+		Processes: []compose.ProcessState{{
+			Name: "wake-proxy", Status: "Completed", IsRunning: false,
+			Pid: 20068, CPU: 0.0, Mem: 1 << 20, SystemTime: "54m",
+		}},
+	}}
+	out := renderServicesSections(t, servicesPageData{Instances: views})
+	for _, stale := range []string{"20068", "54m", "1M"} {
+		if strings.Contains(out, stale) {
+			t.Errorf("stale stat %q rendered for a stopped process:\n%s", stale, out)
+		}
+	}
+}
+
 // TestServicesTemplateRendersAPIBadges verifies that the conditional UI bits
 // driven by process-compose API fields — health pill, exit code, namespace
 // label, system_time — actually render when the corresponding fields are set.

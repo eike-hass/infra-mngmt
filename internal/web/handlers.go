@@ -149,6 +149,20 @@ func sourceLevel(id string, global bool) string {
 	return "project"
 }
 
+// projectShort returns a short, human label for an entity's owning project —
+// the repo-dir basename (e.g. "infra-mngmt") — or "global" for global-scoped
+// entities. The entity list shows this only in the cross-scope "all" view to
+// disambiguate identically-named entities across projects (C1).
+func projectShort(e entity.Entity) string {
+	if e.Scope.Global || e.Scope.Project == "" {
+		return "global"
+	}
+	if b := filepath.Base(e.Scope.Project); b != "." && b != "/" && b != "" {
+		return b
+	}
+	return e.Scope.Project
+}
+
 // claudeIconSVG is the official Claude mark from https://claude.ai/favicon.svg
 // (Anthropic). Embedded inline so the icon survives offline / firewalled
 // environments and renders without a network round-trip.
@@ -342,6 +356,7 @@ var tmplFuncs = template.FuncMap{
 	"statusHelp":             statusHelp,
 	"exitCodeHelp":           exitCodeHelp,
 	"entityLevel":            func(e entity.Entity) string { return sourceLevel(e.Source, e.Scope.Global) },
+	"projectShort":           projectShort,
 	"entityLevelShort": func(e entity.Entity) string {
 		switch sourceLevel(e.Source, e.Scope.Global) {
 		case "global":

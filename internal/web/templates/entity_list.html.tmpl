@@ -20,6 +20,10 @@
          style="animation-delay:{{cardDelayMs $i}}ms">
       <span class="kind-icon {{.Kind}}">{{kindIcon .Kind}}</span>
       <span class="entity-name">{{.Name}}</span>
+      {{/* Owning project — shown only in the cross-scope "all" view (JS toggles
+           #entity-list.show-project) so duplicate-named entities are
+           distinguishable (C1). */}}
+      <span class="entity-project" title="project: {{projectShort .}}">{{projectShort .}}</span>
       {{if $status}}<span class="runtime-badge {{$status.State}}" title="{{$status.State}}{{if $status.Process}} · {{$status.Instance}}/{{$status.Process}}{{end}}"></span>{{end}}
       {{$tool := entityTool .}}{{if $tool}}<span class="entity-tool-tag {{$tool}}" title="tool: {{$tool}}">{{toolIcon $tool}}</span>{{end}}
       <span class="entity-scope-tag {{entityLevel .}}" title="{{entityLevel .}}">{{entityLevelShort .}}</span>
