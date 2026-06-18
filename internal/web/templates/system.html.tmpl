@@ -1,0 +1,271 @@
+{{/* System tab — wsl2 disk + docker/podman system df + prune/remove cleanup.
+     Three section wrappers self-load; the disk card also reloads on the
+     `sys-refresh` event a prune emits (freed space inside a distro grows its
+     compact gap). Expand/collapse of df categories is client-side (system.js);
+     destructive actions route through the shared #blast-slot confirm modal. */}}
+
+{{define "system-shell"}}
+<div class="sys-view">
+  <div id="sys-disk" hx-get="/partials/system/disk" hx-trigger="load, sys-refresh from:body" hx-swap="innerHTML">
+    <p class="svc-section-placeholder">loading wsl2 disk…</p>
+  </div>
+  <div id="sys-docker" hx-get="/partials/system/docker" hx-trigger="load" hx-swap="innerHTML">
+    <p class="svc-section-placeholder">loading docker…</p>
+  </div>
+  <div id="sys-podman" hx-get="/partials/system/podman" hx-trigger="load" hx-swap="innerHTML">
+    <p class="svc-section-placeholder">loading podman…</p>
+  </div>
+</div>
+{{end}}
+
+
+{{/* ── wsl2 disk card ──────────────────────────────────────────────────── */}}
+{{define "sys-disk-card"}}
+<div class="svc-instance sys-card sys-disk">
+  <div class="svc-header">
+    <span class="svc-icon" title="wsl2 disk">▣</span>
+    <span class="sys-dot {{if .Windows.Low}}warn{{else}}ok{{end}}" title="windows drive {{.Windows.Drive}} {{fmtSize .Windows.Free}} free"></span>
+    <span class="svc-name">wsl2 disk</span>
+    <div class="svc-actions">
+      {{if .HasReclaimable}}
+        <span class="sys-reclaim-note">{{fmtSize .Reclaimable}} reclaimable by compact</span>
+      {{else}}
+        <span class="svc-endpoint">nothing to compact</span>
+      {{end}}
+    </div>
+  </div>
+
+  {{if .Err}}
+    <div class="sys-engine-down">
+      <div class="sys-down-title"><span aria-hidden="true">⚠</span> can't read disk state</div>
+      <div class="sys-down-sub">{{.Err}}</div>
+    </div>
+  {{else}}
+  {{/* hero strip */}}
+  <div class="sys-hero">
+    <div class="sys-hero-drive">
+      <div class="sys-hero-row">
+        <span class="kicker">windows host · drive {{.Windows.Drive}}</span>
+        <span class="sys-grow"></span>
+        <span class="t-10 sys-mute2">vhdx files grow into this drive</span>
+      </div>
+      <div class="sys-diskbar"><div class="sys-diskbar-fill {{if .Windows.Low}}low{{end}}" style="width:{{pctOf .Windows.Used .Windows.Total}}%"></div></div>
+      <div class="sys-hero-legend t-11">
+        <span class="mono c-text">{{fmtSize .Windows.Used}} used</span>
+        <span class="sys-mute2">·</span>
+        <span class="mono sys-free {{if .Windows.Low}}low{{end}}">{{fmtSize .Windows.Free}} free</span>
+        <span class="sys-mute2">of {{fmtSize .Windows.Total}}</span>
+      </div>
+    </div>
+    <div class="sys-hero-div"></div>
+    <div class="sys-stat">
+      <span class="kicker">wsl footprint</span>
+      <span class="sys-stat-val">{{fmtSize .Footprint}}</span>
+      <span class="t-10 sys-mute2">{{len .Distros}} distros · sum of vhdx</span>
+    </div>
+    <div class="sys-hero-div"></div>
+    <div class="sys-stat">
+      <span class="kicker">reclaimable by compact</span>
+      <span class="sys-stat-val {{if .HasReclaimable}}yellow{{end}}">{{fmtSize .Reclaimable}}</span>
+      <span class="t-10 sys-mute2">returned to drive {{.Windows.Drive}} on compact</span>
+    </div>
+  </div>
+
+  {{/* distro table */}}
+  <table class="process-table sys-df-table">
+    <thead><tr>
+      <th>distro</th>
+      <th class="sys-w-state">state</th>
+      <th class="sys-w-fs">filesystem (used / total)</th>
+      <th class="num sys-w-vhdx">vhdx on host</th>
+      <th class="sys-w-reclaim">reclaimable</th>
+      <th class="sys-w-act"></th>
+    </tr></thead>
+    <tbody>
+      {{range .Distros}}
+      <tr>
+        <td>
+          <div class="sys-namecell">
+            <span class="sys-name-primary">{{.Name}}</span>
+            <span class="sys-name-secondary">{{.SubLabel}}</span>
+          </div>
+        </td>
+        <td><span class="status-pill {{if .Running}}running{{else}}stopped{{end}}"><span class="dot"></span>{{if .Running}}running{{else}}stopped{{end}}</span></td>
+        <td>
+          {{if .FsKnown}}
+          <div class="sys-mini">
+            <div class="sys-mini-track"><div class="sys-mini-fill {{if .FsLow}}low{{end}}" style="width:{{pctOf .FsUsed .FsTotal}}%"></div></div>
+            <span class="t-10 {{if .FsLow}}sys-free low{{else}}sys-mute2{{end}}">{{fmtSize .FsFree}} free</span>
+          </div>
+          {{else}}<span class="sys-mute2 t-10">— (stopped)</span>{{end}}
+        </td>
+        <td class="num mono">{{if .VhdxSize}}{{fmtSize .VhdxSize}}{{else}}<span class="sys-mute2">—</span>{{end}}</td>
+        <td>
+          {{if .HasCompactGap}}
+          <span class="sys-reclaim"><span class="sys-reclaim-amt">{{fmtSize .CompactGap}}</span><span class="sys-reclaim-pct">{{pctOf .CompactGap .VhdxSize}}%</span></span>
+          {{else}}<span class="sys-mute2">—</span>{{end}}
+        </td>
+        <td class="sys-act">
+          <button class="proc-btn" disabled title="compaction returns this space to drive {{$.Windows.Drive}} — coming in a later pass">compact</button>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{end}}
+</div>
+{{end}}
+
+
+{{/* ── docker / podman df card (shared) ────────────────────────────────── */}}
+{{define "sys-engine-card"}}
+<div class="svc-instance sys-card sys-engine {{.Slug}}">
+  <div class="svc-header">
+    <span class="svc-icon" title="{{.Slug}}">{{.Glyph}}</span>
+    <span class="sys-dot {{if .DF.Available}}ok{{else}}err{{end}}" title="{{.Slug}} engine {{if .DF.Available}}reachable{{else}}unreachable{{end}}"></span>
+    <span class="svc-name">{{.Slug}}</span>
+    {{if .DF.Available}}<span class="svc-endpoint mono">v{{.DF.Version}}{{if .DF.Distro}} · {{.DF.Distro}}{{end}}</span>{{end}}
+    <div class="svc-actions">
+      {{if .DF.Available}}
+        {{if .DF.HasSafeReclaim}}
+          <button class="proc-btn sys-safe-btn" title="remove dangling images + build cache — loss-free"
+            hx-get="/partials/system/confirm?engine={{.Slug}}&op=prune&key=__safe__"
+            hx-target="#blast-slot" hx-swap="innerHTML">safe prune{{if .DF.SafeReclaim}} · ~{{fmtSize .DF.SafeReclaim}}{{end}}</button>
+        {{end}}
+        {{if .DF.HasReclaim}}
+          <button class="proc-btn stop" title="{{.Slug}} system prune -a --volumes"
+            hx-get="/partials/system/confirm?engine={{.Slug}}&op=prune&key=__all__"
+            hx-target="#blast-slot" hx-swap="innerHTML">prune all · {{fmtSize .DF.TotalReclaimable}}</button>
+        {{else}}
+          <span class="svc-endpoint">nothing to reclaim</span>
+        {{end}}
+      {{end}}
+    </div>
+  </div>
+
+  {{if not .DF.Available}}
+    <div class="sys-engine-down">
+      <div class="sys-down-title"><span aria-hidden="true">⚠</span> {{.Slug}} engine isn't reachable</div>
+      <div class="sys-down-sub">disk usage can't be read and nothing can be pruned until the {{.Slug}} service is up.</div>
+      <div class="sys-down-cmd mono">start it with: {{if eq .Slug "docker"}}systemctl --user start docker{{else}}podman machine start{{end}}</div>
+    </div>
+  {{else}}
+  <table class="process-table sys-df-table">
+    <thead><tr>
+      <th>type</th>
+      <th class="num sys-w-num">total</th>
+      <th class="num sys-w-num">active</th>
+      <th class="num sys-w-size">size</th>
+      <th class="sys-w-reclaim">reclaimable</th>
+      <th class="sys-w-act"></th>
+    </tr></thead>
+    <tbody>
+      {{$slug := .Slug}}
+      {{range .DF.Rows}}
+      {{$key := .Key}}
+      <tr class="sys-df-parent">
+        <td class="sys-cat-cell">
+          <button type="button" class="sys-disclosure" data-target="sysd-{{$slug}}-{{$key}}" aria-expanded="false" aria-label="{{.Label}}, expand">
+            <span class="sys-chev">{{chevSVG}}</span><span class="sys-cat">{{.Label}}</span>
+          </button>
+        </td>
+        <td class="num mono sys-mute">{{.Total}}</td>
+        <td class="num mono sys-mute2">{{.Active}}</td>
+        <td class="num mono c-text">{{fmtSize .Size}}</td>
+        <td>
+          {{if .HasReclaim}}
+          <span class="sys-reclaim"><span class="sys-reclaim-amt">{{fmtSize .Reclaimable}}</span><span class="sys-reclaim-pct">{{pctOf .Reclaimable .Size}}%</span></span>
+          {{else}}<span class="sys-mute2">—</span>{{end}}
+        </td>
+        <td class="sys-act">
+          <button class="proc-btn stop" title="{{.Prune}}" {{if not .HasReclaim}}disabled{{end}}
+            hx-get="/partials/system/confirm?engine={{$slug}}&op=prune&key={{$key}}"
+            hx-target="#blast-slot" hx-swap="innerHTML">prune</button>
+        </td>
+      </tr>
+      <tr class="sys-detail-row" id="sysd-{{$slug}}-{{$key}}" hidden>
+        <td colspan="6" class="sys-detail-cell">
+          {{if .Items}}
+          <table class="process-table sys-item-table">
+            <tbody>
+              {{range .Items}}
+              <tr class="{{if .InUse}}sys-inuse{{end}}">
+                {{if eq $key "images"}}
+                  <td class="mono {{if eq .Repo "<none>"}}sys-mute2{{end}}">{{.Repo}}<span class="sys-mute2">:{{.Tag}}</span></td>
+                  <td class="mono sys-mute2 sys-tiny">{{shortDigest .ID}}</td>
+                  <td class="sys-mute2 sys-tiny">{{.Created}}</td>
+                {{else if eq $key "containers"}}
+                  <td class="mono c-text">{{.Name}}</td>
+                  <td class="mono sys-mute2 sys-tiny">{{.Image}}</td>
+                  <td class="sys-mute2 sys-tiny">{{.Status}}</td>
+                {{else if eq $key "volumes"}}
+                  <td class="mono c-text">{{.Name}}</td>
+                  <td class="sys-mute2 sys-tiny">{{.Driver}}</td>
+                  <td class="num sys-mute2 sys-tiny">{{.Links}} link{{if ne .Links 1}}s{{end}}</td>
+                {{else}}
+                  <td class="mono sys-mute2 sys-tiny">{{shortDigest .ID}}</td>
+                  <td class="sys-mute2 sys-tiny">{{.Type}}</td>
+                  <td class="sys-mute2 sys-tiny">{{.Created}}</td>
+                {{end}}
+                <td class="num mono c-text sys-item-size">{{fmtSize .Size}}</td>
+                <td class="sys-item-state">
+                  {{if .InUse}}<span class="pill-tone good">in use</span>
+                  {{else if eq $key "images"}}<span class="pill-tone warn">{{if eq .Repo "<none>"}}dangling{{else}}unused{{end}}</span>
+                  {{else if eq $key "containers"}}<span class="pill-tone warn">stopped</span>
+                  {{else}}<span class="pill-tone warn">unused</span>{{end}}
+                </td>
+                <td class="sys-act">
+                  {{if and (not .InUse) (ne $key "buildcache")}}
+                    <button class="proc-btn stop" title="remove {{.Key}}"
+                      hx-get="/partials/system/confirm?engine={{$slug}}&op=remove&key={{$key}}&id={{.Key | qesc}}"
+                      hx-target="#blast-slot" hx-swap="innerHTML">remove</button>
+                  {{else}}<span class="sys-mute2 sys-tiny" title="{{if .InUse}}in use — can't be removed{{else}}prune the whole build cache to remove{{end}}">—</span>{{end}}
+                </td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+          {{else}}<div class="sys-detail-empty">none.</div>{{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  <div class="sys-df-footer">
+    <span class="t-9 sys-mute2">total {{fmtSize .DF.TotalSize}} · </span>
+    <span class="t-9 {{if .DF.HasReclaim}}yellow{{else}}sys-mute2{{end}}">{{fmtSize .DF.TotalReclaimable}} reclaimable</span>
+    <span class="sys-grow"></span>
+    <span class="t-9 sys-mute2 mono">frees space inside {{if .DF.Distro}}{{.DF.Distro}}{{else}}the distro{{end}} — compact it to return space to drive C:</span>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+
+{{/* ── prune / remove confirm modal (rendered into #blast-slot) ─────────── */}}
+{{define "sys-confirm"}}
+<div class="promote-modal">
+  <div class="promote-modal-card sys-confirm-card">
+    <div class="promote-modal-head">
+      <div class="promote-modal-titles"><div class="promote-modal-title">{{.Title}}</div></div>
+      <button class="promote-close" hx-get="/partials/promote-clear" hx-target="#blast-slot" hx-swap="innerHTML" aria-label="close">×</button>
+    </div>
+    <div class="promote-modal-body">
+      <div class="sys-cmd mono"><span class="sys-cmd-prompt">$ </span>{{.Command}}</div>
+      <div class="sys-facts">
+        {{range .Lines}}
+        <div class="sys-fact">
+          <span class="sys-fact-label">{{.Label}}</span>
+          <span class="sys-fact-value mono {{if .Yellow}}yellow{{end}}">{{.Value}}</span>
+        </div>
+        {{end}}
+      </div>
+      {{if .Warning}}<div class="sys-warn {{.WarnClass}}"><span aria-hidden="true">⚠</span> <span>{{.Warning}}</span></div>{{end}}
+      <div class="promote-result-actions">
+        <button class="promote-cancel" hx-get="/partials/promote-clear" hx-target="#blast-slot" hx-swap="innerHTML">cancel</button>
+        <button class="promote-confirm sys-confirm-danger" hx-post="{{.ActionURL}}" hx-target="{{.CardTarget}}" hx-swap="innerHTML" hx-disabled-elt="this">{{.ConfirmLabel}}</button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

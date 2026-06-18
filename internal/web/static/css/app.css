@@ -1007,3 +1007,128 @@ tr.project-member .proc-name{color:var(--text2)}
   .svc-instance { overflow-x: auto; }
   .process-table { min-width: 680px; }
 }
+
+/* ── System tab (wsl2 disk + docker/podman df + cleanup) ──────────────────────
+   Reuses the .svc-instance card chrome and .process-table; the .sys-* classes
+   below add the disk hero strip, mini/hero disk bars, df disclosure rows,
+   reclaim cells, and the prune/remove confirm-modal facts. */
+/* Mirror #view-services / .svc-grid exactly: the outer view is the hidden-by-
+   default scroll container (showView toggles display), and the inner .sys-view
+   carries the 1200px cap + centering so the cards line up with every other
+   view's width. */
+#view-system{flex:1;overflow-y:auto;padding:0 14px 50px;display:none;flex-direction:column}
+.sys-view{display:flex;flex-direction:column;gap:14px;max-width:1200px;width:100%;margin:0 auto}
+.sys-view>div:first-child{margin-top:10px}
+.sys-card{flex-shrink:0}
+
+/* header status dot + per-engine glyph color */
+.sys-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.sys-dot.ok{background:var(--green);box-shadow:0 0 5px var(--green)}
+.sys-dot.warn{background:var(--orange);box-shadow:0 0 5px var(--orange)}
+.sys-dot.err{background:var(--red)}
+.sys-card.docker .svc-icon{color:oklch(68% 0.13 251)}
+.sys-card.podman .svc-icon{color:var(--kind-agent)}
+.sys-disk .svc-icon{color:var(--kind-memory)}
+
+.sys-grow{flex:1}
+.sys-mute{color:var(--text2)}
+.sys-mute2{color:var(--text3)}
+.yellow{color:var(--yellow)}
+.sys-free{color:var(--green);font-weight:500}
+.sys-free.low{color:var(--orange)}
+.sys-reclaim-note{color:var(--yellow);font-size:10px}
+
+/* hero strip */
+.sys-hero{display:flex;gap:14px;padding:14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.sys-hero-drive{display:flex;flex-direction:column;gap:6px;flex:1;min-width:280px}
+.sys-hero-row{display:flex;align-items:center;gap:8px}
+.sys-hero-legend{display:flex;align-items:center;gap:6px}
+.sys-hero-div{width:1px;align-self:stretch;background:var(--border)}
+.sys-stat{display:flex;flex-direction:column;gap:3px;min-width:0}
+.sys-stat-val{font-family:var(--font);font-size:18px;line-height:1;color:var(--white);font-weight:600}
+.sys-stat-val.yellow{color:var(--yellow)}
+
+/* disk bars */
+.sys-diskbar{width:100%;height:12px;border-radius:6px;background:var(--bg4);overflow:hidden}
+.sys-diskbar-fill{height:100%;background:var(--accent);transition:width var(--dur-slow) var(--ease-out)}
+.sys-diskbar-fill.low{background:var(--orange)}
+.sys-mini{display:flex;align-items:center;gap:6px}
+.sys-mini-track{width:54px;height:5px;border-radius:3px;background:var(--bg4);overflow:hidden;flex-shrink:0}
+.sys-mini-fill{height:100%;background:var(--accent);opacity:.75;transition:width var(--dur-base)}
+.sys-mini-fill.low{background:var(--orange)}
+
+/* two-line distro name cell */
+.sys-namecell{display:flex;flex-direction:column;gap:1px}
+.sys-name-primary{color:var(--white);font-size:11px}
+.sys-name-secondary{color:var(--text3);font-size:9.5px}
+
+/* df / distro table */
+.sys-df-table td{font-size:10.5px}
+.sys-df-table th.num,.sys-df-table td.num{text-align:right}
+.sys-df-table .sys-w-state{width:100px}
+.sys-df-table .sys-w-fs{width:210px}
+.sys-df-table .sys-w-vhdx{width:120px}
+.sys-df-table .sys-w-reclaim{width:130px}
+.sys-df-table .sys-w-act{width:110px}
+.sys-df-table .sys-w-num{width:70px}
+.sys-df-table .sys-w-size{width:100px}
+.sys-act{text-align:right;white-space:nowrap}
+.sys-card .proc-btn:disabled{opacity:.4;cursor:not-allowed}
+.sys-card .proc-btn:disabled:hover{border-color:var(--border);color:var(--text2)}
+
+/* category disclosure */
+.sys-cat-cell{padding:0!important}
+.sys-disclosure{display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--white);font:inherit;font-weight:500;cursor:pointer;padding:6px 12px;width:100%}
+.sys-chev{display:inline-flex;transition:transform var(--dur-fast) var(--ease-spring);transform:rotate(-90deg)}
+.sys-disclosure.open .sys-chev{transform:rotate(0deg)}
+.sys-cat{color:var(--white)}
+
+/* reclaim cell (size + percent pill) */
+.sys-reclaim{display:inline-flex;align-items:center;gap:6px}
+.sys-reclaim-amt{color:var(--yellow);font-family:var(--font)}
+.sys-reclaim-pct{font-size:9px;padding:1px 5px;border-radius:10px;background:rgba(255,204,92,.12);color:var(--yellow)}
+
+/* per-object detail sub-table */
+.sys-detail-cell{padding:0!important;background:rgba(255,255,255,.012)}
+.sys-item-table{margin-left:18px;width:calc(100% - 18px)}
+.sys-item-table td{font-size:10px;padding:4px 8px}
+.sys-item-table tr:hover td{background:transparent}
+.sys-inuse{opacity:.78}
+.sys-tiny{font-size:10px}
+.sys-item-size{width:84px}
+.sys-item-state{width:84px}
+.sys-detail-empty{padding:10px 14px 10px 30px;font-style:italic;color:var(--text3);font-size:10px}
+
+/* item state pills */
+.pill-tone{font-size:9px;padding:1px 6px;border-radius:10px;white-space:nowrap}
+.pill-tone.good{background:rgba(107,207,127,.12);color:var(--green)}
+.pill-tone.warn{background:rgba(255,204,92,.12);color:var(--yellow)}
+
+/* df footer */
+.sys-df-footer{display:flex;align-items:center;gap:8px;padding:7px 14px;border-top:1px solid var(--border);background:var(--card-bg-2)}
+
+/* engine-down / disk-error block */
+.sys-engine-down{display:flex;flex-direction:column;gap:6px;align-items:center;padding:24px 14px;background:rgba(224,108,108,.04);text-align:center}
+.sys-down-title{color:var(--text);font-size:11px}
+.sys-down-title span{color:var(--red)}
+.sys-down-sub{color:var(--text3);font-size:10px;max-width:380px}
+.sys-down-cmd{color:var(--text2);font-size:10px;margin-top:4px;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px}
+
+/* prune/remove confirm modal (reuses .promote-modal chrome) */
+.sys-confirm-card{width:480px}
+.sys-cmd{padding:7px 10px;border-radius:4px;background:var(--bg2);border:1px solid var(--border);color:var(--text2);margin-bottom:12px;word-break:break-all;font-size:10px}
+.sys-cmd-prompt{color:var(--text3)}
+.sys-facts{display:flex;flex-direction:column;gap:3px}
+.sys-fact{display:flex;gap:8px;padding:3px 0}
+.sys-fact-label{min-width:110px;color:var(--text3);font-size:11px}
+.sys-fact-value{font-size:11px;color:var(--text)}
+.sys-fact-value.yellow{color:var(--yellow)}
+.sys-warn{display:flex;gap:6px;margin-top:12px;padding:8px 10px;border-radius:4px;background:rgba(255,204,92,.08);border:1px solid color-mix(in srgb,var(--yellow) 35%,transparent);color:var(--yellow);font-size:10px;line-height:1.5}
+/* severity variants: danger (volumes / prune-all) vs info (build cache / safe prune) */
+.sys-warn.sys-warn-danger{background:rgba(224,108,108,.09);border-color:color-mix(in srgb,var(--red) 40%,transparent);color:var(--red)}
+.sys-warn.sys-warn-info{background:rgba(107,207,127,.07);border-color:color-mix(in srgb,var(--green) 30%,transparent);color:var(--green)}
+.promote-confirm.sys-confirm-danger:hover{background:var(--red);border-color:var(--red)}
+/* while a prune/remove is in flight htmx disables the proceed button — show it's working */
+.promote-confirm[disabled]{opacity:.55;cursor:wait}
+/* safe prune reads as the low-risk option: neutral at rest, green on hover */
+.sys-safe-btn:hover{border-color:var(--green);color:var(--green)}

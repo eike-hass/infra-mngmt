@@ -333,6 +333,9 @@ func runningContainerCount(cs []containerView) int {
 var tmplFuncs = template.FuncMap{
 	"kindIcon":               kindIcon,
 	"formatMem":              formatMem,
+	"fmtSize":                fmtSize,
+	"pctOf":                  pctOf,
+	"shortDigest":            shortDigest,
 	"statusClass":            statusClass,
 	"healthClass":            healthClass,
 	"cpuBarWidth":            cpuBarWidth,

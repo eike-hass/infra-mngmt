@@ -24,6 +24,7 @@
     <button class="view-tab active" id="vtab-entities">config</button>
     <button class="view-tab" id="vtab-llama">llama</button>
     <button class="view-tab" id="vtab-services">services</button>
+    <button class="view-tab" id="vtab-system">system</button>
   </div>
 
   <div class="divider"></div>
@@ -122,10 +123,18 @@
   <p class="svc-section-placeholder">loading llama servers…</p>
 </div>
 
+<div id="view-system"
+     hx-get="/partials/system"
+     hx-trigger="revealed once"
+     hx-swap="innerHTML">
+  <p class="svc-section-placeholder">loading system…</p>
+</div>
+
 <script type="module" src="{{static "js/app.js"}}"></script>
 <script type="module" src="{{static "js/preview.js"}}"></script>
 <script type="module" src="{{static "js/containers.js"}}"></script>
 <script type="module" src="{{static "js/promote.js"}}"></script>
+<script type="module" src="{{static "js/system.js"}}"></script>
 {{if .WakeURL}}
 <span class="wake-chip" id="wake-chip" data-wake-url="{{.WakeURL}}">
   <span class="wake-chip-label">waking</span>

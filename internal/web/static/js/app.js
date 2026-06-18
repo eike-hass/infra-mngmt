@@ -3,11 +3,13 @@ function showView(v) {
   document.getElementById('view-entities').style.display = v === 'entities' ? 'flex' : 'none';
   document.getElementById('view-services').style.display = v === 'services' ? 'flex' : 'none';
   document.getElementById('view-llama').style.display    = v === 'llama'    ? 'flex' : 'none';
+  document.getElementById('view-system').style.display   = v === 'system'   ? 'flex' : 'none';
   document.getElementById('kind-bar').style.display      = v === 'entities' ? 'flex' : 'none';
   document.getElementById('tab-scroll-wrap').style.display = v === 'entities' ? 'flex' : 'none';
   document.getElementById('vtab-entities').classList.toggle('active', v === 'entities');
   document.getElementById('vtab-services').classList.toggle('active', v === 'services');
   document.getElementById('vtab-llama').classList.toggle('active',    v === 'llama');
+  document.getElementById('vtab-system').classList.toggle('active',   v === 'system');
   if (v === 'entities') updateProjectOverview(); else document.getElementById('project-overview').style.display = 'none';
 }
 
@@ -724,6 +726,7 @@ window.selectedEntityProject = selectedEntityProject;
 document.getElementById('vtab-entities').addEventListener('click', () => showView('entities'));
 document.getElementById('vtab-llama').addEventListener('click', () => showView('llama'));
 document.getElementById('vtab-services').addEventListener('click', () => showView('services'));
+document.getElementById('vtab-system').addEventListener('click', () => showView('system'));
 document.getElementById('ov-rescan').addEventListener('click', e => doRescan(e));
 document.getElementById('ov-refresh')?.addEventListener('click', e => doRefresh(e));
 document.getElementById('ov-toggle').addEventListener('click', () => toggleOverview());
@@ -756,6 +759,7 @@ document.body.addEventListener('click', e => {
 
 // ── window exports for cross-module access ──
 window.showView = showView;
+window.showToast = showToast; // used by system.js (separate module) for prune/remove result toasts
 window.doRescan = doRescan;
 window.doRefresh = doRefresh;
 window.toggleKindGroup = toggleKindGroup;

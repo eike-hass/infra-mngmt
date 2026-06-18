@@ -23,6 +23,7 @@ import (
 	"github.com/eike-hass/infra-mngmt/internal/docker"
 	"github.com/eike-hass/infra-mngmt/internal/graph"
 	"github.com/eike-hass/infra-mngmt/internal/llama"
+	"github.com/eike-hass/infra-mngmt/internal/podman"
 	"github.com/eike-hass/infra-mngmt/internal/rates"
 	"github.com/eike-hass/infra-mngmt/internal/source"
 )
@@ -73,6 +74,7 @@ type Server struct {
 	depRules           []deps.Rule            // dependencies.yaml rules
 	modelRates         map[string]rates.Rate  // model-rates.yaml; nil/empty → OD card renders "—" for every cost
 	docker             *docker.Client         // nil if Docker unavailable
+	podman             *podman.Client         // shells out to the podman CLI; self-detects availability per read
 	llamaServers       []LlamaEntry           // declared in config.yaml; lookup keyed by (Instance,Process)
 	llamaClients       map[string]*llama.Client
 	mux                *chi.Mux
@@ -96,6 +98,7 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		composeFiles:    map[string]string{},
 		token:           token,
 		docker:          dc,
+		podman:          podman.New(),
 		bridges:         bridges,
 		containerDecls:  containerDecls,
 		depRules:        depRules,
@@ -171,6 +174,15 @@ func New(sources []source.Source, composeCfg []ComposeEntry, token string, dc *d
 		r.Get("/partials/promote-clear", s.handlePromoteClear)
 		r.Post("/api/promote", s.handlePromote)
 		r.Post("/api/sources/rescan", s.handleSourcesRescan)
+
+		// system routes (disk + docker/podman df + prune/remove cleanup)
+		r.Get("/partials/system", s.handleSystem)                // shell: three self-loading section wrappers
+		r.Get("/partials/system/disk", s.handleSystemDisk)       // wsl2 disk card
+		r.Get("/partials/system/docker", s.handleSystemDocker)   // docker df card
+		r.Get("/partials/system/podman", s.handleSystemPodman)   // podman df card
+		r.Get("/partials/system/confirm", s.handleSystemConfirm) // ?engine=&op=&key=&id=  confirm modal
+		r.Post("/system/prune", s.handleSystemPrune)             // ?engine=&key=  (key=__all__ for whole engine)
+		r.Post("/system/remove", s.handleSystemRemove)           // ?engine=&key=&id=
 
 		// services routes
 		r.Get("/partials/services", s.handleServicesPartial)
